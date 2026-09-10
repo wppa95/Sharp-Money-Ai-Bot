@@ -34,6 +34,18 @@ def _jsonable(value: Any) -> Any:
 
 def endpoint_result_payload(result: PropLineEndpointResult) -> dict[str, Any]:
     """Return a stable machine-readable envelope for any read-only endpoint."""
+    safe_headers = {
+        name.lower(): value
+        for name, value in (result.headers or {}).items()
+        if name.lower() in {
+            "content-type", "content-length", "content-disposition",
+            "x-propline-archive-starts", "x-propline-archive-notice",
+            "x-propline-export-daily-remaining",
+            "x-daily-limit", "x-daily-used", "x-daily-remaining",
+            "x-daily-reset", "ratelimit-limit", "ratelimit-remaining",
+            "ratelimit-reset", "ratelimit-policy",
+        }
+    }
     return {
         "source": "PropLine",
         "payload": _jsonable(result.payload),
@@ -46,6 +58,7 @@ def endpoint_result_payload(result: PropLineEndpointResult) -> dict[str, Any]:
         "upgrade_url": result.upgrade_url,
         "error": result.error,
         "failure_kind": result.failure_kind,
+        "headers": safe_headers,
     }
 
 

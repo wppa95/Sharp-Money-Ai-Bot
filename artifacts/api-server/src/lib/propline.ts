@@ -20,7 +20,18 @@ export type PropLinePlayerRequest = {
   stat_type: string;
 };
 
-type BridgeRequest = PropLineEventRequest | PropLinePlayerRequest;
+/** A capability call is deliberately opaque to Node.  The Python facade is
+ * responsible for mapping this allow-listed name to its client method. */
+export type PropLineCapabilityRequest = {
+  kind: "capability";
+  capability: string;
+  params: Record<string, unknown>;
+};
+
+export type PropLineBridgeRequest =
+  | PropLineEventRequest
+  | PropLinePlayerRequest
+  | PropLineCapabilityRequest;
 type BridgeResponse =
   | { ok: true; data: unknown }
   | { ok: false; error: string };
@@ -43,7 +54,7 @@ export class PropLineBridge {
   private stdoutBuffer = "";
   private requestQueue: Promise<unknown> = Promise.resolve();
 
-  request(payload: BridgeRequest): Promise<unknown> {
+  request(payload: PropLineBridgeRequest): Promise<unknown> {
     const next = this.requestQueue.then(() => this.send(payload));
     this.requestQueue = next.catch(() => undefined);
     return next;
@@ -116,7 +127,7 @@ export class PropLineBridge {
     return child;
   }
 
-  private send(payload: BridgeRequest): Promise<unknown> {
+  private send(payload: PropLineBridgeRequest): Promise<unknown> {
     return new Promise((resolve, reject) => {
       const child = this.start();
       this.pending = { resolve, reject };

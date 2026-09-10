@@ -93,6 +93,9 @@ class _Response:
     async def json(self, **_kwargs):
         return self._payload
 
+    async def text(self, **_kwargs):
+        return str(self._payload)
+
 
 class _Session:
     def __init__(self, response):
@@ -525,12 +528,12 @@ def test_client_handles_rate_limit_with_backoff():
     assert len(session.calls) == 1
 
 
-def test_client_default_pacing_supports_one_request_per_120_second_cycle():
+def test_client_default_pacing_uses_shared_pro_subscription_cap():
     client = PropLineClient(api_key="test-only-key")
 
-    assert client.min_request_interval == pytest.approx(20.0)
-    assert client.request_limiter.effective_limit == 180
-    assert client.endpoint_request_limiter.effective_limit == 27
+    assert client.min_request_interval == pytest.approx(3600 / 1020)
+    assert client.request_limiter.effective_limit == 1020
+    assert client.endpoint_request_limiter is client.request_limiter
 
 
 def test_shared_limiter_caps_rate_and_continuously_spaces_requests():
@@ -541,10 +544,10 @@ def test_shared_limiter_caps_rate_and_continuously_spaces_requests():
         sleeps.append(seconds)
         clock[0] += seconds
 
-    limiter = PropLineRequestLimiter(limit=999, clock=lambda: clock[0], sleep=advance)
+    limiter = PropLineRequestLimiter(limit=2000, clock=lambda: clock[0], sleep=advance)
 
     async def exercise():
-        for _ in range(190):
+        for _ in range(1020):
             await limiter.acquire()
         before = list(limiter._request_times)
         await limiter.acquire()
@@ -552,19 +555,99 @@ def test_shared_limiter_caps_rate_and_continuously_spaces_requests():
 
     before = asyncio.run(exercise())
 
-    assert limiter.configured_limit == 190
-    assert len(before) == 190
-    assert all(delay == pytest.approx(3600 / 190) for delay in sleeps)
-    assert clock[0] >= 3600 / 190 * 190
+    assert limiter.configured_limit == 1020
+    assert len(before) == 1020
+    assert all(delay == pytest.approx(3600 / 1020) for delay in sleeps)
+    assert clock[0] >= 3600 / 1020 * 1020
 
 
-def test_provider_lower_limit_is_adopted_by_shared_limiter():
+def test_ledger_limiter_is_shared_and_restart_safe(tmp_path):
+    clock = [1000.0]
+    sleeps = []
+
+    async def advance(seconds):
+        sleeps.append(seconds)
+        clock[0] += seconds
+
+    ledger = str(tmp_path / "quota.sqlite3")
+    first = PropLineRequestLimiter(limit=2, clock=lambda: clock[0],
+                                   sleep=advance, ledger_path=ledger,
+                                   ledger_clock=lambda: clock[0])
+    second = PropLineRequestLimiter(limit=2, clock=lambda: clock[0],
+                                    sleep=advance, ledger_path=ledger,
+                                    ledger_clock=lambda: clock[0])
+
+    async def exercise():
+        await first.acquire()
+        await second.acquire()
+        # A newly constructed instance sees the persisted reservations.
+        restarted = PropLineRequestLimiter(limit=2, clock=lambda: clock[0],
+                                            sleep=advance, ledger_path=ledger,
+                                            ledger_clock=lambda: clock[0])
+        await restarted.acquire()
+
+    asyncio.run(exercise())
+    assert len(sleeps) >= 2
+    assert all(delay >= 1800 for delay in sleeps)
+
+
+def test_daily_budget_ledger_is_shared_across_instances_and_restart(tmp_path):
+    day = [datetime(2026, 1, 2).date()]
+    ledger = str(tmp_path / "daily.sqlite3")
+    first = PropLineRequestBudget(2, day_factory=lambda: day[0], ledger_path=ledger)
+    second = PropLineRequestBudget(2, day_factory=lambda: day[0], ledger_path=ledger)
+    assert first.reserve() is True
+    assert second.reserve() is True
+    restarted = PropLineRequestBudget(2, day_factory=lambda: day[0], ledger_path=ledger)
+    assert restarted.reserve() is False
+    day[0] = day[0].replace(day=3)
+    assert restarted.reserve() is True
+
+
+def test_ledger_persists_retry_after_across_limiter_instances(tmp_path):
+    clock = [10_000.0]
+    sleeps = []
+
+    async def advance(seconds):
+        sleeps.append(seconds)
+        clock[0] += seconds
+
+    ledger = str(tmp_path / "blocked.sqlite3")
+    first = PropLineRequestLimiter(clock=lambda: clock[0], sleep=advance,
+                                   ledger_path=ledger, ledger_clock=lambda: clock[0])
+    first.defer(120)
+    second = PropLineRequestLimiter(clock=lambda: clock[0], sleep=advance,
+                                    ledger_path=ledger, ledger_clock=lambda: clock[0])
+    assert second.backoff_remaining == 120
+
+    asyncio.run(second.acquire())
+    assert sleeps[0] == 120
+    assert second.backoff_remaining == 0
+
+
+def test_daily_quota_headers_do_not_change_hourly_pacing():
     limiter = PropLineRequestLimiter()
     limiter.observe_provider_limit({"X-RateLimit-Limit": "100"})
     limiter.observe_provider_limit({"X-RateLimit-Limit": "999"})
 
-    assert limiter.effective_limit == 100
-    assert limiter.min_interval == pytest.approx(36.0)
+    assert limiter.effective_limit == 1020
+    assert limiter.min_interval == pytest.approx(3600 / 1020)
+
+
+def test_public_and_pro_daily_headers_are_telemetry_only():
+    limiter = PropLineRequestLimiter()
+    limiter.observe_provider_limit({
+        "RateLimit-Limit": "1000",
+        "X-Daily-Limit": "1000",
+        "X-Daily-Remaining": "999",
+    })
+    limiter.observe_provider_limit({
+        "RateLimit-Limit": "25000",
+        "X-Daily-Limit": "25000",
+        "X-Daily-Remaining": "24999",
+    })
+    assert limiter.effective_limit == 1020
+    assert limiter._provider_headers["x-daily-limit"] == "25000"
 
 
 def test_discovery_reuses_fresh_cache_instead_of_repeating_request():
@@ -693,6 +776,21 @@ def test_hobby_operational_and_bulk_capabilities_use_documented_routes():
     assert session.calls[3][0].endswith("/v1/sports/baseball_mlb/grand-salami")
     assert session.calls[4][0].endswith("/v1/sports/hockey_nhl/daily-goals-total")
     assert session.calls[5][0].endswith("/v1/exports/sample")
+
+
+def test_resolved_export_uses_bounded_long_timeout():
+    session = _Session(_Response(
+        200,
+        "player_name,market\nReal Player,points\n",
+        headers={"X-PropLine-Archive-Starts": "2026-04-01"},
+    ))
+    client = PropLineClient(
+        api_key="test-only-key", session=session, min_request_interval=0
+    )
+    result = asyncio.run(client.fetch_resolved_props_export(sport="basketball_nba"))
+    assert result.succeeded is True
+    timeout = session.calls[0][1]["timeout"]
+    assert timeout.total == 120
 
 
 def test_hobby_sgp_and_clv_actions_are_posted_without_touching_polling_models():
@@ -1220,11 +1318,11 @@ def test_propline_line_movement_rejects_mixed_source_identities():
 def test_propline_default_budget_matches_plan_without_exceeding_hourly_limit():
     budget = PropLineRequestBudget()
 
-    assert PROPLINE_DAILY_REQUEST_LIMIT == 5_000
-    assert budget.limit == 5_000
-    assert PROPLINE_ENDPOINT_DAILY_REQUEST_LIMIT == 650
-    assert PROPLINE_ENDPOINT_REQUESTS_PER_HOUR == 27
-    assert PROPLINE_MAX_REQUESTS_PER_HOUR == 190
+    assert PROPLINE_DAILY_REQUEST_LIMIT == 25_000
+    assert budget.limit == 25_000
+    assert PROPLINE_ENDPOINT_DAILY_REQUEST_LIMIT == 25_000
+    assert PROPLINE_ENDPOINT_REQUESTS_PER_HOUR == 1020
+    assert PROPLINE_MAX_REQUESTS_PER_HOUR == 1020
 
 
 def test_sports_pagination_follows_all_cursors_without_a_page_ceiling():

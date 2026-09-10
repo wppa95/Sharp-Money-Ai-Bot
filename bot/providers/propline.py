@@ -13,17 +13,21 @@ The client never invents an API path or sends credentials to another host.
 from __future__ import annotations
 
 import asyncio
+import csv
 import hashlib
+import io
 import json
 import logging
 import os
 import re
+import sqlite3
 import time
 from collections import deque
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from typing import Any, Awaitable, Callable, Iterable, Optional
 from urllib.parse import quote
+from pathlib import Path
 
 import aiohttp
 
@@ -209,8 +213,8 @@ class PropLineNotFoundError(PropLineError):
     """PropLine returned a 404 for an event that may have rotated."""
 
 
-PROPLINE_DAILY_REQUEST_LIMIT = 5_000
-PROPLINE_ENDPOINT_DAILY_REQUEST_LIMIT = 650
+PROPLINE_DAILY_REQUEST_LIMIT = 25_000
+PROPLINE_ENDPOINT_DAILY_REQUEST_LIMIT = 25_000
 
 
 class PropLineRequestBudget:
@@ -226,14 +230,31 @@ class PropLineRequestBudget:
         limit: int = PROPLINE_DAILY_REQUEST_LIMIT,
         *,
         day_factory: Callable[[], Any] | None = None,
+        ledger_path: Optional[str] = None,
     ) -> None:
         self.limit = max(1, int(limit))
         self._day_factory = day_factory or (lambda: datetime.utcnow().date())
         self._day = self._day_factory()
         self._count = 0
+        self._ledger_path = ledger_path
+        if ledger_path:
+            Path(ledger_path).parent.mkdir(parents=True, exist_ok=True)
+            with sqlite3.connect(ledger_path, timeout=30) as db:
+                db.execute(
+                    "CREATE TABLE IF NOT EXISTS propline_daily_budget "
+                    "(budget_key TEXT PRIMARY KEY, used INTEGER NOT NULL)"
+                )
 
     @property
     def count(self) -> int:
+        if self._ledger_path:
+            key = str(self._day_factory())
+            with sqlite3.connect(self._ledger_path, timeout=30) as db:
+                row = db.execute(
+                    "SELECT used FROM propline_daily_budget WHERE budget_key = ?",
+                    (key,),
+                ).fetchone()
+            return int(row[0]) if row else 0
         self._reset_if_needed()
         return self._count
 
@@ -248,6 +269,30 @@ class PropLineRequestBudget:
             self._count = 0
 
     def reserve(self) -> bool:
+        if self._ledger_path:
+            key = str(self._day_factory())
+            with sqlite3.connect(self._ledger_path, timeout=30) as db:
+                db.execute("BEGIN IMMEDIATE")
+                row = db.execute(
+                    "SELECT used FROM propline_daily_budget WHERE budget_key = ?",
+                    (key,),
+                ).fetchone()
+                used = int(row[0]) if row else 0
+                if used >= self.limit:
+                    db.rollback()
+                    return False
+                if row:
+                    db.execute(
+                        "UPDATE propline_daily_budget SET used = used + 1 "
+                        "WHERE budget_key = ?", (key,)
+                    )
+                else:
+                    db.execute(
+                        "INSERT INTO propline_daily_budget(budget_key, used) "
+                        "VALUES (?, 1)", (key,)
+                    )
+                db.commit()
+                return True
         self._reset_if_needed()
         if self._count >= self.limit:
             return False
@@ -255,24 +300,38 @@ class PropLineRequestBudget:
         return True
 
     def reset(self) -> None:
+        if self._ledger_path:
+            key = str(self._day_factory())
+            with sqlite3.connect(self._ledger_path, timeout=30) as db:
+                db.execute(
+                    "DELETE FROM propline_daily_budget WHERE budget_key = ?",
+                    (key,),
+                )
+            return
         self._day = self._day_factory()
         self._count = 0
 
 
 # PropLine's hard provider allowance.  The limiter below is the only request
 # admission point, so separate client instances cannot burst independently.
-PROPLINE_RECOVERY_REQUESTS_PER_HOUR = 160
-PROPLINE_DEFAULT_REQUESTS_PER_HOUR = 180
-PROPLINE_MAX_REQUESTS_PER_HOUR = 190
-PROPLINE_ENDPOINT_REQUESTS_PER_HOUR = 27
+PROPLINE_RECOVERY_REQUESTS_PER_HOUR = 816
+PROPLINE_DEFAULT_REQUESTS_PER_HOUR = 1_020
+PROPLINE_MAX_REQUESTS_PER_HOUR = 1_020
+PROPLINE_ENDPOINT_REQUESTS_PER_HOUR = 1_020
 PROPLINE_RECOVERY_MIN_REQUEST_INTERVAL = (
     3600.0 / PROPLINE_RECOVERY_REQUESTS_PER_HOUR
 )
 PROPLINE_MIN_REQUEST_INTERVAL = 3600.0 / PROPLINE_DEFAULT_REQUESTS_PER_HOUR
-_DEFAULT_PROPLINE_REQUEST_BUDGET = PropLineRequestBudget(PROPLINE_DAILY_REQUEST_LIMIT)
-_DEFAULT_PROPLINE_ENDPOINT_REQUEST_BUDGET = PropLineRequestBudget(
-    PROPLINE_ENDPOINT_DAILY_REQUEST_LIMIT
+_DEFAULT_PROPLINE_BUDGET_LEDGER_PATH = os.getenv(
+    "PROPLINE_QUOTA_LEDGER_PATH",
+    os.path.join(os.path.dirname(__file__), "..", "data", "propline_quota.sqlite3"),
 )
+_DEFAULT_PROPLINE_REQUEST_BUDGET = PropLineRequestBudget(
+    PROPLINE_DAILY_REQUEST_LIMIT, ledger_path=_DEFAULT_PROPLINE_BUDGET_LEDGER_PATH
+)
+# Feed and endpoint calls spend one subscription quota, not two independent
+# 25,000-call pools.
+_DEFAULT_PROPLINE_ENDPOINT_REQUEST_BUDGET = _DEFAULT_PROPLINE_REQUEST_BUDGET
 
 
 def _propline_request_kind(url: str) -> str:
@@ -317,6 +376,8 @@ class PropLineRequestLimiter:
         *,
         clock: Callable[[], float] = time.monotonic,
         sleep: Callable[[float], Awaitable[Any]] = asyncio.sleep,
+        ledger_path: Optional[str] = None,
+        ledger_clock: Optional[Callable[[], float]] = None,
     ) -> None:
         self.configured_limit = min(
             PROPLINE_MAX_REQUESTS_PER_HOUR,
@@ -325,6 +386,26 @@ class PropLineRequestLimiter:
         self.provider_limit = PROPLINE_MAX_REQUESTS_PER_HOUR
         self._clock = clock
         self._sleep = sleep
+        self._ledger_path = ledger_path
+        # SQLite timestamps must be epoch seconds.  Tests that use a synthetic
+        # clock can inject it explicitly; otherwise never persist monotonic
+        # process-local values.
+        self._ledger_clock = ledger_clock or (time.time if ledger_path else clock)
+        if ledger_path:
+            Path(ledger_path).parent.mkdir(parents=True, exist_ok=True)
+            with sqlite3.connect(ledger_path, timeout=30) as db:
+                db.execute(
+                    "CREATE TABLE IF NOT EXISTS propline_quota "
+                    "(reserved_at REAL NOT NULL)"
+                )
+                db.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_propline_quota_time "
+                    "ON propline_quota(reserved_at)"
+                )
+                db.execute(
+                    "CREATE TABLE IF NOT EXISTS propline_quota_meta "
+                    "(key TEXT PRIMARY KEY, value REAL NOT NULL)"
+                )
         self._lock = asyncio.Lock()
         self._request_times: deque[float] = deque()
         self._next_request_at = 0.0
@@ -334,6 +415,7 @@ class PropLineRequestLimiter:
         self._attempted_count = 0
         self._successful_count = 0
         self._rate_limited_count = 0
+        self._provider_headers: dict[str, str] = {}
 
     @property
     def effective_limit(self) -> int:
@@ -356,6 +438,14 @@ class PropLineRequestLimiter:
 
     @property
     def backoff_remaining(self) -> float:
+        if self._ledger_path:
+            now = self._ledger_clock()
+            with sqlite3.connect(self._ledger_path, timeout=30) as db:
+                row = db.execute(
+                    "SELECT value FROM propline_quota_meta "
+                    "WHERE key = 'blocked_until'"
+                ).fetchone()
+            return max(0.0, (float(row[0]) if row else 0.0) - now)
         return max(0.0, self._blocked_until - self._clock())
 
     @property
@@ -401,29 +491,34 @@ class PropLineRequestLimiter:
         self.configured_limit = min(self.configured_limit, configured_limit)
 
     def observe_provider_limit(self, headers: Any) -> None:
-        """Adopt a lower limit advertised by the provider, never a higher one."""
+        """Record quota headers for telemetry without treating daily quota as hourly.
+
+        PropLine's ``RateLimit-*`` and ``X-Daily-*`` fields describe the
+        subscription's calendar-day allowance.  They are intentionally not
+        pacing inputs: a public endpoint may report the free daily limit while
+        the authenticated key has a separate 1,020/hour safety cap.
+        """
         if not headers:
             return
         normalized = {
             str(name).lower(): value
             for name, value in getattr(headers, "items", lambda: ())()
         }
-        for name in (
-            "x-ratelimit-limit",
-            "x-rate-limit-limit",
-            "ratelimit-limit",
-        ):
-            raw = normalized.get(name)
-            if raw is not None:
-                match = re.search(r"\d+", str(raw))
-                if match:
-                    reported = int(match.group())
-                    if 0 < reported < self.provider_limit:
-                        self.provider_limit = reported
-                break
+        self._provider_headers.update(
+            {name: str(value) for name, value in normalized.items()
+             if name in {
+                 "x-daily-limit", "x-daily-used", "x-daily-remaining",
+                 "x-daily-reset", "ratelimit-limit", "ratelimit-remaining",
+                 "ratelimit-reset", "ratelimit-policy", "x-ratelimit-limit",
+                 "x-ratelimit-remaining", "x-ratelimit-reset",
+             }}
+        )
 
     async def acquire(self) -> None:
         """Wait for one slot; reservations are spaced across the hour."""
+        if self._ledger_path:
+            await self._acquire_ledger()
+            return
         async with self._lock:
             while True:
                 now = self._clock()
@@ -452,17 +547,69 @@ class PropLineRequestLimiter:
                 self._next_request_at = reserved_at + self.min_interval
                 return
 
+    async def _acquire_ledger(self) -> None:
+        """Atomically reserve a persistent cross-process slot."""
+        while True:
+            now = self._ledger_clock()
+            delay = 0.0
+            with sqlite3.connect(self._ledger_path, timeout=30) as db:
+                db.execute("BEGIN IMMEDIATE")
+                blocked = db.execute(
+                    "SELECT value FROM propline_quota_meta "
+                    "WHERE key = 'blocked_until'"
+                ).fetchone()
+                if blocked and float(blocked[0]) > now:
+                    delay = float(blocked[0]) - now
+                cutoff = now - 3600.0
+                if delay <= 0:
+                    db.execute("DELETE FROM propline_quota WHERE reserved_at <= ?", (cutoff,))
+                    count, latest = db.execute(
+                        "SELECT COUNT(*), MAX(reserved_at) FROM propline_quota"
+                    ).fetchone()
+                    if count >= self.effective_limit:
+                        oldest = db.execute(
+                            "SELECT MIN(reserved_at) FROM propline_quota"
+                        ).fetchone()[0]
+                        delay = max(0.0, oldest + 3600.0 - now)
+                    elif latest is not None:
+                        delay = max(0.0, latest + self.min_interval - now)
+                if delay <= 0:
+                    db.execute("INSERT INTO propline_quota(reserved_at) VALUES (?)", (now,))
+                    db.commit()
+                    return
+                db.rollback()
+            await self._sleep(delay)
+
     def defer(self, retry_after: float) -> None:
         """Share a provider cooldown across every client instance."""
         self._phase = "recovery"
         self._recovery_clean_since = None
-        self._blocked_until = max(
-            self._blocked_until,
-            self._clock() + max(1.0, float(retry_after)),
-        )
+        if self._ledger_path:
+            with sqlite3.connect(self._ledger_path, timeout=30) as db:
+                db.execute("BEGIN IMMEDIATE")
+                now = self._ledger_clock()
+                until = now + max(1.0, float(retry_after))
+                db.execute(
+                    "INSERT INTO propline_quota_meta(key, value) VALUES "
+                    "('blocked_until', ?) ON CONFLICT(key) DO UPDATE SET "
+                    "value = MAX(value, excluded.value)",
+                    (until,),
+                )
+                db.commit()
+        else:
+            self._blocked_until = max(
+                self._blocked_until,
+                self._clock() + max(1.0, float(retry_after)),
+            )
         self.record_rate_limit()
 
     def reset(self) -> None:
+        if self._ledger_path:
+            with sqlite3.connect(self._ledger_path, timeout=30) as db:
+                db.execute("DELETE FROM propline_quota")
+                db.execute(
+                    "DELETE FROM propline_quota_meta WHERE key = 'blocked_until'"
+                )
         self._request_times.clear()
         self._next_request_at = 0.0
         self._blocked_until = 0.0
@@ -473,10 +620,16 @@ class PropLineRequestLimiter:
         self._rate_limited_count = 0
 
 
-_DEFAULT_PROPLINE_REQUEST_LIMITER = PropLineRequestLimiter()
+_DEFAULT_PROPLINE_LEDGER_PATH = _DEFAULT_PROPLINE_BUDGET_LEDGER_PATH
+_DEFAULT_PROPLINE_REQUEST_LIMITER = PropLineRequestLimiter(
+    ledger_path=_DEFAULT_PROPLINE_LEDGER_PATH
+)
 _DEFAULT_PROPLINE_ENDPOINT_REQUEST_LIMITER = PropLineRequestLimiter(
     PROPLINE_ENDPOINT_REQUESTS_PER_HOUR
 )
+# Every authenticated endpoint uses the same rolling-hour limiter.  Keep the
+# endpoint name as a compatibility alias for callers that inspect telemetry.
+_DEFAULT_PROPLINE_ENDPOINT_REQUEST_LIMITER = _DEFAULT_PROPLINE_REQUEST_LIMITER
 
 
 @dataclass(frozen=True)
@@ -685,6 +838,7 @@ class PropLineEndpointResult:
     upgrade_url: str = ""
     error: str = ""
     failure_kind: str = ""
+    headers: Optional[dict[str, str]] = None
 
     @property
     def data(self) -> Any:
@@ -2630,12 +2784,11 @@ class PropLineClient:
         self._player_trends_cache_clock: dict[str, float] = {}
         self._endpoint_cache: dict[str, PropLineEndpointResult] = {}
         self._endpoint_cache_clock: dict[str, float] = {}
+        self._last_response_headers: dict[str, str] = {}
+        self._export_calls = 0
         self.request_limiter = request_limiter or _DEFAULT_PROPLINE_REQUEST_LIMITER
         self.request_limiter.configure_min_interval(self.min_request_interval)
-        self.endpoint_request_limiter = (
-            endpoint_request_limiter
-            or _DEFAULT_PROPLINE_ENDPOINT_REQUEST_LIMITER
-        )
+        self.endpoint_request_limiter = endpoint_request_limiter or self.request_limiter
 
     @property
     def is_configured(self) -> bool:
@@ -2721,7 +2874,11 @@ class PropLineClient:
             return False
         if self.request_budget.remaining <= 0:
             return False
-        if endpoint and not self.endpoint_request_budget.reserve():
+        if (
+            endpoint
+            and self.endpoint_request_budget is not self.request_budget
+            and not self.endpoint_request_budget.reserve()
+        ):
             return False
         if not self.request_budget.reserve():
             return False
@@ -2735,6 +2892,9 @@ class PropLineClient:
         *,
         method: str = "GET",
         json_body: Any = None,
+        stream: bool = False,
+        timeout_seconds: Optional[float] = None,
+        max_stream_bytes: Optional[int] = None,
     ) -> Any:
         """Perform one authorized request and account for it centrally."""
         if not self.api_key:
@@ -2786,7 +2946,12 @@ class PropLineClient:
                 "X-API-Key": self.api_key,
                 "Accept": "application/json",
             }
-            timeout = aiohttp.ClientTimeout(total=self.timeout_seconds)
+            request_timeout = (
+                self.timeout_seconds
+                if timeout_seconds is None
+                else max(1.0, min(120.0, float(timeout_seconds)))
+            )
+            timeout = aiohttp.ClientTimeout(total=request_timeout)
             request_method = getattr(session, method.lower(), None)
             if request_method is None:
                 raise PropLineError(f"PropLine HTTP method is unsupported: {method}")
@@ -2799,6 +2964,9 @@ class PropLineClient:
                 request_kwargs["json"] = json_body
             request_limiter.record_attempt()
             async with request_method(url, **request_kwargs) as response:
+                self._last_response_headers = {
+                    str(k): str(v) for k, v in response.headers.items()
+                }
                 request_limiter.observe_provider_limit(response.headers)
                 if response.status == 404:
                     raise PropLineNotFoundError(f"PropLine resource not found (HTTP {response.status})")
@@ -2840,7 +3008,43 @@ class PropLineClient:
                     )
                 if response.status >= 400:
                     raise PropLineError(f"PropLine request failed (HTTP {response.status})")
-                payload = await response.json(content_type=None)
+                if stream:
+                    content_length = response.headers.get("Content-Length")
+                    if (
+                        max_stream_bytes is not None
+                        and content_length
+                        and int(content_length) > max_stream_bytes
+                    ):
+                        raise PropLineError(
+                            "PropLine streamed response exceeds the maximum size"
+                        )
+                    if hasattr(response, "content") and hasattr(
+                        response.content, "iter_chunked"
+                    ):
+                        chunks = bytearray()
+                        async for chunk in response.content.iter_chunked(64 * 1024):
+                            chunks.extend(chunk)
+                            if (
+                                max_stream_bytes is not None
+                                and len(chunks) > max_stream_bytes
+                            ):
+                                raise PropLineError(
+                                    "PropLine streamed response exceeds the maximum size"
+                                )
+                        payload = chunks.decode(
+                            response.charset or "utf-8", errors="replace"
+                        )
+                    else:
+                        payload = await response.text()
+                        if (
+                            max_stream_bytes is not None
+                            and len(payload.encode("utf-8")) > max_stream_bytes
+                        ):
+                            raise PropLineError(
+                                "PropLine streamed response exceeds the maximum size"
+                            )
+                else:
+                    payload = await response.json(content_type=None)
                 request_limiter.record_success()
                 stats = {
                     "attempted": request_limiter.attempted_count,
@@ -3105,6 +3309,7 @@ class PropLineClient:
                 payload, fetched_at, endpoint=endpoint,
                 succeeded=True, complete=True, redacted=redacted,
                 upgrade_url=upgrade_url,
+                headers=dict(self._last_response_headers),
             )
             self._endpoint_cache[scope] = result
             self._endpoint_cache_clock[scope] = self._clock()
@@ -3261,6 +3466,103 @@ class PropLineClient:
             )
         return await self._fetch_read_only(endpoint, {}, cache_scope="exports-sample")
 
+    async def fetch_resolved_props_export(
+        self,
+        *,
+        sport: str,
+        market: str = "",
+        bookmaker: str = "",
+        since: str = "",
+        until: str = "",
+    ) -> PropLineEndpointResult:
+        """Fetch the Pro streamed resolved-props CSV.
+
+        This is deliberately separate from the Backfill/Enterprise odds-history
+        export.  PropLine appends two HMAC watermark canaries to each export;
+        those rows are provider integrity markers and must never enter bot
+        evidence, so they are removed before the result is exposed.
+        """
+        fetched_at = datetime.utcnow()
+        sport = _clean(sport)
+        if not sport:
+            return PropLineEndpointResult(
+                None, fetched_at, error="PropLine export requires sport",
+                failure_kind="configuration",
+            )
+        day = datetime.utcnow().date()
+        if getattr(self, "_export_day", None) != day:
+            self._export_day, self._export_calls = day, 0
+        if self._export_calls >= 50:
+            return PropLineEndpointResult(
+                None, fetched_at, error="PropLine resolved-props export daily budget exhausted",
+                failure_kind="quota",
+            )
+        try:
+            endpoint = self._official_read_path("exports", "resolved-props")
+        except PropLineError as exc:
+            return PropLineEndpointResult(
+                None, fetched_at, error=str(exc), failure_kind="configuration"
+            )
+        params = {"sport": sport}
+        for key, value in (
+            ("market", market), ("bookmaker", bookmaker),
+            ("since", since), ("until", until),
+        ):
+            if _clean(value):
+                params[key] = _clean(value)
+        async with self._lock:
+            try:
+                csv_text = await self._request_json(
+                    endpoint,
+                    params,
+                    stream=True,
+                    timeout_seconds=120.0,
+                    max_stream_bytes=100_000_000,
+                )
+                self._export_calls += 1
+            except PropLineRateLimitError as exc:
+                return PropLineEndpointResult(
+                    None, fetched_at, endpoint=endpoint, error=str(exc),
+                    failure_kind="quota", headers=dict(self._last_response_headers),
+                )
+            except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
+                return PropLineEndpointResult(
+                    None, fetched_at, endpoint=endpoint,
+                    error=f"PropLine export request failed: {type(exc).__name__}",
+                    failure_kind="http",
+                )
+            except PropLineError as exc:
+                return PropLineEndpointResult(
+                    None, fetched_at, endpoint=endpoint, error=str(exc),
+                    failure_kind="quota" if "budget" in str(exc).lower() else "http",
+                )
+        if not isinstance(csv_text, str):
+            csv_text = str(csv_text or "")
+        # Filter by named column rather than position: new provider columns are
+        # explicitly allowed to be appended before customer_token.
+        output = io.StringIO()
+        rows = csv.DictReader(io.StringIO(csv_text))
+        if rows.fieldnames:
+            writer = csv.DictWriter(output, fieldnames=rows.fieldnames, lineterminator="\n")
+            writer.writeheader()
+            for row in rows:
+                if any(
+                    _clean(value).startswith("(Watermark)")
+                    for value in row.values()
+                ):
+                    continue
+                writer.writerow(row)
+        else:
+            output.write(csv_text)
+        return PropLineEndpointResult(
+            output.getvalue(), fetched_at, endpoint=endpoint, succeeded=True,
+            complete=True, headers=dict(self._last_response_headers),
+        )
+
+    async def export_resolved_props(self, **kwargs: Any) -> PropLineEndpointResult:
+        """Compatibility alias for the documented resolved-props export."""
+        return await self.fetch_resolved_props_export(**kwargs)
+
     async def fetch_sgp(
         self,
         sport_key: str,
@@ -3372,6 +3674,30 @@ class PropLineClient:
         params = {"period": _clean(period)} if _clean(period) else {}
         return await self._fetch_event_endpoint(sport_key, event, "markets", params)
 
+    async def fetch_event_odds_endpoint(
+        self,
+        sport_key: str,
+        event: Any,
+        *,
+        markets: Any = "",
+        bookmakers: Any = "",
+        period: str = "",
+        include_links: bool = False,
+        include_book_ids: bool = False,
+    ) -> PropLineEndpointResult:
+        """Fetch the documented per-event odds JSON endpoint."""
+        params: dict[str, str] = {}
+        for key, value in (("markets", markets), ("bookmakers", bookmakers),
+                           ("period", period)):
+            cleaned = self._csv_param(value)
+            if cleaned:
+                params[key] = cleaned
+        if include_links:
+            params["includeLinks"] = "true"
+        if include_book_ids:
+            params["includeBookIds"] = "true"
+        return await self._fetch_event_endpoint(sport_key, event, "odds", params)
+
     async def fetch_scores(
         self, sport_key: str, *, days_from: int = 3
     ) -> PropLineEndpointResult:
@@ -3436,21 +3762,31 @@ class PropLineClient:
         )
 
     async def fetch_closing_lines(
-        self, sport_key: str, event: Any, *, markets: Any = ""
+        self, sport_key: str, event: Any, *, markets: Any = "",
+        bookmakers: Any = "", period: str = ""
     ) -> PropLineEndpointResult:
         """Fetch provider-defined opening and closing line evidence."""
-        params = {"markets": self._csv_param(markets)} if self._csv_param(markets) else {}
+        params = {}
+        if self._csv_param(markets):
+            params["markets"] = self._csv_param(markets)
+        if self._csv_param(bookmakers):
+            params["bookmakers"] = self._csv_param(bookmakers)
+        if _clean(period):
+            params["period"] = _clean(period)
         return await self._fetch_event_endpoint(
             sport_key, event, "odds/closing", params
         )
 
     async def fetch_movement(
-        self, sport_key: str, event: Any, *, markets: Any = "", period: str = ""
+        self, sport_key: str, event: Any, *, markets: Any = "",
+        bookmakers: Any = "", period: str = ""
     ) -> PropLineEndpointResult:
         """Fetch read-only line movement and cross-book steam context."""
         params = {}
         if self._csv_param(markets):
             params["markets"] = self._csv_param(markets)
+        if self._csv_param(bookmakers):
+            params["bookmakers"] = self._csv_param(bookmakers)
         if _clean(period):
             params["period"] = _clean(period)
         return await self._fetch_event_endpoint(sport_key, event, "movement", params)
