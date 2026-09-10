@@ -35,13 +35,29 @@ _FOOTBALL_ALIASES = frozenset(
 def canonical_sport_key(sport: Optional[object]) -> str:
     """Normalize provider sport labels without conflating soccer and football."""
     raw = sport.value if hasattr(sport, "value") else str(sport or "")
-    return re.sub(r"[^A-Z0-9]+", "_", raw.upper()).strip("_")
+    key = re.sub(r"[^A-Z0-9]+", "_", raw.upper()).strip("_")
+    # Keep aliases on one evidence/delivery identity.  Soccer is deliberately
+    # not included: a provider's generic FOOTBALL label means gridiron, while
+    # SOCCER/ASSOCIATION_FOOTBALL remains its own sport.
+    if key in {"CFB", "NCAA", "COLLEGE_FOOTBALL", "FCS"} or key.endswith("_NCAAF"):
+        return "NCAAF"
+    if key in {"FOOTBALL", "GRIDIRON", "AMERICAN_FOOTBALL", "AMERICANFOOTBALL"}:
+        return "NFL"
+    if key == "BASEBALL":
+        return "MLB"
+    if key in {"ASSOCIATION_FOOTBALL", "FOOTBALL_SOCCER"}:
+        return "SOCCER"
+    return key
 
 
 def is_football_related_sport(sport: Optional[object]) -> bool:
     """Return True for gridiron/football competitions and common aliases."""
     key = canonical_sport_key(sport)
     if not key:
+        return False
+    # Some feeds call association football simply "football"; never merge
+    # those rows with NFL/CFB evidence or delivery identity.
+    if key == "SOCCER":
         return False
     return (
         key in _FOOTBALL_ALIASES

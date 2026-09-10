@@ -37,7 +37,6 @@ from engine.delivery_gates import (
 )
 _directional_evidence_gate = _canonical_tier_delivery_gate
 from engine.score_validation import clamp_score
-from engine.sport_policy import is_football_related_sport
 from engine.delivery_evidence import (
     is_historical_average_source,
     serialized_evidence_supports_delivery,
@@ -647,8 +646,8 @@ def format_start_message() -> str:
 
 
 def is_telegram_suppressed_sport(sport: Optional[str]) -> bool:
-    """Block football betting output while preserving monitoring/history."""
-    return is_football_related_sport(sport)
+    """Compatibility hook; all supported sports may reach normal delivery."""
+    return False
 
 
 def _has_strong_underdog_evidence(
@@ -710,9 +709,6 @@ async def send_alert(
     # All live Telegram paths eventually pass through this low-level sender.
     # Keep internal scoring vocabulary out of user-facing alerts, including
     # legacy/direct broadcast callers that do not use the current formatters.
-    if is_football_related_sport(sport):
-        logger.info("send_alert: football betting output suppressed: sport=%s", sport)
-        return False
     message = _sanitize_user_alert_message(message)
     markup = InlineKeyboardMarkup(keyboard) if keyboard else None
     try:
@@ -889,15 +885,8 @@ async def broadcast_alert(
     Broadcast an alert to multiple chat IDs.
     Returns {"sent": n, "failed": m}.
 
-    Delivery qualification is enforced before this low-level sender.  The
-    provider-independent football restriction is repeated here as a final
-    backstop for legacy/direct callers that pass a sport.
+    Delivery qualification is enforced before this low-level sender.
     """
-    if is_football_related_sport(sport):
-        logger.info("broadcast_alert: football betting output suppressed: sport=%s", sport)
-        # Suppression is an intentional no-send outcome, not a transport
-        # failure.  Failed counts are reserved for attempted deliveries.
-        return {"sent": 0, "failed": 0}
     message = _sanitize_user_alert_message(message)
     sent = failed = 0
     for cid in chat_ids:
@@ -1729,12 +1718,6 @@ class AlertDelivery:
                 sent=False,
                 filtered=True,
                 filtered_reason=f"Unsupported prop provider/source: {source}",
-            )
-        if is_football_related_sport(sport):
-            return DeliveryResult(
-                sent=False,
-                filtered=True,
-                filtered_reason="Football-related betting output is disabled",
             )
         from alert_normalizer import normalize_underdog
         from alert_scope_filter import check

@@ -30,9 +30,10 @@ class LineHistoryRecord:
 
 
 def _result_key(player: str, sport: str, stat: str) -> tuple[str, str, str]:
+    from .sport_policy import canonical_sport_key
     return (
         str(player or "").strip().casefold(),
-        str(sport or "UNKNOWN").strip().upper(),
+        canonical_sport_key(sport or "UNKNOWN"),
         str(stat or "").strip().lower(),
     )
 

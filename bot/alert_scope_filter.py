@@ -20,7 +20,6 @@ import logging
 from dataclasses import dataclass
 
 from models import AlertObject, AlertSource, AlertType, MarketType, Sport
-from engine.sport_policy import is_football_related_sport
 
 logger = logging.getLogger(__name__)
 
@@ -67,11 +66,6 @@ def check(obj: AlertObject) -> FilterResult:
     Side-effect: stamps ``obj.reason`` with the block explanation when blocked.
     """
     src = obj.source
-
-    # Football remains in the monitored/tracked universe, but no provider or
-    # legacy path may turn it into Telegram betting output.
-    if src in (AlertSource.PRIZEPICKS, AlertSource.UNDERDOG) and is_football_related_sport(obj.sport):
-        return _block(obj, "Blocked: football-related betting output")
 
     # ── PrizePicks / Underdog: player props ──────────────────────────────────
     if src in (AlertSource.PRIZEPICKS, AlertSource.UNDERDOG):

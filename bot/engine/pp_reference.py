@@ -37,7 +37,6 @@ from typing import Any, Optional
 
 import config as _config
 from engine.delivery_gates import directional_evidence_gate as _directional_evidence_gate
-from engine.sport_policy import is_football_related_sport
 from engine.timing import is_game_alertable
 
 logger = logging.getLogger(__name__)
@@ -341,7 +340,6 @@ async def run_pp_reference_cycle(
     candidates = [
         p for p in scored_props
         if str(p.get("direction") or "").strip().upper() in {"OVER", "UNDER"}
-        and not is_football_related_sport(str(p.get("sport") or ""))
     ]
     if not candidates:
         logger.debug("pp_reference: no directional props in this cycle — skipping")

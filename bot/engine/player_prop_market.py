@@ -44,7 +44,6 @@ import config as _config
 from datetime import datetime, timedelta
 from typing import Any, Optional
 from engine.delivery_gates import directional_evidence_gate as _directional_evidence_gate
-from engine.sport_policy import is_football_related_sport
 from engine.timing import is_game_alertable
 
 logger = logging.getLogger(__name__)
@@ -775,10 +774,7 @@ async def run_player_prop_market_cycle(
     def _admits(p: dict) -> bool:
         return (p.get("direction") or "").strip().upper() in {"OVER", "UNDER"}
 
-    candidates = [
-        p for p in scored_props
-        if _admits(p) and not is_football_related_sport(str(p.get("sport") or ""))
-    ]
+    candidates = [p for p in scored_props if _admits(p)]
     if not candidates:
         logger.debug("player_prop_market: no directional props — skipping")
         return 0
@@ -826,7 +822,8 @@ async def run_player_prop_market_cycle(
                 "direction": p.get("direction") or "",
             }
 
-        # Alert suppression — controlled by ALERT_DISABLED_SPORTS env var (default: NFL,NBA).
+        # Optional operator suppression controlled by ALERT_DISABLED_SPORTS
+        # (empty by default). Sport alone is otherwise never a delivery veto.
         # Data is still scored and stored; only the Telegram broadcast is skipped.
         if sport.upper() in _config.config.alert_disabled_sports:
             logger.debug("player_prop_market: alert suppressed (%s scope) — %s / %s", sport, player, stat_type)

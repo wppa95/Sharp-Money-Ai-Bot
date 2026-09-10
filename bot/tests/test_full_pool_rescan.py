@@ -10,8 +10,8 @@ Required coverage (20 tests):
  6.  A new rotation automatically begins after 100%
  7.  Rotation state persists across restart (via HealthTracker)
  8.  Removed props cannot be resurrected
- 9.  Tier 1 + other sports receive higher scheduling priority than NFL/MLB
-10.  NFL/MLB still eventually get processed
+ 9.  Non-baseball sports receive higher delivery priority than MLB
+10. NFL and MLB both remain in full-pool processing
 11.  No artificial Underdog API-call limit is introduced
 12.  Batch size remains bounded
 13.  Existing Task-121 stable refresh still works alongside FPR
@@ -417,8 +417,8 @@ class TestFPRJob:
         db.log_prop_opportunity.assert_awaited_once()
         delivery.assert_not_called()
 
-    async def test_fpr_filters_football_and_futures_before_scoring(self, monkeypatch):
-        """FPR excludes non-player futures and gridiron aliases upstream."""
+    async def test_fpr_filters_futures_but_keeps_football(self, monkeypatch):
+        """FPR excludes non-player futures but evaluates gridiron normally."""
         soccer = _make_snap(
             player="Soccer Player",
             sport="SOCCER",
@@ -463,11 +463,11 @@ class TestFPRJob:
         ):
             await _full_pool_rescan_job(ctx)
 
-        score.assert_called_once()
-        db.get_ud_prop_history.assert_awaited_once()
+        assert score.call_count == 2
+        assert db.get_ud_prop_history.await_count == 2
         stats = health.set_fpr_stats.call_args.args[0]
-        assert stats["pool_size"] == 1
-        assert stats["fpr_rescored"] == 1
+        assert stats["pool_size"] == 2
+        assert stats["fpr_rescored"] == 2
 
     async def test_mixed_primary_provider_pool_stays_in_one_rotation(self, monkeypatch):
         """PrizePicks rows join legacy Underdog rows without a second FPR."""
@@ -1297,9 +1297,9 @@ class TestFPRJob:
         # deliver_underdog should NOT have been called
         delivery_mock.deliver_underdog.assert_not_awaited()
 
-    # ── Test 10 continued: football is excluded while MLB is processed ─────────
+    # ── Test 10 continued: NFL and MLB both remain processable ─────────────────
     async def test_nfl_mlb_eventually_processed(self):
-        """FPR preserves supported sports but excludes football — test 10."""
+        """FPR keeps both football and low-priority MLB eligible — test 10."""
         pool = {
             ("NFL Player", "Passing Yards", 22.5): _make_snap(player="NFL Player", sport="NFL"),
             ("MLB Player", "Strikeouts",    22.5): _make_snap(player="MLB Player", sport="MLB"),
@@ -1331,8 +1331,39 @@ class TestFPRJob:
         ):
             await _full_pool_rescan_job(ctx)
 
-        assert "NFL Player" not in processed, "NFL player must stay out of FPR"
+        assert "NFL Player" in processed, "NFL player must be processed"
         assert "MLB Player" in processed, "MLB player must be processed"
+
+    async def test_cfb_uses_ncaaf_identity_for_bulk_evidence_lookup(self):
+        """A CFB active line must find completed evidence stored as NCAAF."""
+        pool = {
+            ("CFB Player", "Passing Yards", 250.5): _make_snap(
+                player="CFB Player",
+                sport="CFB",
+                stat="Passing Yards",
+                line=250.5,
+                ext_id="cfb-player-1",
+            ),
+        }
+        db = _make_db(pool=pool)
+        db.get_player_results_bulk = AsyncMock(return_value={})
+        ctx = _make_context(db)
+        health = _make_health(cursor=0)
+
+        from market_engine import _full_pool_rescan_job
+
+        with (
+            patch("market_engine.get_health_tracker", return_value=health),
+            patch("market_engine._fetch_and_compute_hit_rates", new=AsyncMock(return_value=None)),
+            patch("market_engine._is_game_live_or_past", return_value=False),
+            patch("engine.ud_scoring.score_ud_prop", return_value=_make_score()),
+            patch("engine.player_validator.validate_player_prop", return_value=_make_validation()),
+            patch("engine.ud_bet_decision.make_ud_bet_decision", return_value=_make_decision(rec="PASS")),
+        ):
+            await _full_pool_rescan_job(ctx)
+
+        targets = db.get_player_results_bulk.await_args.args[0]
+        assert ("CFB Player", "NCAAF", "Passing Yards") in targets
 
     # ── Test 20: API totals NOT shown in display (log format check) ───────────
     def test_api_totals_not_in_display_format(self):

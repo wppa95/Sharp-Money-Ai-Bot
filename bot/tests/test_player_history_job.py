@@ -29,7 +29,7 @@ def test_fair_cycle_targets_round_robins_all_sports():
         ("mlb-1", "MLB", "hits"),
     ]
     selected = _fair_cycle_targets(targets, 3)
-    assert [target[1] for target in selected] == ["MLB", "NBA", "NFL"]
+    assert [target[1] for target in selected] == ["NBA", "NFL", "MLB"]
 
 
 def test_fair_cycle_targets_preserves_all_when_under_limit():

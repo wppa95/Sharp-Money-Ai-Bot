@@ -1,4 +1,4 @@
-"""Regression coverage for football monitoring with delivery suppression."""
+"""Regression coverage for football monitoring and evidence-backed delivery."""
 
 from __future__ import annotations
 
@@ -40,7 +40,7 @@ from providers.underdog_provider import UnderdogProvider
         "indoor football",
     ],
 )
-def test_football_aliases_are_blocked(sport):
+def test_football_aliases_are_classified_as_gridiron_family(sport):
     assert is_football_related_sport(sport) is True
 
 

@@ -401,8 +401,8 @@ class TestDeliverUnderdog:
         "sport",
         ["NFL", "NCAAF", "CFB", "CFL", "AFL", "RUGBY", "americanfootball_nfl"],
     )
-    async def test_football_family_real_evidence_stays_blocked(self, sport):
-        """Football-family sports remain monitoring-only even with evidence."""
+    async def test_football_family_real_evidence_is_delivered(self, sport):
+        """Football-family sports use the same evidence gate as other sports."""
         mock_bot = MagicMock()
         mock_bot.send_message = AsyncMock(return_value=MagicMock())
         delivery = AlertDelivery(_make_db_mock(), mock_bot, [1])
@@ -424,8 +424,8 @@ class TestDeliverUnderdog:
             decision=SimpleNamespace(recommendation="OVER", confidence=75),
         )
 
-        assert result.sent is False
-        assert mock_bot.send_message.await_count == 0
+        assert result.sent is True
+        assert mock_bot.send_message.await_count == 1
 
     @pytest.mark.asyncio
     async def test_non_strong_moneyline_is_filtered_before_formatting(self):
@@ -444,13 +444,19 @@ class TestDeliverUnderdog:
         delivery._bot.send_message.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_football_moneyline_is_suppressed(self, monkeypatch):
+    async def test_football_moneyline_uses_normal_delivery_scope(self, monkeypatch):
         delivery = self._delivery()
         decision = MagicMock(
             moneyline_strength="STRONG",
-            recommendation="STRONG",
+            recommendation="OVER",
             decision_tier=None,
             confidence=95,
+        )
+        validation = SimpleNamespace(
+            has_supporting_data=True,
+            data_source="real",
+            n_real_games=10,
+            n_supplemental_games=0,
         )
         score = MagicMock(total=95, tier="S", stars=5)
         monkeypatch.setattr(
@@ -466,12 +472,12 @@ class TestDeliverUnderdog:
             old_line=0,
             new_line=0,
             is_moneyline=True,
+            validation=validation,
             decision=decision,
             score=score,
         )
-        assert result.sent is False
-        assert result.filtered is True
-        assert "Football" in result.filtered_reason
+        assert result.sent is True
+        assert result.filtered is False
 
     @pytest.mark.asyncio
     async def test_line_change_higher_broadcast(self):

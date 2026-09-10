@@ -7,6 +7,8 @@ import re
 import time
 from types import SimpleNamespace
 
+from engine.sport_policy import canonical_sport_key
+
 logger = logging.getLogger(__name__)
 
 # Sports in the supported player-prop universe.  Several of these sports do
@@ -75,6 +77,12 @@ _PLAYER_PROP_PROVIDERS = (
 _PLAYER_HISTORY_PROPLINE_TARGETS_PER_CYCLE = 1
 
 
+def _history_sport_order(sport: str) -> tuple[int, str]:
+    """Prioritize non-baseball evidence without dropping MLB progress."""
+    normalized = str(sport or "").strip().upper()
+    return (1 if normalized in {"MLB", "BASEBALL"} else 0, normalized)
+
+
 class _CadenceBoundaryReached(Exception):
     """Internal signal that this collector invocation must stop now."""
 
@@ -102,7 +110,7 @@ def _fair_cycle_targets(
         by_sport.setdefault(target[1], []).append(target)
     selected: list[tuple[str, str, str]] = []
     while len(selected) < limit and by_sport:
-        for sport in sorted(tuple(by_sport)):
+        for sport in sorted(tuple(by_sport), key=_history_sport_order):
             bucket = by_sport.get(sport)
             if not bucket:
                 by_sport.pop(sport, None)
@@ -142,7 +150,10 @@ def _rotating_target_slice(
     if not targets:
         return [], 0, None
 
-    stable_targets = sorted(targets, key=lambda target: (target[1], target[0], target[2]))
+    stable_targets = sorted(
+        targets,
+        key=lambda target: (_history_sport_order(target[1]), target[0], target[2]),
+    )
     rotation = _fair_cycle_targets(stable_targets, len(stable_targets))
     if not rotation:
         return [], 0, None
@@ -291,7 +302,7 @@ async def player_history_collector_job(context) -> None:
                     # than separate stat/line fields.
                     stat = re.sub(r"\s+-?\d+(?:\.\d+)?\s*$", "", selection)
                     stat = stat or selection
-                sport = (getattr(s, "sport", None) or "UNKNOWN").upper()
+                sport = canonical_sport_key(getattr(s, "sport", None) or "UNKNOWN")
                 key = (player.strip(), sport, (stat or "").lower().strip())
                 target_sources.setdefault(
                     key,
@@ -341,7 +352,7 @@ async def player_history_collector_job(context) -> None:
                     )
                     plh = [("Underdog", row) for row in (provider_rows or [])]
                 for _provider, s in plh:
-                    sport = (getattr(s, "sport", None) or "UNKNOWN").upper()
+                    sport = canonical_sport_key(getattr(s, "sport", None) or "UNKNOWN")
                     key = (
                         (s.player_name or "").strip(),
                         sport,
@@ -377,7 +388,12 @@ async def player_history_collector_job(context) -> None:
         # Stable ordering keeps request/load distribution reproducible, but
         # there is no slice limit: every active target is attempted this run.
         cycle_targets = _fair_cycle_targets(
-            sorted(targets, key=lambda target: (target[1], target[0], target[2])),
+            sorted(
+                targets,
+                key=lambda target: (
+                    _history_sport_order(target[1]), target[0], target[2]
+                ),
+            ),
             len(targets),
         )
         # ── Fetch this run's complete supported target set ──────────────────

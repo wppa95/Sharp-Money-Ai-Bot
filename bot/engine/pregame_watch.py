@@ -25,7 +25,6 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Any, Optional
 from engine.delivery_gates import directional_evidence_gate as _directional_evidence_gate
-from engine.sport_policy import is_football_related_sport
 
 
 def _line_label(line: float) -> str:
@@ -405,16 +404,13 @@ class PregameWatchEngine:
         from engine.timing import is_game_alertable
 
         for key, entry in targets:
-            # Telegram suppression does not affect monitoring or watch state.
+            # Monitoring and delivery share the normal evidence/freshness gates;
+            # sport alone is never a delivery veto.
             try:
                 from alerts import is_telegram_suppressed_sport
             except Exception:
-                is_telegram_suppressed_sport = lambda _sport: (
-                    (_sport or "").upper() in {"NBA", "MLB", "NFL", "NCAA", "NCAAF", "CFB"}
-                )
+                is_telegram_suppressed_sport = lambda _sport: False
             if is_telegram_suppressed_sport(entry.sport):
-                continue
-            if is_football_related_sport(entry.sport):
                 continue
 
             player, stat, _ = key

@@ -123,7 +123,7 @@ class TestDeliveryDiversification:
         low  = _make_cand(player="B", sport="MLB", stat_type="Hits",   tier="A")
         q = [low, high]
         result = _apply_delivery_diversification(q)
-        assert result[0]["player"] == "B"   # input order is preserved when priority ties
+        assert result[0]["player"] == "A"   # non-baseball is preferred over MLB
 
     def test_second_in_group_gets_penalty(self):
         """
@@ -149,7 +149,7 @@ class TestDeliveryDiversification:
         # separates Tier-2 groups and applies the duplicate-group penalty.
         q = [b2, a, b1]
         result = _apply_delivery_diversification(q)
-        assert [c["player"] for c in result] == ["Y", "Z", "X"]
+        assert [c["player"] for c in result] == ["Y", "X", "Z"]
 
     def test_third_in_group_gets_larger_penalty(self):
         """Third candidate in a group gets −600, larger than second's −300."""
@@ -174,7 +174,18 @@ class TestDeliveryDiversification:
         # input order, then group diversification penalizes the duplicate.
         q = [b, s2, s1]
         result = _apply_delivery_diversification(q)
-        assert [c["player"] for c in result] == ["C", "B", "A"]
+        assert [c["player"] for c in result] == ["B", "A", "C"]
+
+    def test_mlb_remains_eligible_after_three_non_baseball_candidates(self):
+        queue = [
+            _make_cand(player=f"N{i}", sport="NFL", stat_type="Yards")
+            for i in range(4)
+        ]
+        queue.append(_make_cand(player="M", sport="MLB", stat_type="Hits"))
+        result = _apply_delivery_diversification(queue)
+        assert [candidate["player"] for candidate in result] == [
+            "N0", "N1", "N2", "M", "N3",
+        ]
 
     def test_group_rank_attribute_set(self):
         """After diversification, _group_rank is set on each candidate."""

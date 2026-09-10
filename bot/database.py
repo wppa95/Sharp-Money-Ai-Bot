@@ -491,8 +491,8 @@ def _retry_sqlite_write(func):
 def _is_supported_tracking_sport(sport: Optional[object]) -> bool:
     """Return whether a normalized sport can appear in tracking reports.
 
-    Football is now part of the monitored/persisted universe.  Telegram
-    delivery still applies the independent football suppression gate.
+    Every normalized sport is retained for monitoring, persistence, evidence,
+    and the normal evidence-backed delivery path.
     """
     return bool(str(sport or "").strip())
 

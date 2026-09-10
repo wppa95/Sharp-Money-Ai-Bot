@@ -4161,6 +4161,11 @@ def _cand_priority(c: dict) -> float:
     return mc
 
 
+def _delivery_sport_priority(sport: object) -> int:
+    """Return a low-priority rank for baseball, without disabling it."""
+    return 1 if str(sport or "").strip().upper() in {"MLB", "BASEBALL"} else 0
+
+
 def _apply_delivery_diversification(queue: list) -> list:
     """
     Rank all candidates by change priority with a soft diversification penalty.
@@ -4187,7 +4192,25 @@ def _apply_delivery_diversification(queue: list) -> list:
         )
         return group
 
-    result = _rank_group(list(queue))
+    ranked = _rank_group(list(queue))
+    # User-facing preference is non-baseball first. Interleave one MLB item
+    # after every three other sports so a large football/basketball feed cannot
+    # indefinitely starve legitimate MLB candidates under the delivery cap.
+    non_baseball = [
+        candidate for candidate in ranked
+        if _delivery_sport_priority(candidate.get("sport")) == 0
+    ]
+    baseball = [
+        candidate for candidate in ranked
+        if _delivery_sport_priority(candidate.get("sport")) == 1
+    ]
+    result = []
+    while non_baseball or baseball:
+        result.extend(non_baseball[:3])
+        del non_baseball[:3]
+        if baseball:
+            result.append(baseball.pop(0))
+    # Empty/unknown sport queues still retain the same ordering semantics.
     queue.clear()
     queue.extend(result)
     return queue
@@ -8085,7 +8108,6 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
       the rotation or prevent their evaluation.
     """
     from engine.player_validator import validate_player_prop as _fpr_validate
-    from engine.sport_policy import is_football_related_sport as _fpr_is_football
     from engine.ud_bet_decision import make_ud_bet_decision as _fpr_decide
     from engine.ud_scoring import (
         score_ud_prop          as _fpr_score_fn,
@@ -8239,10 +8261,7 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
         active_pool = {
             key: snap
             for key, snap in active_pool.items()
-            if (
-                not _is_futures_stat(getattr(snap, "stat_type", ""))
-                and not _fpr_is_football(getattr(snap, "sport", ""))
-            )
+            if not _is_futures_stat(getattr(snap, "stat_type", ""))
         }
         _fpr_prizepicks_lines = _active_prizepicks_lines(active_pool)
         fpr_pool_size = len(active_pool)
@@ -8452,6 +8471,8 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
         # Evidence is also shared by alternate lines for a player/stat.  The
         # bulk result is keyed by the exact stat spelling used by the decision
         # layer, matching _fetch_and_compute_hit_rates' existing lookup.
+        from engine.sport_policy import canonical_sport_key
+
         _fpr_results_by_prop: dict[tuple[str, str, str], list] = {}
         _fpr_bulk_results = getattr(db, "get_player_results_bulk", None)
         if asyncio.iscoroutinefunction(_fpr_bulk_results):
@@ -8460,7 +8481,9 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                     [
                         (
                             _fpr_parts(_key, pool_snaps[_key])[1],
-                            _fpr_parts(_key, pool_snaps[_key])[3],
+                            canonical_sport_key(
+                                _fpr_parts(_key, pool_snaps[_key])[3]
+                            ),
                             _fpr_parts(_key, pool_snaps[_key])[2],
                         )
                         for _key in batch_keys
@@ -8492,6 +8515,7 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                 _fpr_line_val,
                 _fpr_source_id,
             ) = _fpr_parts(_fpr_key, _fpr_snap)
+            _fpr_evidence_sport = canonical_sport_key(_fpr_sport)
             # Every provider is first-class in the same universe. Keep the
             # legacy pp_line field for downstream compatibility, but use this
             # row's own line rather than privileging PrizePicks.
@@ -8553,7 +8577,7 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                     _fpr_history_snap = await get_player_history_provider().get_snapshot(
                         db,
                         _fpr_player,
-                        _fpr_sport,
+                        _fpr_evidence_sport,
                         _fpr_stat,
                         _fpr_line,
                         source_provider=_fpr_provider,
@@ -8571,10 +8595,14 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                     history_snap = _fpr_history_snap,
                 )
                 _fpr_hits = await _fetch_and_compute_hit_rates(
-                    db, _fpr_player, _fpr_sport, _fpr_stat, _fpr_line,
+                    db, _fpr_player, _fpr_evidence_sport, _fpr_stat, _fpr_line,
                     source_provider=_fpr_provider,
                     preloaded_results=_fpr_results_by_prop.get(
-                        (_fpr_player, _fpr_sport, _fpr_stat.lower().strip())
+                        (
+                            _fpr_player,
+                            _fpr_evidence_sport,
+                            _fpr_stat.lower().strip(),
+                        )
                     ) if _fpr_results_by_prop else None,
                     opponent=getattr(_fpr_snap, "opponent", None),
                 )
