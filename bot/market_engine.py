@@ -6843,16 +6843,31 @@ async def underdog_job(context) -> None:
             _top = []
             for _sn in sorted(_sport_buckets.keys()):
                 _top.extend(
-                    sorted(_sport_buckets[_sn], key=lambda x: x["total"], reverse=True)[:3]
+                    sorted(
+                        _sport_buckets[_sn],
+                        key=lambda x: (
+                            x.get("total") is not None,
+                            x.get("total") if x.get("total") is not None else float("-inf"),
+                        ),
+                        reverse=True,
+                    )[:3]
                 )
             _dbg_lines.append(f"  top 3/sport by score (sports: {', '.join(sorted(_sport_buckets.keys()))}):")
             for _i, _p in enumerate(_top, 1):
                 _direction = _p.get("direction") or "—"
                 _evidence = "yes" if _p.get("evidence_available") else "no"
+                _score = _p.get("total")
+                _score_text = (
+                    f"{_score:3d}"
+                    if isinstance(_score, int)
+                    else f"{_score:3.0f}"
+                    if isinstance(_score, float)
+                    else "N/A"
+                )
                 # Header line contains neutral evaluation metrics only.
                 _dbg_lines.append(
                     f"    {_i:2d}. {_p['player'][:24]:<24} | {_p['stat_type']:<22}"
-                    f" | {_p['sport']:<5} | score={_p['total']:3d}/100"
+                    f" | {_p['sport']:<5} | score={_score_text}/100"
                     f" | direction={_direction} | evidence={_evidence}"
                     f" | path={_p['path']}"
                 )
