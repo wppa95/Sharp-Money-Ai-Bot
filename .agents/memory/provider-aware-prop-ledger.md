@@ -21,3 +21,14 @@ provider gaps.
 **How to apply:** Keep the four bookmaker keys configured at the PropLine
 request boundary, map each to its provider label before persistence, and never
 allow supplemental PropLine rows to enter a separate Telegram delivery lane.
+
+When a provider is disabled, do not construct its client, register its usage
+budget, or schedule its polling/status jobs; compatibility callbacks may remain
+only for direct callers and must not be part of the live scheduler.
+
+**Why:** A callback-level no-op still makes health, scheduler, and startup
+reports claim the disabled provider is active and leaves accidental future call
+sites harder to detect.
+
+**How to apply:** Gate provider initialization, result clients, usage tracking,
+and scheduler registration from the same provider-enabled flag.

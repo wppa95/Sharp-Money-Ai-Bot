@@ -257,17 +257,18 @@ async def test_event_stats_rejects_in_progress_and_provider_failure_without_writ
 
 
 @pytest.mark.asyncio
-async def test_event_stats_never_fetches_football():
+async def test_event_stats_supports_football():
     client = _event_stats_client(
         players=[{"name": "Alex Example", "stats": {"points": 31}}]
     )
     client.official_sport_for = lambda sport: "football_nfl"
     provider = PlayerHistoryProvider(propline_client=client)
 
-    assert await provider._fetch_propline_event_stats(
+    rows = await provider._fetch_propline_event_stats(
         "NFL", "NFL", "passing yards"
-    ) == []
-    client.fetch_scores.assert_not_awaited()
+    )
+    assert rows == []
+    client.fetch_scores.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -706,7 +707,7 @@ async def test_snapshot_keeps_primary_results_and_adds_only_distinct_supplementa
 
 
 @pytest.mark.asyncio
-async def test_raw_propline_games_are_normalized_only_after_final_and_never_for_football():
+async def test_raw_propline_games_are_normalized_only_after_final_for_all_sports():
     class _RawGamesClient:
         is_configured = True
 
@@ -745,7 +746,8 @@ async def test_raw_propline_games_are_normalized_only_after_final_and_never_for_
     assert rows[0].game_id == "final-1"
     assert rows[0].actual_value == 31.0
     assert rows[0].source == "propline_games"
-    assert football_rows == []
+    assert len(football_rows) == 1
+    assert football_rows[0].game_id == "final-1"
 
 
 @pytest.mark.asyncio

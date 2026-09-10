@@ -51,21 +51,18 @@ class Config:
 
     # ── External APIs ─────────────────────────────────────────────────────────
     ODDS_API_KEY: str = os.environ.get("ODDS_API_KEY", "")
-    # Odds API is used for sportsbook player-prop observations only. The
-    # general h2h/totals poller is disabled; these flags control the optional
-    # DraftKings/FanDuel player-prop sources.
-    ODDS_API_ENABLED: bool = os.environ.get("ODDS_API_ENABLED", "true").lower() not in (
-        "false", "0", "no", "off"
-    )
-    # Separate OddsAPI scope.  ACTIVE_SPORTS belongs to the Underdog namespace
-    # and may contain provider-only identifiers such as CS, LOL, or TENNIS.
+    # Odds API is intentionally disabled while PropLine owns all player-prop
+    # ingestion. Keep the environment name for compatibility and easy future
+    # re-enablement, but the safe default is off.
+    ODDS_API_ENABLED: bool = False
+    # Legacy OddsAPI scope, retained for compatibility while the provider is
+    # disabled. ACTIVE_SPORTS may contain provider-only identifiers.
     ODDS_API_SPORTS_RAW: str = os.environ.get(
         "ODDS_API_SPORTS",
         "MLB,NBA,NHL,NCAAF,NCAAB,UFC,WNBA,EPL,LaLiga,SerieA,"
         "Bundesliga,Ligue1,MLS,UCL",
     )
-    # The current OddsAPI plan allows 500 requests/month.  The strict daily
-    # pacing values below are the hard request-admission policy.
+    # Legacy quota values retained for compatibility with old status readers.
     ODDS_API_QUOTA_LIMIT: int = int(os.environ.get("ODDS_API_QUOTA_LIMIT", "500"))
     ODDS_API_DAILY_LIMIT: int = int(os.environ.get("ODDS_API_DAILY_LIMIT", "16"))
     ODDS_API_MIN_REQUEST_INTERVAL: float = float(
@@ -142,33 +139,26 @@ class Config:
     # Minimum PP line change (in units) to log as a movement signal.
     MIN_PP_LINE_CHANGE: float = float(os.environ.get("MIN_PP_LINE_CHANGE", "0.5"))
 
-    # ── Player prop market fetching ───────────────────────────────────────────
-    # Sports for which player-prop odds are fetched from The Odds API and stored
-    # in odds_records so the PP crossmatch pipeline can find sportsbook matches.
-    # Priority 1: NBA, MLB.  Add soccer leagues (e.g. "NBA,MLB,EPL,MLS") for
-    # Priority 2.  NFL excluded by default.
+    # ── Player prop market compatibility scope ───────────────────────────────
+    # Retained for callers that still read this setting. Player-prop ingestion
+    # is handled by PropLine for every configured sport.
     PLAYER_PROP_SPORTS_RAW: str = os.environ.get(
         "PLAYER_PROP_SPORTS", "MLB,NBA,WNBA,NFL,NHL"
     )
-    # Keep supplemental player-prop tracking within the live 1–2 minute
-    # refresh window. Strict OddsAPI pacing still controls real requests.
+    # Keep supplemental player-prop tracking within the live 1–2 minute window.
     PLAYER_PROP_POLL_INTERVAL: int = int(os.environ.get("PLAYER_PROP_POLL_INTERVAL", "120"))
     # Seconds between pregame market watch cycles (continuous, all-day).
     # Each cycle runs morning_scan + pregame_scan for all watched entries.
     PREGAME_SCAN_INTERVAL: int = int(os.environ.get("PREGAME_SCAN_INTERVAL", "120"))
 
-    # ── Sports to monitor (comma-separated Sport enum values) ─────────────────
-    # Default: MLB only — the only sport whose alerts can be delivered given
-    # the current scope rules (MLB Moneyline + MLB Totals on DK/FD).
-    # Fetching other sports wastes Odds API quota without producing any alerts.
-    # Add sports here only when their alert delivery is also enabled in
-    # alert_scope_filter.py — e.g. set ACTIVE_SPORTS=NBA,MLB when NBA is
-    # in-season and NBA alerts are approved.
-    # Note: "Soccer" is a legacy alias for EPL — don't activate it alongside
-    # "EPL" or the EPL feed will be fetched twice.
+    # ── Sports to monitor (comma-separated provider sport values) ────────────
+    # All supported provider namespaces are enabled by default. PropLine's
+    # active catalog remains authoritative when it is available.
     ACTIVE_SPORTS_RAW: str = os.environ.get(
         "ACTIVE_SPORTS",
-     "NFL,CFB,TENNIS,WNBA,CS,LOL,VAL,DOTA,PGA,FIFA",
+        "NFL,NBA,MLB,NHL,NCAAF,NCAAB,UFC,WNBA,EPL,LaLiga,SerieA,"
+        "Bundesliga,Ligue1,MLS,UCL,SOCCER,CS,LOL,VAL,VALORANT,DOTA,"
+        "TENNIS,FIFA,PGA,MMA,GOLF,TT,BADMINTON",
     )
 
     # ── Alert thresholds ──────────────────────────────────────────────────────
@@ -203,8 +193,8 @@ class Config:
     )
 
     # ── Player-prop source settings ────────────────────────────────────────────
-    # PrizePicks/PropLine remains internal evidence; DK/FD feed the shared
-    # player-prop ledger and never create a separate alert product.
+    # PropLine supplies PrizePicks, DraftKings, FanDuel, and supplemental
+    # Underdog observations. Native Underdog ingestion remains active too.
     DRAFTKINGS_ENABLED: bool = os.environ.get("DRAFTKINGS_ENABLED", "true").lower() not in (
         "false", "0", "no", "off"
     )
@@ -213,7 +203,7 @@ class Config:
     )
     UNDERDOG_ENABLED:   bool = os.environ.get("UNDERDOG_ENABLED",   "true").lower() == "true"
     SPORTSBOOK_CONFIRMATION_ENABLED: bool = os.environ.get(
-        "SPORTSBOOK_CONFIRMATION_ENABLED", "true"
+        "SPORTSBOOK_CONFIRMATION_ENABLED", "false"
     ).lower() not in ("false", "0", "no", "off")
 
     # Polling intervals for multi-platform connectors (seconds)
@@ -307,7 +297,8 @@ class Config:
         if s.strip()
     ))
 
-    # Sports whose Underdog bet alerts are delivered to Telegram.
+    # Sports whose Underdog/PropLine observations are collected. Delivery still
+    # requires the existing evidence and safety gates.
     # ─────────────────────────────────────────────────────────────────────────
     # Primary (real result data available → OVER/UNDER picks enabled):
     #   MLB    — MLB Stats API  (statsapi.mlb.com)
@@ -329,12 +320,8 @@ class Config:
     #            is preferred when available;
     #            returns [] gracefully without it (alerts suppressed by decision engine)
     #
-    #   SOCCER → football-data.org API provider is built (bot/providers/soccer_stats.py)
-    #            but NOT in the default.  To enable add SOCCER to UD_ALERT_SPORTS env var
-    #            AND set FOOTBALL_DATA_API_KEY (free token: football-data.org/client/register).
-    #            Disabled by default because the free tier has no lineup/appearance data;
-    #            without it the provider cannot distinguish a DNP (injury/bench) from a
-    #            zero-stat game, which would produce invalid hit rates.
+    #   SOCCER → collected when present; result/evidence requirements still apply
+    #            before any user-facing delivery.
     #
     # No free provider available (self-suppress via PASS decision):
     #   COD  — no public per-game player stat API exists
@@ -370,17 +357,11 @@ class Config:
     # Default: 3600 (1 hour).  Set to 0 to disable automatic skipping.
     SEASON_CHECK_INTERVAL: int = int(os.environ.get("SEASON_CHECK_INTERVAL", "3600"))
 
-    # ── Odds API shared cache ─────────────────────────────────────────────────
-    # TTL for the shared Odds API response cache (seconds).  Default 55 s
-    # keeps the cache warm inside the 90 s connector poll cycle.
-    # DraftKings and FanDuel share one API call per sport per TTL window,
-    # cutting Odds API quota usage by ~50%.
+    # ── Legacy Odds API cache ────────────────────────────────────────────────
+    # Retained for compatibility; no Odds API requests are made while disabled.
     ODDS_API_CACHE_TTL: int = int(os.environ.get("ODDS_API_CACHE_TTL", "55"))
 
-    # ── API budget management ─────────────────────────────────────────────────
-    # Monthly Odds API request cap.  The Odds API free tier allows 500
-    # requests/month.  Set to 0 to disable budget enforcement entirely.
-    # Telegram warnings fire at 75 %, 90 %, and 100 % of this value.
+    # ── Legacy API budget management ─────────────────────────────────────────
     ODDS_API_MONTHLY_BUDGET: int = int(
         os.environ.get("ODDS_API_MONTHLY_BUDGET", str(ODDS_API_QUOTA_LIMIT))
     )

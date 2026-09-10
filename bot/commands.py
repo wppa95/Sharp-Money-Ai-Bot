@@ -2392,8 +2392,8 @@ async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
     def _render_pick_entry(rank: int, flat_idx: int, plh, comp) -> str:
 
-        # Keep the source line canonical for this row. A PrizePicks-only row
-        # must never be rendered as though its line came from Underdog.
+        # Keep the source line canonical for this row. A PropLine-only row
+        # must never be rendered as though its line came from native Underdog.
         provider = getattr(plh, "provider", None) or "Underdog"
         provider_emoji = _PROV_EMOJI.get(provider, "📡")
         source_id = str(

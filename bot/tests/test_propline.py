@@ -1453,7 +1453,7 @@ def test_incomplete_event_snapshot_retains_last_complete_snapshot():
     assert second.failed_event_ids == ("game-1",)
 
 
-def test_official_event_results_uses_documented_route_and_prizepicks_only():
+def test_official_event_results_uses_documented_route():
     session = _Session(_Response(200, _event_results("game-1")))
     client = PropLineClient(
         api_key="test-only-key",

@@ -27,7 +27,6 @@ from urllib.parse import quote
 
 import aiohttp
 
-from engine.sport_policy import is_football_related_sport
 from providers.prop_provider import PlayerProp, PropProviderBase
 
 logger = logging.getLogger(__name__)
@@ -4733,8 +4732,8 @@ class PropLinePrizePicksProvider(PropProviderBase):
                 error="PropLine is not configured", failure_kind="disabled",
             )
         if (
-            is_football_related_sport(canonical_sport)
-            or (self._sport_filter is not None and canonical_sport not in self._sport_filter)
+            self._sport_filter is not None
+            and canonical_sport not in self._sport_filter
         ):
             return PropLinePlayerHistoryFetchResult(
                 (), datetime.utcnow(), player_name=_clean(player_name),
@@ -4779,8 +4778,8 @@ class PropLinePrizePicksProvider(PropProviderBase):
                 error="PropLine is not configured", failure_kind="disabled",
             )
         if (
-            is_football_related_sport(canonical_sport)
-            or (self._sport_filter is not None and canonical_sport not in self._sport_filter)
+            self._sport_filter is not None
+            and canonical_sport not in self._sport_filter
         ):
             return PropLinePlayerTrendsFetchResult(
                 (), datetime.utcnow(), player_name=_clean(player_name),

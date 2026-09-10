@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 # This constant is the single source of truth for the provider priority policy.
 # Keep DK/FD limited to moneylines and totals; do not widen this to spreads or props.
 #
-# Priority order: PrizePicks (PRIMARY) → Underdog (SECONDARY) → DK/FD (SUPPORTING ONLY)
+# Provider order: native Underdog (PRIMARY) → PropLine sources (SUPPORTING)
 #
 SCOPE_RULES: dict[str, str] = {
     "PrizePicks": "ALLOW — player props, all sports (primary source)",

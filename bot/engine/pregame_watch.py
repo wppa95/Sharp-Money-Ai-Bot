@@ -382,8 +382,8 @@ class PregameWatchEngine:
             logger.debug("pregame_watch.pregame_scan: no entries in window (total=%d)", len(self._watch_entries))
             return 0
 
-        # Bulk fetch cross-provider data once for all targets
-        # DK/FD removed from active workflow — Underdog + PrizePicks only
+        # Bulk fetch the PropLine corroboration data once for all targets.
+        # Native Underdog remains the live source for this watch.
         try:
             from engine.player_prop_market import build_player_prop_market_comparison
             pp_rows = await db.get_latest_props_for_provider("PrizePicks", since_hours=24)
@@ -479,7 +479,7 @@ class PregameWatchEngine:
             ):
                 continue
 
-            # Build market comparison — Underdog + PrizePicks only
+            # Build market comparison — native Underdog + PropLine
             prev_line = (
                 entry.opening_lines["Underdog"].line_value
                 if "Underdog" in entry.opening_lines else None

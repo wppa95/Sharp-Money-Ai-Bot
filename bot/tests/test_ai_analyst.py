@@ -98,7 +98,7 @@ async def db():
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("sport", ["NBA", "NHL", "MLB"])
-async def test_prediction_persists_and_grades_for_supported_nonfootball_sports(
+async def test_prediction_persists_and_grades_for_supported_sports(
     db: Database, sport: str
 ):
     payload = build_advisory_from_pipeline(

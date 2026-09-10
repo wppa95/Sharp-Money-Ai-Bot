@@ -124,9 +124,10 @@ class TestBudgetCheckJobHealth:
 
         with patch.object(m, "get_health_tracker", return_value=health):
             with patch.object(m, "get_usage_tracker", return_value=tracker):
-                with patch.object(m.config.__class__, "allowed_user_ids",
-                                  new_callable=lambda: property(lambda self: {99999})):
-                    await m._budget_check_job(ctx)
+                with patch.object(m.config, "ODDS_API_ENABLED", True):
+                    with patch.object(m.config.__class__, "allowed_user_ids",
+                                      new_callable=lambda: property(lambda self: {99999})):
+                        await m._budget_check_job(ctx)
 
         info = health.get_job_info("_budget_check_job")
         assert info.get("fail_count", 0) >= 1, (
@@ -265,6 +266,7 @@ class TestClvHarvestJobHealth:
         db = MagicMock()
         db.get_pending_clv_seeds    = AsyncMock(return_value=pending_seeds or [])
         db.mark_clv_seed_expired    = AsyncMock()
+        db.mark_clv_seeds_expired_bulk = AsyncMock()
         db.mark_clv_seed_computed   = AsyncMock()
         db.get_last_odds_for_event  = AsyncMock(return_value=None)
         db.save_clv_record          = AsyncMock()

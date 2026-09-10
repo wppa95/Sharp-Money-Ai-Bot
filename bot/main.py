@@ -555,7 +555,7 @@ def _coordinated_job(
 
 
 def _configured_odds_api_sports() -> list[tuple[str, Sport]]:
-    """Return only configured sports supported by the OddsAPI namespace.
+    """Return legacy OddsAPI sports for compatibility callers.
 
     ``ACTIVE_SPORTS`` is also used as the Underdog scanner scope, so it can
     contain valid Underdog-only identifiers such as CS, LOL, VAL, and TENNIS.
@@ -601,7 +601,7 @@ def _configured_odds_api_sports() -> list[tuple[str, Sport]]:
 
     if ignored:
         logger.debug(
-            "OddsAPI poll scope: ignoring %d Underdog-only/unsupported sports: %s",
+            "Legacy OddsAPI scope: ignoring %d unsupported sports: %s",
             len(ignored),
             ", ".join(ignored),
         )
@@ -742,29 +742,28 @@ async def post_init(application: Application) -> None:
     _engine = AnalysisEngine()
 
     # ── Season / market-status checker ────────────────────────────────────────
-    _season_checker = SeasonChecker(
-        api_key=config.ODDS_API_KEY,
-        ttl_seconds=config.SEASON_CHECK_INTERVAL,
-    )
-    # Eager first load — non-fatal; checker stays fail-open on error.
-    if config.SEASON_CHECK_INTERVAL > 0:
-        await _season_checker.refresh()
+    # This checker is an Odds API client, so it must not even be constructed
+    # while the provider is disabled.
+    _season_checker = None
+    if config.ODDS_API_ENABLED:
+        _season_checker = SeasonChecker(
+            api_key=config.ODDS_API_KEY,
+            ttl_seconds=config.SEASON_CHECK_INTERVAL,
+        )
+        # Eager first load — non-fatal; checker stays fail-open on error.
+        if config.SEASON_CHECK_INTERVAL > 0:
+            await _season_checker.refresh()
 
-    # ── Provider health monitor + shared Odds API cache ──────────────────────
+    # ── Provider health monitor + PropLine feed ─────────────────────────────
     _health_monitor = init_health_monitor()
-    # PropLine is an internal evidence/feed companion for Underdog. It is not
-    # exposed as an independent Telegram provider.
     from providers.propline import PropLinePrizePicksProvider
     _propline_enabled = PropLinePrizePicksProvider(
         bookmaker=config.PROPLINE_UNDERDOG_BOOKMAKER
     ).is_available()
-    # OddsAPI is registered so quota headers (x-requests-remaining/used) recorded
-    # by OddsApiCache._fetch() appear in /status and health logs.
-    _health_monitor.register("OddsAPI")
     _health_monitor.register("Underdog", disabled=not config.UNDERDOG_ENABLED)
     logger.info(
         "Provider health monitor initialised "
-        "(OddsAPI + Underdog + internal PropLine feed=%s)",
+        "(Underdog + PropLine feed=%s; all configured sports enabled)",
         "enabled" if _propline_enabled else "disabled",
     )
     if config.discord_configured:
@@ -782,28 +781,41 @@ async def post_init(application: Application) -> None:
     else:
         logger.info("Discord delivery not configured (required variables absent)")
 
-    init_odds_cache(ttl_seconds=config.ODDS_API_CACHE_TTL)
-    logger.info("Odds API shared cache initialised (TTL=%ds)", config.ODDS_API_CACHE_TTL)
-    init_quota_pacer(
-        quota_limit=config.ODDS_API_QUOTA_LIMIT,
-        daily_limit=config.ODDS_API_DAILY_LIMIT,
-        min_interval_seconds=config.ODDS_API_MIN_REQUEST_INTERVAL,
-        timezone_name=config.ODDS_API_PACING_TIMEZONE,
-        state_path=config.ODDS_API_PACING_STATE_FILE,
-    )
+    if config.ODDS_API_ENABLED:
+        init_odds_cache(ttl_seconds=config.ODDS_API_CACHE_TTL)
+        init_quota_pacer(
+            quota_limit=config.ODDS_API_QUOTA_LIMIT,
+            daily_limit=config.ODDS_API_DAILY_LIMIT,
+            min_interval_seconds=config.ODDS_API_MIN_REQUEST_INTERVAL,
+            timezone_name=config.ODDS_API_PACING_TIMEZONE,
+            state_path=config.ODDS_API_PACING_STATE_FILE,
+        )
+        logger.info("Odds API compatibility services enabled")
+    else:
+        logger.info("Odds API disabled; using PropLine for all player-prop feeds")
 
     # ── API usage tracker + budget enforcement ────────────────────────────────
     _usage_tracker = init_usage_tracker(
-        monthly_budgets={"OddsAPI": config.ODDS_API_MONTHLY_BUDGET},
+        monthly_budgets=(
+            {"OddsAPI": config.ODDS_API_MONTHLY_BUDGET}
+            if config.ODDS_API_ENABLED
+            else {}
+        ),
     )
     _usage_tracker.set_season_checker(_season_checker)
     logger.info(
-        "API usage tracker initialised (OddsAPI budget: %d requests/month)",
-        config.ODDS_API_MONTHLY_BUDGET,
+        "API usage tracker initialised (%s)",
+        "OddsAPI budget active"
+        if config.ODDS_API_ENABLED
+        else "OddsAPI disabled",
     )
 
-    # Game results provider — not wired to any job yet; framework only
-    _results_provider = OddsApiResultsProvider(api_key=config.ODDS_API_KEY)
+    # Game results provider — only construct it when its upstream is enabled.
+    _results_provider = (
+        OddsApiResultsProvider(api_key=config.ODDS_API_KEY)
+        if config.ODDS_API_ENABLED
+        else None
+    )
     application.bot_data["results_provider"] = _results_provider
 
     allowed_ids = list(config.allowed_user_ids)
@@ -829,7 +841,7 @@ async def post_init(application: Application) -> None:
     ))
 
     init_market_engine(registry)
-    init_odds_confirmation(_engine, _db)   # wire existing OddsAPI data into confirmation
+    init_odds_confirmation(_engine, _db)   # compatibility setup; Odds API is disabled
 
     # Store db reference in bot_data for market engine jobs
     application.bot_data["db"] = _db
@@ -843,19 +855,19 @@ async def post_init(application: Application) -> None:
     # Register background jobs
     jq = application.job_queue
     if jq:
-        # Retain the compatibility callback for scheduler/state visibility.
-        # It is a no-op for player props because PropLine owns DK/FD/PP/UD
-        # player-prop ingestion.
-        jq.run_repeating(
-            _coordinated_job(
-                "odds_poller",
-                _poll_odds_job,
-                exclusive_group=_SQLITE_WRITE_JOB_GROUP,
-            ),
-            interval=config.PLAYER_PROP_POLL_INTERVAL,
-            first=10,
-            name="odds_poller",
-        )
+        # PropLine owns all player-prop ingestion; no Odds API poller is
+        # scheduled while that provider is disabled.
+        if config.ODDS_API_ENABLED:
+            jq.run_repeating(
+                _coordinated_job(
+                    "odds_poller",
+                    _poll_odds_job,
+                    exclusive_group=_SQLITE_WRITE_JOB_GROUP,
+                ),
+                interval=config.PLAYER_PROP_POLL_INTERVAL,
+                first=10,
+                name="odds_poller",
+            )
         # jq.run_repeating(_steam_check_job,    interval=config.STEAM_CHECK_INTERVAL,      first=15,  name="steam_checker")
         jq.run_repeating(
             _coordinated_job(
@@ -968,8 +980,14 @@ async def post_init(application: Application) -> None:
             first=90,
             name="player_history_collector",
         )
-        # API budget check — every 15 minutes
-        jq.run_repeating(_coordinated_job("budget_checker", _budget_check_job), interval=900, first=30, name="budget_checker")
+        # API budget check — every 15 minutes, only when an API budget exists.
+        if config.ODDS_API_ENABLED:
+            jq.run_repeating(
+                _coordinated_job("budget_checker", _budget_check_job),
+                interval=900,
+                first=30,
+                name="budget_checker",
+            )
         # PropLineHistory prune — once per day (keeps last 14 days)
         jq.run_repeating(
             _coordinated_job(
@@ -983,8 +1001,8 @@ async def post_init(application: Application) -> None:
         )
         # Heartbeat — every 60 s (keeps HealthTracker alive timestamp current)
         jq.run_repeating(_coordinated_job("heartbeat", _heartbeat_job), interval=60, first=30, name="heartbeat")
-        # Season / market-status refresh (skip when interval is 0 = disabled)
-        if config.SEASON_CHECK_INTERVAL > 0:
+        # Season / market-status refresh (requires the Odds API provider).
+        if config.ODDS_API_ENABLED and config.SEASON_CHECK_INTERVAL > 0:
             jq.run_repeating(
                 _coordinated_job("season_checker", _season_check_job),
                 interval=config.SEASON_CHECK_INTERVAL,
@@ -992,19 +1010,23 @@ async def post_init(application: Application) -> None:
                 name="season_checker",
             )
         logger.info(
-            "Jobs scheduled — Underdog every %ds with internal PropLine feed; "
+            "Jobs scheduled — Underdog every %ds with PropLine feed; "
             "full-pool every %ds; "
             "independent grader: every %ds, "
             "history collector: every %ds, "
-            "season_check: every %ds, "
+            "season_check: %s, "
             "heartbeat: every 60s "
              "[Unified Player Props cycle enabled=%s; "
-             "Odds API player-prop feed disabled; PropLine bookmakers=%s]",
+             "PropLine player-prop feed active; Odds API disabled; bookmakers=%s]",
             config.UNDERDOG_POLL_INTERVAL,
             config.UNDERDOG_POLL_INTERVAL,
             config.OPPORTUNITY_GRADER_INTERVAL,
             config.PLAYER_HISTORY_POLL_INTERVAL,
-            config.SEASON_CHECK_INTERVAL,
+            (
+                f"every {config.SEASON_CHECK_INTERVAL}s"
+                if config.ODDS_API_ENABLED and config.SEASON_CHECK_INTERVAL > 0
+                else "disabled"
+            ),
              _propline_enabled,
              ",".join(getattr(config, "propline_bookmakers", [])),
         )
@@ -2241,6 +2263,11 @@ async def _budget_check_job(context) -> None:
       ≥ 90 % → ⚠️  serious warning; LOW-priority calls now blocked
       ≥ 100% → 🚨  pacing budget exceeded; LOW + MEDIUM blocked; HIGH + CRITICAL pass
     """
+    if not config.ODDS_API_ENABLED:
+        _ht = get_health_tracker()
+        if _ht:
+            _ht.record_job_run("_budget_check_job")
+        return
     _tracker = get_usage_tracker()
     if _tracker is None:
         # Tracker not ready — record as successful no-op so /health never shows "never ran"
@@ -2379,7 +2406,7 @@ async def _season_check_job(context) -> None:
     already manages the interval).  Failures are logged inside the
     checker and leave the previous cache value intact (fail-open).
     """
-    if _season_checker is None:
+    if not config.ODDS_API_ENABLED or _season_checker is None:
         # Checker not ready — record as successful no-op so /health never shows "never ran"
         _ht = get_health_tracker()
         if _ht:

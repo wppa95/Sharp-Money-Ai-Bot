@@ -1004,12 +1004,10 @@ def propline_request_schedule_state() -> Optional[dict[str, object]]:
 async def _get_prizepicks_scan_sports(provider) -> tuple[str, ...]:
     """Return the provider's active canonical sports, with a safe config fallback.
 
-    PropLine's sports catalog is authoritative when available.  The configured
-    list remains a compatibility fallback for test/custom providers and for a
+    PropLine's sports catalog is authoritative when available. The configured
+    list remains a compatibility fallback for test/custom providers and a
     temporary catalog outage. When no explicit scope is configured, the
-    provider's complete known namespace keeps a temporary catalog 429 from
-    suppressing all non-football coverage. It is never used to turn an empty
-    successful catalog into a fabricated sport.
+    provider's complete known namespace is used for every supported sport.
     """
     configured = tuple(
         str(sport).strip()
@@ -1024,7 +1022,6 @@ async def _get_prizepicks_scan_sports(provider) -> tuple[str, ...]:
     fallback = configured or provider_sports
 
     def _configured(values) -> tuple[str, ...]:
-        from engine.sport_policy import is_football_related_sport
         result: list[str] = []
         seen: set[str] = set()
         for value in values:
@@ -1032,7 +1029,6 @@ async def _get_prizepicks_scan_sports(provider) -> tuple[str, ...]:
             if (
                 canonical
                 and canonical.upper() not in seen
-                and not is_football_related_sport(canonical)
             ):
                 seen.add(canonical.upper())
                 result.append(canonical)
@@ -1056,7 +1052,6 @@ async def _get_prizepicks_scan_sports(provider) -> tuple[str, ...]:
         )
         return fallback_sports
 
-    from engine.sport_policy import is_football_related_sport
     sports: list[str] = []
     seen: set[str] = set()
     for item in discovered or []:
@@ -1066,8 +1061,6 @@ async def _get_prizepicks_scan_sports(provider) -> tuple[str, ...]:
             or item
         ).strip()
         if canonical and canonical.upper() not in seen:
-            if is_football_related_sport(canonical):
-                continue
             seen.add(canonical.upper())
             sports.append(canonical)
     if discovered is None:

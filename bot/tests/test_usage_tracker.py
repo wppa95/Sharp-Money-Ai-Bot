@@ -109,9 +109,8 @@ class TestInferCallPriority:
         # MLB is Tier-2 — blocked from Odds API EV pipeline → LOW priority.
         assert infer_call_priority("baseball_mlb", "h2h") == CallPriority.LOW
 
-    def test_nba_low_when_not_in_active_sports(self):
-        # NBA is not in the default active_sports config → LOW (not MEDIUM).
-        # Priority is sport-agnostic: NBA would be HIGH only if added to active_sports.
+    def test_nba_low_for_legacy_game_line_path(self):
+        # Legacy game-line requests remain low priority; player props use HIGH.
         assert infer_call_priority("basketball_nba", "h2h,spreads") == CallPriority.LOW
 
     def test_nfl_low(self):
