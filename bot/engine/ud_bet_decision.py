@@ -78,8 +78,10 @@ class UDBetDecision:
     """Complete betting evaluation for one Underdog prop."""
 
     recommendation: Optional[str]   # "OVER" | "UNDER" | None
-    decision_tier:  Optional[str]   # reporting metadata for directional picks
-    confidence:     int              # 0–95 (0 when no direction exists)
+    # Deprecated compatibility fields.  Directional qualification no longer
+    # produces or consumes tiers or bet-quality confidence.
+    decision_tier:  Optional[str]
+    confidence:     Optional[int]
     reason:         str
 
     # ── Real game-result windows (None = window not available) ────────────────
@@ -165,7 +167,7 @@ class UDBetDecision:
         return cls(
             recommendation     = None,
             decision_tier      = None,
-            confidence         = 0,
+            confidence         = None,
             reason             = reason,
             avg_vs_line_pct    = avg_vs_line_pct,
             at_historical_low  = at_historical_low,
@@ -174,39 +176,24 @@ class UDBetDecision:
         )
 
     @classmethod
-    def make_pass(
-        cls,
-        reason: str,
-        hit_rates: "Optional[PlayerHitRates]" = None,
-        avg_vs_line_pct: Optional[float] = None,
-        at_historical_low: bool = False,
-    ) -> "UDBetDecision":
-        """Compatibility alias for the neutral no-direction state."""
-        return cls.make_no_direction(
-            reason=reason,
-            hit_rates=hit_rates,
-            avg_vs_line_pct=avg_vs_line_pct,
-            at_historical_low=at_historical_low,
-        )
-
-    @classmethod
     def make_pick(
         cls,
         recommendation: str,
-        decision_tier: str,
-        confidence: int,
         reason: str,
         hit_rates: "PlayerHitRates",
         avg_vs_line_pct: Optional[float] = None,
         at_historical_low: bool = False,
         evidence_source: Optional[str] = None,
+        # Compatibility-only arguments for older callers.  They are ignored.
+        decision_tier: Optional[str] = None,
+        confidence: Optional[int] = None,
     ) -> "UDBetDecision":
         """Construct an OVER/UNDER decision."""
         w = _windows_from_hit_rates(hit_rates)
         return cls(
             recommendation     = recommendation,
-            decision_tier      = decision_tier,
-            confidence         = confidence,
+            decision_tier      = None,
+            confidence         = None,
             reason             = reason,
             avg_vs_line_pct    = avg_vs_line_pct,
             at_historical_low  = at_historical_low,
@@ -226,18 +213,8 @@ class UDBetDecision:
     def recommendation_emoji(self) -> str:
         return {"OVER": "🟢", "UNDER": "🔴"}.get(self.recommendation, "⚪")
 
-    def tier_display(self) -> str:
-        return {
-            "S":    "⭐ S-Tier",
-            "A":    "🔷 A-Tier",
-            "B":    "🔹 B-Tier",
-            "C":    "▪️ C-Tier",
-        }.get(self.decision_tier, "—")
-
     def confidence_display(self) -> str:
-        if self.recommendation not in ("OVER", "UNDER"):
-            return "—"
-        return f"{self.confidence}/100"
+        return "—"
 
     def avg_vs_line_display(self) -> str:
         if self.avg_vs_line_pct is None:
@@ -274,8 +251,6 @@ class UDBetDecision:
         return json.dumps(
             {
                 "rec":  self.recommendation,
-                "tier": self.decision_tier,
-                "conf": self.confidence,
                 "evidence_source": self.evidence_source,
                 "evidence_label": self.evidence_source_display(),
                 "l5":   {"g": self.l5_games, "o": self.l5_over, "r": _r(self.l5_hit_rate), "avg": _r(self.l5_avg)},
@@ -357,21 +332,10 @@ def make_ud_bet_decision(
                 at_historical_low=at_low,
             )
 
-        score_total = getattr(score, "total", None)
-        confidence = (
-            int(max(10, min(_MAX_CONFIDENCE, float(score_total))))
-            if isinstance(score_total, (int, float)) and not isinstance(score_total, bool)
-            else _MIN_CONFIDENCE
-        )
-        score_tier = str(getattr(score, "tier", "") or "").upper()
-        if score_tier not in {"S", "A", "B", "C"}:
-            score_tier = "B"
         avg_line = float(getattr(validation, "avg_line"))
         relation = "below" if direction == "OVER" else "above"
         return UDBetDecision.make_pick(
             recommendation=direction,
-            decision_tier=score_tier,
-            confidence=confidence,
             reason=(
                 f"Historical average fallback — current line {current_line:g} "
                 f"is {relation} historical average {avg_line:g}; "
@@ -417,22 +381,14 @@ def make_ud_bet_decision(
     if contradiction:
         return _historical_fallback(contradiction)
 
-    # ── Tier classification ───────────────────────────────────────────────────
-    tier = _determine_tier(hit_rates, direction, primary)
-
-    # ── Confidence ────────────────────────────────────────────────────────────
-    confidence = _compute_confidence(hit_rates, direction, tier, primary)
-
     # ── Reason string ─────────────────────────────────────────────────────────
     reason = _build_reason(
-        hit_rates, direction, tier, primary, current_line,
+        hit_rates, direction, None, primary, current_line,
         avg_vs_line_pct, at_low,
     )
 
     return UDBetDecision.make_pick(
         recommendation     = direction,
-        decision_tier      = tier,
-        confidence         = confidence,
         reason             = reason,
         hit_rates          = hit_rates,
         avg_vs_line_pct    = avg_vs_line_pct,

@@ -685,19 +685,15 @@ def _format_analyst_inline_block(
     that builds the narrative from stored decision artifacts.  Returns "" for
     non-directional/removal decisions, or when the import fails.
 
-    Tier and confidence remain internal metadata. The narrative is not exposed
-    through the Telegram player-pick presentation.
+    Legacy tier/quality metadata is not part of the analyst input. The
+    narrative remains advisory and cannot affect delivery.
     """
     if decision is None:
         return ""
     rec       = getattr(decision, "recommendation", None)
-    raw_tier  = getattr(decision, "decision_tier", "B") or "B"
-    conf      = getattr(decision, "confidence", 0) or 0
+    raw_tier  = ""
+    conf      = 0
     rlvl      = "MEDIUM"
-    if score is not None:
-        # Derive risk from stars: 5=LOW, 4=LOW, 3=MEDIUM, 2/1=HIGH
-        stars = getattr(score, "stars", 3) or 3
-        rlvl  = "LOW" if stars >= 4 else "MEDIUM" if stars >= 3 else "HIGH"
 
     try:
         from engine.analyst import format_analyst_alert_block
@@ -882,11 +878,8 @@ def format_underdog_change_alert(
     change = (new_line - old_line) if not removed else 0.0
     change_sign = "+" if change >= 0 else ""
 
-    # Pick from decision.  Quality and tier remain internal metadata only.
+    # Pick from the directional decision only.
     rec = getattr(decision, "recommendation", None) if decision else None
-    conf = getattr(decision, "confidence", None) if decision else None
-    if conf is None and score is not None:
-        conf = getattr(score, "total", None)
 
     pick_line = ""
     if rec in ("OVER", "UNDER") and not removed:
@@ -910,7 +903,7 @@ def format_underdog_change_alert(
             _thick,
         ]
     else:
-        # OddsAPI sportsbook confirmation footer (S/A tier only)
+        # OddsAPI sportsbook confirmation footer
         _confirm_line = ""
         if market_confirmation is not None:
             _cn = market_confirmation.get("notes", "")
@@ -1060,15 +1053,10 @@ def format_underdog_new_prop_alert(
         if game_time else ""
     )
 
-    # Quality labels are informational only; direction is the sole
-    # qualification gate.  Quality is retained for internal scoring/reporting
-    # but deliberately omitted from the Telegram PLAY presentation.
     # Reason bullets
     reasons = ["Qualified current-line player evidence"]
     if line_value <= low_line_threshold:
         reasons.append(f"Low starting line ({line_value} ≤ {low_line_threshold})")
-    if score is not None and getattr(score, "stars", 0) >= 3:
-        reasons.append("Score qualifies for current market review")
     if (
         validation is not None
         and getattr(validation, "has_supporting_data", False)
@@ -1139,7 +1127,7 @@ def format_underdog_new_prop_cycle_summary(
       player, stat_type, sport, team, line, score (UDPropScore|None),
       immediate (bool), game_time (datetime|None).
 
-    Sorted display order: 0.5 lines first → line asc → stars desc.
+    Sorted display order: 0.5 lines first → line ascending.
        Immediately-alerted props are marked with ⚡; internal quality metadata
        is used only for ordering and is not shown.
     """
@@ -1151,10 +1139,8 @@ def format_underdog_new_prop_cycle_summary(
     n_half_line = sum(1 for p in new_props if (p.get("line") or 99.0) <= 0.5)
 
     def _sort_key(p: dict) -> tuple:
-        stars = getattr(p.get("score"), "stars", 0)
         line  = p.get("line") or 99.0
-        # 0.5 lines first, then ascending line, then descending stars
-        return (0 if line <= 0.5 else 1, line, -stars)
+        return (0 if line <= 0.5 else 1, line)
 
     sorted_props = sorted(new_props, key=_sort_key)
     shown        = sorted_props[:max_shown]

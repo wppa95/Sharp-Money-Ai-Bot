@@ -3907,11 +3907,11 @@ class Database:
                         last_seen=observed_at,
                         change_count=0,
                         opening_line=line_value,
-                        score_tier=getattr(prop, "score_tier", None),
+                        score_tier=None,
                         bet_recommendation=getattr(prop, "bet_recommendation", None),
-                        bet_confidence=getattr(prop, "bet_confidence", None),
-                        market_quality_score=getattr(prop, "market_quality_score", None),
-                        score_total=getattr(prop, "score_total", None),
+                        bet_confidence=None,
+                        market_quality_score=None,
+                        score_total=None,
                     )
                     s.add(row)
                     latest[key] = row
@@ -3964,13 +3964,11 @@ class Database:
                             if getattr(latest[key], "opening_line", None) is not None
                             else old_line
                         ),
-                        score_tier=getattr(prop, "score_tier", None),
+                        score_tier=None,
                         bet_recommendation=getattr(prop, "bet_recommendation", None),
-                        bet_confidence=getattr(prop, "bet_confidence", None),
-                        market_quality_score=getattr(
-                            prop, "market_quality_score", None
-                        ),
-                        score_total=getattr(prop, "score_total", None),
+                        bet_confidence=None,
+                        market_quality_score=None,
+                        score_total=None,
                     )
                     s.add(row)
                     latest[key] = row
@@ -4001,36 +3999,22 @@ class Database:
                 row.removed = False
                 row.lifecycle_state = "DISCOVERED"
                 if refresh_metadata:
-                    row.score_tier = getattr(prop, "score_tier", None)
+                    row.score_tier = None
                     row.bet_recommendation = getattr(
                         prop, "bet_recommendation", None
                     )
-                    row.bet_confidence = getattr(prop, "bet_confidence", None)
-                    row.market_quality_score = getattr(
-                        prop, "market_quality_score", None
-                    )
-                    row.score_total = getattr(prop, "score_total", None)
+                    row.bet_confidence = None
+                    row.market_quality_score = None
+                    row.score_total = None
                 else:
-                    row.score_tier = getattr(prop, "score_tier", None) or row.score_tier
+                    row.score_tier = None
                     row.bet_recommendation = (
                         getattr(prop, "bet_recommendation", None)
                         or row.bet_recommendation
                     )
-                    row.bet_confidence = (
-                        getattr(prop, "bet_confidence", None)
-                        if getattr(prop, "bet_confidence", None) is not None
-                        else row.bet_confidence
-                    )
-                    row.market_quality_score = (
-                        getattr(prop, "market_quality_score", None)
-                        if getattr(prop, "market_quality_score", None) is not None
-                        else row.market_quality_score
-                    )
-                    row.score_total = (
-                        getattr(prop, "score_total", None)
-                        if getattr(prop, "score_total", None) is not None
-                        else row.score_total
-                    )
+                    row.bet_confidence = None
+                    row.market_quality_score = None
+                    row.score_total = None
 
             await s.commit()
         return len(props)
@@ -5326,6 +5310,13 @@ class Database:
                     pass  # column already exists — safe to ignore
 
     async def save_underdog_snapshot(self, record: "UnderdogSnapshotRecord") -> "UnderdogSnapshotRecord":
+        # Legacy scoring fields remain in old schemas only; the active
+        # framework persists direction and evidence, never tiers, quality, or
+        # PASS-style decisions.
+        record.score_total = None
+        record.score_tier = None
+        record.score_stars = None
+        record.bet_confidence = None
         async with self.session() as s:
             s.add(record)
             await s.commit()
@@ -5397,13 +5388,13 @@ class Database:
                                     "line_delta": record.line_delta,
                                     "removed": bool(record.removed),
                                     "alert_sent": bool(record.alert_sent),
-                                    "score_total": record.score_total,
-                                    "score_tier": record.score_tier,
-                                    "score_stars": record.score_stars,
+                                     "score_total": None,
+                                     "score_tier": None,
+                                     "score_stars": None,
                                     "alert_outcome": record.alert_outcome,
                                     "validation_json": record.validation_json,
                                     "bet_recommendation": record.bet_recommendation,
-                                    "bet_confidence": record.bet_confidence,
+                                     "bet_confidence": None,
                                     "bet_reason": record.bet_reason,
                                     "bet_evidence_json": record.bet_evidence_json,
                                     "fetched_at": record.fetched_at or datetime.utcnow(),
@@ -5442,16 +5433,6 @@ class Database:
                     stage=stage,
                     exc=exc,
                 )
-                # The scan contract is fail-fast: the caller owns recovery and
-                # must mark the scan incomplete rather than silently retrying
-                # or moving this batch to a background queue.
-                logger.error(
-                    "save_underdog_snapshots_bulk: required batch failed "
-                    "without retry (%d records): %s",
-                    len(records),
-                    exc,
-                )
-                raise
                 if (
                     _is_sqlite_cantopen_error(exc)
                     and session is not None
@@ -6867,6 +6848,8 @@ class Database:
             _provider = opportunity.get("provider")
             _external_id = _stored_opportunity_external_id(_external_id, _provider)
             _stat_type = str(_stat_type)
+            # These fields remain writable for older direct callers while the
+            # active scan paths pass them as empty/None during migration.
             _confidence = opportunity.get("confidence", 0)
             _bet_quality = opportunity.get("bet_quality_score")
             _intelligence = opportunity.get("downstream_intelligence")
@@ -6874,8 +6857,6 @@ class Database:
             if _intelligence is None:
                 _intelligence = build_downstream_payload(
                     evidence={},
-                    bet_quality=_bet_quality,
-                    bet_confidence=_confidence,
                     sample_size=0,
                 )
 
@@ -6919,7 +6900,7 @@ class Database:
                 "stat_type": _stat_type,
                 "line_value": opportunity.get("line_value"),
                 "recommendation": _recommendation,
-                "decision_tier": opportunity.get("decision_tier"),
+                "decision_tier": "",
                 "confidence": _confidence,
                 "game_time": opportunity.get("game_time"),
                 "game_id": str(opportunity.get("game_id") or ""),
@@ -7052,9 +7033,12 @@ class Database:
                     stat_type            = c.get("stat_type", ""),
                     line_value           = float(c.get("line_value") or 0.0),
                     provider             = c.get("provider", "Underdog"),
-                    score_total          = c.get("score_total"),
-                    score_tier           = c.get("score_tier"),
-                    confidence           = c.get("confidence"),
+                    # Candidate telemetry retains its row shape for schema
+                    # compatibility, but the active framework does not write
+                    # composite score, tier, or confidence metadata.
+                    score_total          = None,
+                    score_tier           = None,
+                    confidence           = None,
                     gate_decision        = c.get("gate_decision", "EVALUATED"),
                     rejection_reason     = c.get("rejection_reason"),
                     reason_codes         = c.get("reason_codes"),

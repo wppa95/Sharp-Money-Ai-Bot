@@ -2910,11 +2910,7 @@ async def _run_prizepicks_independent_cycle(
         if decision is None or decision.recommendation not in ("OVER", "UNDER"):
             continue
         directional += 1
-        setattr(prop, "score_tier", getattr(decision, "decision_tier", None))
         setattr(prop, "bet_recommendation", decision.recommendation)
-        setattr(prop, "bet_confidence", decision.confidence)
-        setattr(prop, "market_quality_score", getattr(market_quality, "score", None))
-        setattr(prop, "score_total", getattr(score, "total", None))
         _analyst_result = _analyst_payload(
             player_name=player,
             sport=sport,
@@ -2936,8 +2932,8 @@ async def _run_prizepicks_independent_cycle(
                 stat_type=stat,
                 line_value=line,
                 recommendation=decision.recommendation,
-                decision_tier=decision.decision_tier,
-                confidence=decision.confidence,
+                decision_tier=None,
+                confidence=None,
                 game_time=getattr(prop, "game_time", None),
                 game_id=str(
                     getattr(prop, "game_id", "")
@@ -2945,7 +2941,7 @@ async def _run_prizepicks_independent_cycle(
                     or ""
                 ),
                 provider="PrizePicks",
-                bet_quality_score=decision.confidence,
+                bet_quality_score=None,
                 reason_codes=_compute_reason_codes(score, decision),
                 analyst_result=_analyst_result,
                 downstream_intelligence=_build_downstream_intel(
@@ -2956,9 +2952,9 @@ async def _run_prizepicks_independent_cycle(
                         or getattr(decision, "bet_evidence", None),
                     },
                     line=line,
-                    bet_quality=getattr(score, "total", None),
-                    bet_confidence=decision.confidence,
-                    market_quality=getattr(market_quality, "score", None),
+                    bet_quality=None,
+                    bet_confidence=None,
+                    market_quality=None,
                 ),
             )
         except Exception as exc:  # noqa: BLE001
@@ -3197,7 +3193,6 @@ def _compute_reason_codes(
     avg  = getattr(score, "avg_vs_line",     0) or 0
     sta  = getattr(score, "stability",       0) or 0
     vel  = getattr(score, "move_velocity",   0) or 0
-    tier = getattr(score, "tier",       "PASS")
 
     # Sample-depth codes
     if n < 5:
@@ -3222,11 +3217,6 @@ def _compute_reason_codes(
         codes.append("STABLE_LINE")
     elif sta <= 3 and n >= 5:
         codes.append("VOLATILE_LINE")
-
-    # Tier code
-    _tier_code = {"S": "S_TIER", "A": "A_TIER", "B": "B_TIER"}.get(tier)
-    if _tier_code:
-        codes.append(_tier_code)
 
     # Direction is evidence metadata, not a monitoring classification.
     if decision is not None:
@@ -3256,7 +3246,6 @@ def _compute_reason_codes_from_scored_dict(p: dict) -> list[str]:
     avg  = p.get("avg", 0) or 0
     sta  = p.get("sta", 0) or 0
     vel  = p.get("vel", 0) or 0
-    tier = p.get("score_tier")
 
     if n < 5:
         codes.append("LOW_SAMPLE")
@@ -3279,9 +3268,6 @@ def _compute_reason_codes_from_scored_dict(p: dict) -> list[str]:
     elif sta <= 3 and n >= 5:
         codes.append("VOLATILE_LINE")
 
-    _tc = {"S": "S_TIER", "A": "A_TIER", "B": "B_TIER"}.get(tier)
-    if _tc:
-        codes.append(_tc)
     _evidence_source = str(p.get("evidence_source") or "").strip().lower()
     if _evidence_source == "settled_results":
         codes.append("EVIDENCE:SETTLED_RESULTS")
@@ -5111,12 +5097,12 @@ async def underdog_job(context) -> None:
                                 stat_type         = stat_type,
                                 line_value        = line_val,
                                 recommendation    = decision.recommendation,
-                                decision_tier     = decision.decision_tier,
-                                confidence        = decision.confidence,
+                                decision_tier     = None,
+                                confidence        = None,
                                 game_time         = snap.game_time,
                                 game_id           = _snapshot_event_id(snap),
                                 provider          = "Underdog",
-                                bet_quality_score = decision.confidence,
+                                bet_quality_score = None,
                                 reason_codes      = _compute_reason_codes(score, decision),
                                  analyst_result    = _new_analyst_result,
                                 watchlist_state   = None,
@@ -5128,9 +5114,9 @@ async def underdog_job(context) -> None:
                                         or getattr(decision, "bet_evidence", None),
                                     },
                                     line=line_val,
-                                    bet_quality=getattr(score, "total", None),
-                                    bet_confidence=decision.confidence,
-                                    market_quality=getattr(score, "market_quality", None),
+                                    bet_quality=None,
+                                    bet_confidence=None,
+                                    market_quality=None,
                                 ),
                         )
                         _opportunity_batch.append(_new_opportunity_kwargs)
@@ -5284,9 +5270,9 @@ async def underdog_job(context) -> None:
                         "player":          player,
                         "stat_type":       stat_type,
                         "sport":           snap.sport or "UNKNOWN",
-                        "total":           score.total,
+                        "total":           None,
                         "path":            "new",
-                        "score_tier":      score.tier,
+                        "score_tier":      None,
                         "direction":       (
                             decision.recommendation
                             if decision is not None
@@ -5427,12 +5413,12 @@ async def underdog_job(context) -> None:
                                     stat_type         = stat_type,
                                     line_value        = snap.line or 0.0,
                                     recommendation    = decision.recommendation,
-                                    decision_tier     = decision.decision_tier,
-                                    confidence        = decision.confidence,
+                                     decision_tier     = None,
+                                     confidence        = None,
                                     game_time         = snap.game_time,
                                     game_id           = _snapshot_event_id(snap),
                                     provider          = "Underdog",
-                                    bet_quality_score = decision.confidence,
+                                     bet_quality_score = None,
                                     reason_codes      = _compute_reason_codes(score, decision),
                                      analyst_result    = _lc_analyst_result,
                                     watchlist_state   = None,
@@ -5612,8 +5598,8 @@ async def underdog_job(context) -> None:
                             "stat_type":       stat_type,
                             "sport":           snap.sport or "UNKNOWN",
                             "team":            snap.team or "",
-                            "total":           score.total,
-                            "score_tier":      score.tier,
+                            "total":           None,
+                            "score_tier":      None,
                             "path":            "cs" if is_cold_start else "lc",
                             "direction":       (
                                 decision.recommendation
@@ -5862,7 +5848,8 @@ async def underdog_job(context) -> None:
             else:
                 _alert_outcome = "failed"
     
-            # Persist snapshot — includes scoring and delivery outcome for analysis
+            # Persist the observation, direction, evidence, and delivery
+            # outcome. Legacy score/tier fields remain only for old schemas.
             _source_external_id = getattr(snap, "external_id", None)
             if not isinstance(_source_external_id, str) or not _source_external_id:
                 _source_external_id = f"{player}_{stat_type}"
@@ -5879,17 +5866,9 @@ async def underdog_job(context) -> None:
             )
             record.removed = is_removed
             record.alert_sent = ud_result.sent
-            record.score_total = (
-                clamp_score(score.total, "ud_score.total", 0, 100)
-                if score is not None
-                else None
-            )
-            record.score_tier = score.tier if score is not None else None
-            record.score_stars = (
-                clamp_score(score.stars, "ud_score.stars", 0, 5)
-                if score is not None
-                else None
-            )
+            record.score_total = None
+            record.score_tier = None
+            record.score_stars = None
             record.alert_outcome = _alert_outcome
             record.validation_json = (
                 validation.to_json() if validation is not None else None
@@ -5897,11 +5876,7 @@ async def underdog_job(context) -> None:
             record.bet_recommendation = (
                 decision.recommendation if decision is not None else None
             )
-            record.bet_confidence = (
-                clamp_score(decision.confidence, "ud_bet_confidence", 0, 100)
-                if decision is not None
-                else None
-            )
+            record.bet_confidence = None
             record.bet_reason = decision.reason if decision is not None else None
             record.bet_evidence_json = (
                 decision.to_json() if decision is not None else None
@@ -5909,12 +5884,8 @@ async def underdog_job(context) -> None:
             record.fetched_at = now
             _next_ud_scan_state[(player, stat_type)] = SimpleNamespace(
                 line_value=float(snap.line or 0.0),
-                score_tier=score.tier if score is not None else getattr(prev_record, "score_tier", None),
-                score_total=(
-                    clamp_score(score.total, "ud_score.total", 0, 100)
-                    if score is not None
-                    else getattr(prev_record, "score_total", None)
-                ),
+                score_tier=None,
+                score_total=None,
                 alert_sent=bool(ud_result.sent),
                 fetched_at=now,
             )
@@ -6126,12 +6097,12 @@ async def underdog_job(context) -> None:
                         stat_type         = _st,
                         line_value        = _line_val,
                         recommendation    = _sdec.recommendation,
-                        decision_tier     = _sdec.decision_tier,
-                        confidence        = _sdec.confidence,
+                         decision_tier     = None,
+                         confidence        = None,
                         game_time         = _ssnap.game_time,
                         game_id           = _snapshot_event_id(_ssnap),
                         provider          = "Underdog",
-                        bet_quality_score = _sdec.confidence,
+                         bet_quality_score = None,
                         reason_codes      = _compute_reason_codes(_sscore, _sdec),
                          analyst_result    = _standing_analyst_result,
                         watchlist_state   = None,
@@ -6143,9 +6114,9 @@ async def underdog_job(context) -> None:
                                 or getattr(_sdec, "bet_evidence", None),
                             },
                             line=_line_val,
-                            bet_quality=getattr(_sscore, "total", None),
-                            bet_confidence=_sdec.confidence,
-                            market_quality=getattr(_sscore, "market_quality", None),
+                             bet_quality=None,
+                             bet_confidence=None,
+                             market_quality=None,
                         ),
                     )
                     _opportunity_batch.append(_standing_opportunity_kwargs)
@@ -6855,9 +6826,9 @@ async def underdog_job(context) -> None:
                         "stat_type":            _cp.get("stat_type", ""),
                         "line_value":           float(_cp.get("line") or 0.0),
                         "provider":             "Underdog",
-                        "score_total":          _cp.get("total"),
-                        "score_tier":           _cp.get("score_tier"),
-                        "confidence":           _cp.get("decision_conf"),
+                        "score_total":          None,
+                        "score_tier":           None,
+                        "confidence":           None,
                         # Legacy column retained for schema compatibility.
                         # Current monitoring uses one neutral evaluated state;
                         # delivery is measured separately in ScanCycleLog.
@@ -7518,12 +7489,12 @@ async def _stable_refresh_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                         stat_type         = _sr_stat,
                         line_value        = _sr_line,
                         recommendation    = _sr_dec.recommendation,
-                        decision_tier     = _sr_dec.decision_tier,
-                        confidence        = _sr_dec.confidence,
+                         decision_tier     = None,
+                         confidence        = None,
                         game_time         = _sr_snap.game_time,
                         game_id           = getattr(_sr_snap, "game_id", "") or "",
                         provider          = "Underdog",
-                        bet_quality_score = _sr_dec.confidence,
+                         bet_quality_score = None,
                         reason_codes      = _compute_reason_codes(_sr_score, _sr_dec),
                          analyst_result    = _sr_analyst_result,
                     )
@@ -8359,9 +8330,9 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                     "stat_type": _fpr_stat,
                     "line_value": _fpr_line,
                     "provider": _fpr_provider,
-                    "score_total": getattr(_fpr_score, "total", None),
-                    "score_tier": getattr(_fpr_score, "tier", None),
-                    "confidence": getattr(_fpr_dec, "confidence", None),
+                    "score_total": None,
+                    "score_tier": None,
+                    "confidence": None,
                     "gate_decision": "EVALUATED",
                     "rejection_reason": None,
                     "reason_codes": json.dumps(
@@ -8383,12 +8354,12 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                         "stat_type": _fpr_stat,
                         "line_value": _fpr_line,
                         "recommendation": getattr(_fpr_dec, "recommendation", None),
-                        "decision_tier": getattr(_fpr_dec, "decision_tier", None),
-                        "confidence": getattr(_fpr_dec, "confidence", 0),
+                        "decision_tier": None,
+                        "confidence": None,
                         "game_time": getattr(_fpr_snap, "game_time", None),
                         "game_id": _snapshot_event_id(_fpr_snap),
                         "provider": _fpr_provider,
-                        "bet_quality_score": float(getattr(_fpr_score, "total", 0) or 0),
+                        "bet_quality_score": None,
                         "reason_codes": _compute_reason_codes(_fpr_score, _fpr_dec),
                         "analyst_result": _fpr_analyst_result,
                         "watchlist_state": None,

@@ -606,9 +606,14 @@ def compute_market_quality(
     stat_type: str,
     line_value: float,
     score: "UDPropScore",
-) -> "MarketQuality":
+) -> Optional["MarketQuality"]:
     """
-    Evaluate market quality / softness for an Underdog pick'em prop.
+    Deprecated compatibility shim.
+
+    Market quality was removed from the active player-prop framework. Callers
+    may still import this function while older scan paths are being retired,
+    but it must not produce a quality label or score that can influence
+    qualification, delivery, ranking, or reporting.
 
     Four factors (max 100 total):
       Prop type       0–30   HIGH_FLOOR=30, STANDARD=15, HIGH_VARIANCE=0
@@ -625,6 +630,8 @@ def compute_market_quality(
     score:      Already-computed UDPropScore — components are reused
                 so that no duplicate work is performed.
     """
+    return None
+
     difficulty   = score.difficulty
     activity_sc  = score.historical_activity   # 0–25
     stability_sc = score.stability             # 0–15

@@ -1716,15 +1716,14 @@ def _has_current_prop_data(
 ) -> bool:
     """Keep user-facing pick/slip views on current, actionable rows only.
 
-    This is a presentation gate. It does not affect scanning, scoring, alert
+    This is a presentation gate. It does not affect scanning, alert
     qualification, cadence, or persisted tracking.
 
-    A directional label by itself is not enough for a current pick.  Reports
-    must have provider-owned identity and a fresh upcoming event.  When
-    ``require_scoring`` is true, the row must also have persisted scoring
-    output.  The command layer uses the shape-only mode briefly while it
-    refreshes the current recommendation/confidence from the provider-owned
-    snapshot table.
+    A directional label by itself is not enough for a current pick. Reports
+    must have provider-owned identity and a fresh upcoming event. The
+    ``require_scoring`` argument remains only for caller compatibility; tiers,
+    composite/bet-quality scores, market-quality scores, and PASS are not
+    current eligibility concepts.
     """
     now = now or datetime.utcnow()
     provider = str(getattr(prop, "provider", "") or "").strip().lower()
@@ -1765,53 +1764,11 @@ def _has_current_prop_data(
         ).upper()
         if recommendation not in {"OVER", "UNDER"}:
             return False
-    tier = str(getattr(prop, "score_tier", "") or "").upper()
-    if tier not in {"S", "A", "B"}:
-        return False
-    if not require_scoring:
-        return True
-    score = getattr(prop, "score_total", None)
-    quality = getattr(prop, "market_quality_score", None)
-    confidence = getattr(prop, "bet_confidence", None)
-
-    def _positive_finite(value: Any) -> bool:
-        try:
-            numeric = float(value)
-            return numeric > 0 and numeric == numeric and numeric not in (
-                float("inf"), float("-inf")
-            )
-        except (TypeError, ValueError):
-            return False
-
-    # The composite score and confidence prove that the row reached the
-    # provider scoring pipeline.  Older/current Underdog rows can legitimately
-    # have no dedicated market-quality column because that value is maintained
-    # as scan telemetry rather than provider metadata.  If it is present, it
-    # must still be positive; otherwise the composite remains the required
-    # scoring signal.
-    return (
-        _positive_finite(score)
-        and _positive_finite(confidence)
-        and (quality is None or _positive_finite(quality))
-    )
+    return True
 
 
 def _display_prop_from_opportunity(opportunity: Any) -> Any:
     """Adapt the canonical delivered opportunity to the pick/slip row shape."""
-    confidence = getattr(opportunity, "bet_quality_score", None)
-    if confidence is None:
-        confidence = getattr(opportunity, "confidence", None)
-    try:
-        confidence = float(confidence) if confidence is not None else None
-    except (TypeError, ValueError):
-        confidence = None
-    tier = str(getattr(opportunity, "decision_tier", "") or "").upper()
-    if tier not in {"S", "A", "B"}:
-        tier = (
-            "S" if (confidence or 0) >= 85
-            else "A" if (confidence or 0) >= 70
-            else "B"
-        )
     return SimpleNamespace(
         provider="Underdog",
         product="player_props",
@@ -1833,15 +1790,11 @@ def _display_prop_from_opportunity(opportunity: Any) -> Any:
         prev_line=None,
         opening_line=None,
         removed=False,
-        score_tier=tier,
+        score_tier=None,
         bet_recommendation=getattr(opportunity, "recommendation", None),
-        bet_confidence=confidence,
-        score_total=confidence or 1,
-        market_quality_score=(
-            getattr(opportunity, "bet_quality_score", None)
-            or confidence
-            or 1
-        ),
+        bet_confidence=None,
+        score_total=None,
+        market_quality_score=None,
         alert_sent=True,
         canonical_alert=True,
         result=getattr(opportunity, "result", "PENDING"),
@@ -1942,48 +1895,6 @@ def _select_directional_provider_rows(
     )
 
 
-# ── /picks tier constants ─────────────────────────────────────────────────────
-# New PPAnalysisScore vocabulary (S/A/B/PASS) plus legacy AlertTier values for
-# any records written before the scoring engine was introduced.
-_TIER_ORDER: dict[str, int] = {
-    "S": 0, "A": 1, "B": 2, "PASS": 3,
-    "Critical": 0, "High": 1, "Medium": 2, "Low": 3,
-}
-_TIER_EMOJI: dict[str, str] = {
-    "S": "🟩",
-    "A": "⬜",
-    "B": "🟨",
-    "C": "🟧",
-    "D": "🟥",
-    "PASS": "🟥",
-
-    # legacy compatibility
-    "Critical": "🟥",
-    "High": "🟧",
-    "Medium": "🟨",
-    "Low": "🟥",
-}
-
-# Thresholds mirror PPAnalysisScore._STAR_BANDS — display-only, no scoring logic.
-_STAR_BANDS: tuple[tuple[int, int], ...] = (
-    (86, 5),  # S tier
-    (70, 4),  # A tier
-    (60, 3),  # B tier
-    (50, 2),  # C tier
-    (0, 1),   # D tier
-)
-
-
-def _stars_from_conf(conf: Optional[float]) -> str:
-    """Return a 5-char star bar (e.g. '★★★★☆') from a 0–100 confidence score."""
-    if conf is None:
-        return ""
-    for threshold, n in _STAR_BANDS:
-        if conf >= threshold:
-            return "★" * n + "☆" * (5 - n)
-    return "★☆☆☆☆"
-
-
 class PropPickAdapter:
     """
     Wraps (PropLineHistory + PlayerPropMarketComparison) into the interface
@@ -2024,35 +1935,11 @@ class PropPickAdapter:
         self.comp        = comp
         self.canonical_alert = _is_canonical_alert_prop(plh)
 
-        # Prefer a verified comparison confidence, then persisted engine
-        # output. Never manufacture the old ``40`` fallback for report views.
-        conf = (
-            getattr(comp, "proxy_match_confidence", None)
-            if comp is not None
-            else None
-        )
-        if conf is None:
-            conf = getattr(plh, "bet_confidence", None)
-        if conf is None:
-            conf = getattr(plh, "score_total", None)
-        try:
-            self.confidence = float(conf) if conf is not None else None
-        except (TypeError, ValueError):
-            self.confidence = None
-        if self.confidence is not None and self.confidence != self.confidence:
-            self.confidence = None
-
-        conf_for_tier = self.confidence if self.confidence is not None else -1
-        if conf_for_tier >= 86:
-            self.tier = "S"
-        elif conf_for_tier >= 70:
-            self.tier = "A"
-        elif conf_for_tier >= 60:
-            self.tier = "B"
-        elif conf_for_tier >= 50:
-            self.tier = "C"
-        else:
-            self.tier = "D"
+        # Tiers and score-derived confidence are removed from current
+        # pick/slip candidates. Keep neutral compatibility attributes for
+        # older optimizer/report helpers without using them for eligibility.
+        self.confidence = None
+        self.tier = None
 
         # Best line from comparison or fallback to UD line
         best_line = (comp.best_line if comp else None) or plh.line_value
@@ -2178,7 +2065,6 @@ async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         return
 
     from engine.timing import format_game_time_label as _fmt_gt
-    from engine.downstream_intelligence import compute_sharp_confidence as _sharp_conf
     from engine.player_prop_market import (
         build_player_prop_market_comparison,
         PROVIDER_EMOJI as _PROV_EMOJI,
@@ -2225,8 +2111,8 @@ async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     if sport_filter:
         ud_props = [p for p in ud_props if p.sport.upper() == sport_filter]
 
-    # Delivered opportunities are the canonical actionable population. Merge
-    # them ahead of the live observation pool so a later removed/PASS snapshot
+        # Delivered opportunities are the canonical actionable population. Merge
+        # them ahead of the live observation pool so a later removed snapshot
     # cannot make a sent alert disappear from /picks.
     try:
         _alerted_opps = await _bounded(
@@ -2287,20 +2173,17 @@ async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         logger.warning("cmd_picks: recommendation lookup failed: %s", _rec_exc)
         _rec_query_seconds = time.monotonic() - _stage_started
 
-    # The provider-owned snapshot is the freshest source for direction and
-    # confidence.  Refresh the current-state row before applying the scoring
-    # presentation gate; otherwise a valid scored snapshot can be hidden by a
-    # partially populated PropLineHistory metadata row.
+    # The provider-owned snapshot is the freshest source for direction.
+    # Refresh the current-state row before applying the presentation gate;
+    # legacy confidence metadata is intentionally ignored.
     for _prop in ud_props:
         if _is_canonical_alert_prop(_prop):
             continue
-        _live_rec, _live_conf = _rec_map.get(
+        _live_rec, _ = _rec_map.get(
             _ud_recommendation_identity(_prop), (None, None)
         )
         if str(_live_rec or "").upper() in {"OVER", "UNDER"}:
             setattr(_prop, "bet_recommendation", str(_live_rec).upper())
-        if _live_conf is not None:
-            setattr(_prop, "bet_confidence", _live_conf)
     ud_props = [
         p for p in ud_props
         if _is_canonical_alert_prop(p)
@@ -2366,27 +2249,18 @@ async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             )
         picks.append((plh, comp))
 
-    # Sort within each sport independently — never rank different sports against each other.
-    # Each sport forms its own candidate pool: confidence DESC → providers DESC →
-    # movement DESC → disagreement DESC → game_time ASC (None last).
+    # Sort within each sport independently without confidence, tier, quality,
+    # or market-movement ranking.
     import datetime as _dt_mod
 
     def _pick_sort(item: tuple) -> tuple:
         plh, comp = item
-        conf       = comp.proxy_match_confidence if comp else 0
-        n_prov     = sum(1 for pl in comp.lines.values() if pl.available) if comp else 0
-        movement   = abs(comp.movement or 0.0) if comp else 0.0
-        disagreement = (
-            (comp.best_under_line or 0.0) - (comp.best_over_line or 0.0)
-            if (comp and comp.best_under_line is not None and comp.best_over_line is not None)
-            else 0.0
-        )
         gt = plh.game_time
         if gt is None:
             gt_sort = _dt_mod.datetime.max
         else:
             gt_sort = gt.replace(tzinfo=None) if gt.tzinfo else gt
-        return (-conf, -n_prov, -movement, -disagreement, gt_sort)
+        return (gt_sort, str(plh.player_name or "").lower(), str(plh.stat_type or "").lower())
 
     # Per-sport sort: group → sort each sport independently → flatten in sport order.
     # This ensures MLB's large volume cannot push smaller sports off the leaderboard.
@@ -2470,12 +2344,6 @@ async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         _intel_map = {}
 
     # ── 5. Format ─────────────────────────────────────────────────────────────
-    def _tier_from_conf(c: int) -> str:
-        if c >= 85: return "S"
-        if c >= 70: return "A"
-        if c >= 55: return "B"
-        return "—"
-
     _PICK_LABEL: dict[str, str] = {
         "OVER":  "OVER (More) ⬆",
         "UNDER": "UNDER (Less) ⬇",
@@ -2508,8 +2376,6 @@ async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         ):
             _eff_rec = _live_r
         # Skip props without a direction — user only wants actionable picks.
-        # The provider-owned current-data gate already rejected stale,
-        # unscored, invalid, and zero-confidence rows before this point.
         if _eff_rec not in ("OVER", "UNDER"):
             logger.debug(
                 "cmd_picks: skipping %s/%s — no actionable direction (rec=%s)",
@@ -2525,30 +2391,6 @@ async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         _sport_groups[_key].append((_flat_idx, plh, comp))
 
     def _render_pick_entry(rank: int, flat_idx: int, plh, comp) -> str:
-        conf      = comp.proxy_match_confidence if comp else 0
-
-        # For sports with no cross-provider comparison data (CS, LOL, ESPORTS, VAL,
-        # TENNIS, etc.), proxy_match_confidence is 0 because no PrizePicks/DK/FD
-        # lines exist.  In those cases, fall back to the engine's own scoring:
-        #   - tier  → plh.score_tier  (set by the Underdog scoring engine)
-        #   - conf  → derived from score_tier band midpoint
-        # PropLineHistory stores score_tier but not score_confidence; bet_confidence
-        # is the decision confidence and may be zero when direction is unavailable.
-        # We derive a representative display confidence from the tier band midpoint so
-        # S-tier props show 5 stars and A-tier props show 4 stars.
-        _db_tier = getattr(plh, "score_tier", None) or ""
-        _db_conf = getattr(plh, "score_confidence", None)
-        # Derive a display confidence from the stored score band when the
-        # numeric confidence is absent.
-        if _db_conf is None and _db_tier in ("S", "A", "B"):
-            _db_conf = {"S": 87, "A": 72, "B": 57}.get(_db_tier)
-        if conf < 30 and _db_tier in ("S", "A", "B") and _db_conf is not None:
-            # No cross-provider data — use engine scores for display.
-            tier  = _db_tier
-            stars = _stars_from_conf(float(_db_conf))
-        else:
-            tier  = _tier_from_conf(conf)
-            stars = _stars_from_conf(float(conf))
 
         # Keep the source line canonical for this row. A PrizePicks-only row
         # must never be rendered as though its line came from Underdog.
@@ -2627,8 +2469,7 @@ async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             f"{gt_str}{plh.sport}",
             f"Event: <code>{_html.escape(source_id) if source_id else 'unavailable'}</code>",
             "",
-            f"🎯 Pick: <b>{pick_label}</b>",
-            f"Confidence: {conf}/100  {stars}{move_str}",
+            f"🎯 Pick: <b>{pick_label}</b>{move_str}",
             f"🧾 Evidence basis: <b>{_html.escape(_evidence_label)}</b>",
         ]
 
@@ -2655,14 +2496,6 @@ async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         def _shown(value: object, suffix: str = "") -> str:
             return "unavailable" if value is None else f"{value}{suffix}"
 
-        _bq = getattr(plh, "score_total", None)
-        _mq = getattr(plh, "market_quality_score", None)
-        _bq_label = (
-            "ELITE" if float(_bq) >= 85 else "STRONG" if float(_bq) >= 70 else "BELOW STRONG"
-        ) if _bq is not None else "unavailable"
-        _mq_label = (
-            "ELITE" if float(_mq) >= 85 else "STRONG" if float(_mq) >= 70 else "BELOW STRONG"
-        ) if _mq is not None else "unavailable"
         _projection = _value.get("projection") if isinstance(_value, dict) else None
         _edge = _value.get("edge") if isinstance(_value, dict) else None
         _movement_quality = "unavailable"
@@ -2677,7 +2510,6 @@ async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         entry_lines.extend([
             "",
             "🧠 <b>Downstream Intelligence</b>",
-            f"  BQ: {_shown(_bq, '/100')} · {_bq_label}",
             f"  Sharp Confidence: {_shown(_sharp.get('score') if isinstance(_sharp, dict) else None, '/100')}",
             f"  Model Projection: {_shown(_projection)}",
             f"  Current Line: {_shown(source_v)}",
@@ -2686,7 +2518,6 @@ async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             f"  Movement Quality: {_movement_quality}",
             f"  Evidence Completeness: {_shown(_complete.get('score') if isinstance(_complete, dict) else None, '/100')}",
             f"  Historical Evidence: {_shown(_json.dumps(_historical, separators=(',', ':')) if _historical else None)}",
-            f"  Market Quality: {_shown(_mq, '/100')} · {_mq_label}",
         ])
 
         # ── Evidence block ────────────────────────────────────────────────────
@@ -2823,12 +2654,8 @@ def _render_slip_section(
     (new player prop market framework).
     """
     from engine.timing import format_game_time_label as _fmt_gt
-    from engine.downstream_intelligence import compute_sharp_confidence as _sharp_conf
-
     records    = slip_result.legs
     actual     = len(records)
-    total_conf = 0.0
-    conf_count = 0
     total_move = 0.0   # replaces avg_edge for PropPickAdapter legs
     move_count = 0
     has_adapters = any(hasattr(r, "comp") for r in records)
@@ -2839,12 +2666,6 @@ def _render_slip_section(
     section: list[str] = [heading, ""]
 
     for i, r in enumerate(records, 1):
-        stars_str  = _stars_from_conf(r.confidence)
-        conf_label = f"{r.confidence:.0f}/100" if r.confidence is not None else "unavailable"
-        if r.confidence is not None:
-            total_conf += r.confidence
-            conf_count += 1
-
         best_line = getattr(r, "pp_line_value", None)
         line_str  = f"<code>{best_line:g}</code>" if best_line is not None else "—"
 
@@ -2875,19 +2696,6 @@ def _render_slip_section(
                     and opening != best_line):
                 delta = best_line - opening
                 move_note = f"  {'▲' if delta > 0 else '▼'}{abs(delta):.1f}"
-
-        _move_conf = None
-        if has_adapters:
-            _move_conf = (
-                min(100.0, abs(float(mv)) * 25.0)
-                if mv is not None
-                else None
-            )
-        _sharp = _sharp_conf(
-            bet_confidence=r.confidence,
-            movement_confidence=_move_conf,
-            sample_size=0,
-        )
 
         gt = getattr(r, "game_time", None)
         gt_label = f"  ⏰ {_fmt_gt(gt)}" if gt is not None and _fmt_gt(gt) else ""
@@ -2920,25 +2728,19 @@ def _render_slip_section(
                 provider_row = "\n    " + "  ".join(row_parts)
 
         section.append(
-            f"  <b>Leg {i}</b>  {stars_str}\n"
+            f"  <b>Leg {i}</b>\n"
             f"    <b>{r.player_name}</b> · {r.stat_type}\n"
-            f"    {r.best_side} {line_str}  ·  conf {conf_label}"
-            f"  ·  sharp {_sharp.score}/100"
+            f"    {r.best_side} {line_str}"
             f"{move_note}{gt_label}"
             f"{provider_row}"
             f"{_dec_leg}"
         )
-
-    avg_conf = total_conf / conf_count if conf_count else None
 
     if has_adapters:
         avg_mv = total_move / move_count if move_count else None
         summary = (
             f"\n  Avg move <code>{avg_mv:.1f}</code>" if avg_mv is not None
             else "\n  Avg move <code>unavailable</code>"
-        ) + (
-            f"  ·  Avg conf <code>{avg_conf:.0f}/100</code>" if avg_conf is not None
-            else "  ·  Avg conf <code>unavailable</code>"
         ) + (
             f"  ·  {actual} legs"
         )
@@ -2952,9 +2754,6 @@ def _render_slip_section(
             f"\n  Avg edge <code>+{avg_edge:.1f}%</code>"
             if avg_edge is not None
             else "\n  Avg edge <code>unavailable</code>"
-        ) + (
-            f"  ·  Avg conf <code>{avg_conf:.0f}/100</code>" if avg_conf is not None
-            else "  ·  Avg conf <code>unavailable</code>"
         ) + (
             f"{actual} legs"
         )
@@ -3041,19 +2840,18 @@ async def _cmd_slip_journal(
             sport       = opp.sport or "",
             line_value  = opp.line_value,
             direction   = opp.recommendation,
-            tier        = opp.decision_tier,
-            confidence  = opp.confidence,
+            tier        = None,
+            confidence  = None,
             game_time   = opp.game_time,
             provider    = getattr(opp, "provider", None) or "Underdog",
         )
         legs = await _db.get_slip_journal_legs(open_slip.slip_code)
-        tier_icon = _TIER_EMOJI.get(opp.decision_tier or "", "⚪")
         await update.message.reply_text(
             f"✅ <b>Leg added to {open_slip.slip_code}</b>\n\n"
             f"🎯 <b>PLAYER PROP PICK</b>\n"
-            f"{tier_icon} <b>{opp.player_name}</b> · {opp.stat_type}\n"
+            f"<b>{opp.player_name}</b> · {opp.stat_type}\n"
             f"{opp.recommendation} <code>{opp.line_value:g}</code>  ·  "
-            f"conf <code>{opp.confidence}/100</code>  ·  {opp.sport}\n\n"
+            f"{opp.sport}\n\n"
             f"<i>{open_slip.slip_code} now has {len(legs)} leg{'s' if len(legs) != 1 else ''}.</i>\n"
             f"Grade: <code>/slip grade</code>  ·  View: <code>/slip journal</code>",
             parse_mode=ParseMode.HTML,
@@ -4763,15 +4561,15 @@ async def cmd_analyst(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         candidate_rows: list[tuple[object, object]] = []
         for snap in alerted[:3]:
             dec_ns = __import__("types", fromlist=["SimpleNamespace"]).SimpleNamespace(
-                confidence    = getattr(snap, "bet_confidence", 70) or 70,
-                decision_tier = getattr(snap, "score_tier", "B") or "B",
-                recommendation= getattr(snap, "bet_recommendation", "PASS"),
+                confidence    = None,
+                decision_tier = None,
+                recommendation= getattr(snap, "bet_recommendation", None),
                 reason        = getattr(snap, "bet_reason", "") or "",
                 hit_rates     = {},
                 window_agreement = 0,
             )
             score_ns = __import__("types", fromlist=["SimpleNamespace"]).SimpleNamespace(
-                total     = getattr(snap, "score_total", 60) or 60,
+                total     = None,
                 n_history = 10,
             )
             try:
