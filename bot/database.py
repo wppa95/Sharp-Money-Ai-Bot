@@ -1813,7 +1813,11 @@ class Database:
         # Read one bounded newest-first slice, then balance sports in memory.
         # Deduplicate only after reading the latest row for each provider source
         # so a removal marker cannot resurrect an older directional row.
-        raw_limit = max(limit * 20, 400)
+        # The newest slice can be dominated by one large sport feed (often a
+        # football slate whose rows are intentionally non-deliverable).  Read
+        # a larger but still bounded window so later direction refresh and
+        # sport balancing can see current CS/TENNIS/other rows as well.
+        raw_limit = max(limit * 100, 1000)
         async with self.session() as s:
             filters = [
                 PropLineHistory.provider == "Underdog",
@@ -4582,6 +4586,7 @@ class Database:
                     row.prev_line    = None
                     row.removed      = is_removed
                     row.score_tier   = snap_tier
+                    row.score_total  = getattr(latest_snap, "score_total", None)
                     row.bet_recommendation = getattr(latest_snap, "bet_recommendation", None)
                     row.bet_confidence     = getattr(latest_snap, "bet_confidence", None)
                 except AttributeError:
@@ -4617,6 +4622,9 @@ class Database:
                 # Always propagate score_tier when the snapshot has a value
                 if snap_tier is not None:
                     uvals["score_tier"] = snap_tier
+                _snap_score_total = getattr(latest_snap, "score_total", None)
+                if _snap_score_total is not None:
+                    uvals["score_total"] = _snap_score_total
                 # Always propagate bet direction from snapshot
                 _snap_rec = getattr(latest_snap, "bet_recommendation", None)
                 _snap_bc  = getattr(latest_snap, "bet_confidence", None)

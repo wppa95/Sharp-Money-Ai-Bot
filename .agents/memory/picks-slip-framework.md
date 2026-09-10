@@ -20,3 +20,10 @@ description: How /picks and /slip work after the PPEdgeRecord migration — data
 **Why:** The old PPEdgeRecord pipeline required a PrizePicks line to compute an edge%. The new framework works from Underdog as primary with PP/DK/FD as optional enrichment.
 
 **How to apply:** Any new command that needs ranked props should call `get_top_ud_props_for_picks` + `build_player_prop_market_comparison(min_confidence=0)`. The PPEdgeRecord pipeline (get_top_pp_edges) is retained for backward compat with CLV/performance commands but should not be the primary data source for user-facing picks.
+
+## Current-row metadata handoff
+The shared `PropLineHistory` row can lag the provider-owned Underdog snapshot for direction and confidence, and some current rows have no dedicated market-quality value. `/picks` and `/slip` must refresh recommendation/confidence from the snapshot map before applying presentation scoring gates; a positive composite score plus confidence is sufficient when market quality is absent.
+
+**Why:** Current CS and other non-MLB rows were being discarded before their fresh snapshot direction was applied, making both commands report no picks even though the feed had scored directional rows.
+
+**How to apply:** Keep the initial current-row filter shape-only, refresh provider-owned metadata, then require a valid S/A/B tier, positive composite score, and positive confidence. Never use this presentation fallback to bypass delivery evidence or football suppression.

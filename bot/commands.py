@@ -1712,6 +1712,7 @@ def _has_current_prop_data(
     now: Optional[datetime] = None,
     *,
     require_direction: bool = True,
+    require_scoring: bool = True,
 ) -> bool:
     """Keep user-facing pick/slip views on current, actionable rows only.
 
@@ -1719,10 +1720,11 @@ def _has_current_prop_data(
     qualification, cadence, or persisted tracking.
 
     A directional label by itself is not enough for a current pick.  Reports
-    must have provider-owned identity, a fresh upcoming event, and persisted
-    scoring output with a non-zero confidence/quality signal.  This prevents
-    stale, partially-written, and confidence-zero rows from being selected by
-    /picks or /slip.
+    must have provider-owned identity and a fresh upcoming event.  When
+    ``require_scoring`` is true, the row must also have persisted scoring
+    output.  The command layer uses the shape-only mode briefly while it
+    refreshes the current recommendation/confidence from the provider-owned
+    snapshot table.
     """
     now = now or datetime.utcnow()
     provider = str(getattr(prop, "provider", "") or "").strip().lower()
@@ -1766,6 +1768,8 @@ def _has_current_prop_data(
     tier = str(getattr(prop, "score_tier", "") or "").upper()
     if tier not in {"S", "A", "B"}:
         return False
+    if not require_scoring:
+        return True
     score = getattr(prop, "score_total", None)
     quality = getattr(prop, "market_quality_score", None)
     confidence = getattr(prop, "bet_confidence", None)
@@ -1779,14 +1783,16 @@ def _has_current_prop_data(
         except (TypeError, ValueError):
             return False
 
-    # Both the composite and market-quality fields are evidence that the row
-    # reached the provider scoring pipeline.  Confidence must also be present
-    # and positive; a direction copied onto a zero-confidence row is not an
-    # actionable pick.
+    # The composite score and confidence prove that the row reached the
+    # provider scoring pipeline.  Older/current Underdog rows can legitimately
+    # have no dedicated market-quality column because that value is maintained
+    # as scan telemetry rather than provider metadata.  If it is present, it
+    # must still be positive; otherwise the composite remains the required
+    # scoring signal.
     return (
         _positive_finite(score)
-        and _positive_finite(quality)
         and _positive_finite(confidence)
+        and (quality is None or _positive_finite(quality))
     )
 
 
@@ -2205,7 +2211,9 @@ async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         # Underdog's same-cycle recommendation can be fresher than the
         # synced PropLineHistory column; direction is resolved immediately
         # after this provider fetch.
-        and _has_current_prop_data(p, now, require_direction=False)
+        and _has_current_prop_data(
+            p, now, require_direction=False, require_scoring=False
+        )
         and _is_active_display_sport(p.sport)
         and not is_telegram_suppressed_sport(p.sport)
         and _is_upcoming_game(
@@ -2278,6 +2286,26 @@ async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     except Exception as _rec_exc:
         logger.warning("cmd_picks: recommendation lookup failed: %s", _rec_exc)
         _rec_query_seconds = time.monotonic() - _stage_started
+
+    # The provider-owned snapshot is the freshest source for direction and
+    # confidence.  Refresh the current-state row before applying the scoring
+    # presentation gate; otherwise a valid scored snapshot can be hidden by a
+    # partially populated PropLineHistory metadata row.
+    for _prop in ud_props:
+        if _is_canonical_alert_prop(_prop):
+            continue
+        _live_rec, _live_conf = _rec_map.get(
+            _ud_recommendation_identity(_prop), (None, None)
+        )
+        if str(_live_rec or "").upper() in {"OVER", "UNDER"}:
+            setattr(_prop, "bet_recommendation", str(_live_rec).upper())
+        if _live_conf is not None:
+            setattr(_prop, "bet_confidence", _live_conf)
+    ud_props = [
+        p for p in ud_props
+        if _is_canonical_alert_prop(p)
+        or _has_current_prop_data(p, now, require_direction=False)
+    ]
 
     _provenance_map: dict = {}
     _provenance_reader = getattr(_db, "get_ud_evidence_provenance_bulk", None)
@@ -3218,7 +3246,9 @@ async def cmd_slip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         p for p in ud_props
         if not _is_season_future(p.stat_type)
         # Direction may be supplied by the fresh snapshot lookup below.
-        and _has_current_prop_data(p, now, require_direction=False)
+        and _has_current_prop_data(
+            p, now, require_direction=False, require_scoring=False
+        )
         and _is_active_display_sport(p.sport)
         and not is_telegram_suppressed_sport(p.sport)
         and _is_upcoming_game(
@@ -3286,15 +3316,38 @@ async def cmd_slip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         )
         for _cand, (_provider, _plh) in zip(_candidates, provider_props):
             _k = _ud_recommendation_identity(_plh)
-            _lr, _ = _slip_rec_map.get(_k, (None, None))
+            _lr, _lc = _slip_rec_map.get(_k, (None, None))
             if (
                 _cand.sportsbook == "Underdog"
                 and not _cand.canonical_alert
                 and _lr in ("OVER", "UNDER")
             ):
                 _cand.best_side = _lr
+                setattr(_plh, "bet_recommendation", _lr)
+            if _lc is not None:
+                setattr(_plh, "bet_confidence", _lc)
     except Exception as _slip_rec_exc:
         logger.debug("cmd_slip: rec_map lookup failed: %s", _slip_rec_exc)
+
+    # Apply the scoring gate after the provider-owned recommendation refresh.
+    # This keeps /slip aligned with /picks while still excluding unscored,
+    # stale, or zero-confidence rows.
+    _scored_provider_props = []
+    for _provider, _plh in provider_props:
+        if _is_canonical_alert_prop(_plh) or _has_current_prop_data(
+            _plh, now, require_direction=False
+        ):
+            _scored_provider_props.append((_provider, _plh))
+    provider_props = _scored_provider_props
+    if not provider_props:
+        await update.message.reply_text(
+            "🎯 <b>Sharp Money Prop Slip</b>\n\n"
+            "No current scored player props available right now.\n\n"
+            "<i>Season-long futures are excluded from this view.\n"
+            "Run /picks to check current opportunities.</i>",
+            parse_mode=ParseMode.HTML,
+        )
+        return
 
         # Slip eligibility is directional only.  This is a research tool, not
         # a second Telegram delivery gate.
