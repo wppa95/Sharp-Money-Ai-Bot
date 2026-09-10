@@ -119,11 +119,15 @@ class Config:
         }
 
     # ── PropLine evidence feed ────────────────────────────────────────────────
-    # PropLine is an internal read-only evidence/feed source for the Underdog
-    # player-prop pipeline. It is not an independent Telegram provider.
+    # PropLine supplies source-specific player-prop observations for all
+    # configured pick'em/sportsbook feeds. Underdog's native connector remains
+    # the primary live source; PropLine's Underdog rows are supplemental.
     # The official provider catalog controls scope when available; an empty
     # value must not silently narrow the feed to a guessed subset.
     PRIZEPICKS_LEAGUES_RAW: str = os.environ.get("PRIZEPICKS_LEAGUES", "")
+    PROPLINE_BOOKMAKERS_RAW: str = os.environ.get(
+        "PROPLINE_BOOKMAKERS", "prizepicks,draftkings,fanduel,underdog"
+    )
     # Retained as a compatibility name for existing environment configuration.
     PRIZEPICKS_POLL_INTERVAL: int = int(os.environ.get("PRIZEPICKS_POLL_INTERVAL", "60"))
     PROPLINE_UNDERDOG_BOOKMAKER: str = os.environ.get(
@@ -608,6 +612,20 @@ class Config:
     def prizepicks_leagues(self) -> list[str]:
         """PrizePicks league names to monitor (e.g. ["NBA", "NFL"])."""
         return [lg.strip() for lg in self.PRIZEPICKS_LEAGUES_RAW.split(",") if lg.strip()]
+
+    @property
+    def propline_bookmakers(self) -> list[str]:
+        """Configured PropLine bookmaker keys, normalized and deduplicated."""
+        values = [
+            value.strip().lower().replace(" ", "")
+            for value in self.PROPLINE_BOOKMAKERS_RAW.split(",")
+            if value.strip()
+        ]
+        result: list[str] = []
+        for value in values:
+            if value not in result:
+                result.append(value)
+        return result
 
     @property
     def player_prop_sports(self) -> list[str]:

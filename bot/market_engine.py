@@ -573,9 +573,10 @@ async def _persist_propline_observations(
     db,
     props: list[object],
     *,
+    provider: str = "PrizePicks",
     include_tracking: bool = True,
 ) -> int:
-    """Persist a fetched PrizePicks batch before any evaluation work begins.
+    """Persist one source-specific PropLine batch before evaluation begins.
 
     The request worker is intentionally the durability boundary. PrizePicks
     evaluation may be slow and is allowed to run independently of the
@@ -586,12 +587,12 @@ async def _persist_propline_observations(
     if db is None or not props:
         return 0
     try:
-        canonical_props = canonicalize_player_props("PrizePicks", props)
+        canonical_props = canonicalize_player_props(provider, props)
         if not canonical_props:
             return 0
         await persist_canonical_player_props(
             db,
-            "PrizePicks",
+            provider,
             canonical_props,
             append_snapshot=True,
             append_observations=True,
@@ -928,16 +929,39 @@ _prizepicks_processing_lock: Optional[asyncio.Lock] = None
 _PRIZEPICKS_DEDUP_PREFIX = "PrizePicks::"
 _prizepicks_sport_cursor = 0
 _propline_request_cursor = 0
-_propline_pending_props: dict[tuple[str, str, str, str], object] = {}
+_propline_pending_props: dict[tuple[str, str, str, str, str], object] = {}
 _propline_request_lock: Optional[asyncio.Lock] = None
 _propline_ingest_task: Optional[asyncio.Task] = None
 # Current PropLine observations are also available in-process while the
 # companion branch is running.  This is supplemental evidence only; it never
 # replaces an Underdog snapshot or creates a second alert path.
 _PROPLINE_EVIDENCE_TTL_SECONDS = 20 * 60
-_propline_current_observations: dict[tuple[str, str, str, str], object] = {}
-_propline_evidence_by_identity: dict[tuple[str, str, str], list[object]] = {}
+_propline_current_observations: dict[tuple[str, str, str, str, str], object] = {}
+_propline_evidence_by_identity: dict[tuple[str, str, str, str], list[object]] = {}
 _propline_empty_sport_until: dict[str, float] = {}
+
+_PROPLINE_BOOKMAKER_PROVIDERS = {
+    "prizepicks": "PrizePicks",
+    "draftkings": "DraftKings",
+    "fanduel": "FanDuel",
+    "underdog": "Underdog",
+}
+
+
+def _propline_provider_label(bookmaker: str) -> str:
+    """Map a PropLine bookmaker key to the provider identity stored in DB."""
+    normalized = str(bookmaker or "").strip().lower().replace(" ", "")
+    return _PROPLINE_BOOKMAKER_PROVIDERS.get(
+        normalized,
+        normalized.title() or "PropLine",
+    )
+
+
+def _propline_key_provider(key, prop: object = None) -> str:
+    """Read source identity from current-cache keys, including legacy keys."""
+    if isinstance(key, tuple) and len(key) >= 5:
+        return str(key[0] or "")
+    return str(getattr(prop, "provider", "") or "")
 
 
 def propline_request_schedule_state() -> Optional[dict[str, object]]:
@@ -1000,6 +1024,7 @@ async def _get_prizepicks_scan_sports(provider) -> tuple[str, ...]:
     fallback = configured or provider_sports
 
     def _configured(values) -> tuple[str, ...]:
+        from engine.sport_policy import is_football_related_sport
         result: list[str] = []
         seen: set[str] = set()
         for value in values:
@@ -1007,6 +1032,7 @@ async def _get_prizepicks_scan_sports(provider) -> tuple[str, ...]:
             if (
                 canonical
                 and canonical.upper() not in seen
+                and not is_football_related_sport(canonical)
             ):
                 seen.add(canonical.upper())
                 result.append(canonical)
@@ -1030,6 +1056,7 @@ async def _get_prizepicks_scan_sports(provider) -> tuple[str, ...]:
         )
         return fallback_sports
 
+    from engine.sport_policy import is_football_related_sport
     sports: list[str] = []
     seen: set[str] = set()
     for item in discovered or []:
@@ -1038,10 +1065,9 @@ async def _get_prizepicks_scan_sports(provider) -> tuple[str, ...]:
             or getattr(item, "sport", None)
             or item
         ).strip()
-        if (
-            canonical
-            and canonical.upper() not in seen
-        ):
+        if canonical and canonical.upper() not in seen:
+            if is_football_related_sport(canonical):
+                continue
             seen.add(canonical.upper())
             sports.append(canonical)
     if discovered is None:
@@ -1184,8 +1210,12 @@ async def reset_monitoring_runtime_state() -> None:
     _propline_empty_sport_until.clear()
 
 
-def _cache_propline_evidence(props: list[object]) -> None:
-    """Publish fresh PropLine observations to the read-only evidence boundary."""
+def _cache_propline_evidence(
+    props: list[object],
+    *,
+    provider: str = "PrizePicks",
+) -> None:
+    """Publish fresh source-specific PropLine observations to evidence."""
     now = datetime.utcnow()
     for prop in props:
         player = str(getattr(prop, "player_name", "") or "").strip()
@@ -1203,7 +1233,9 @@ def _cache_propline_evidence(props: list[object]) -> None:
             now - observed_at
         ).total_seconds() > _PROPLINE_EVIDENCE_TTL_SECONDS:
             continue
-        _propline_current_observations[(player, sport, stat, event_id)] = prop
+        _propline_current_observations[
+            (str(provider), player, sport, stat, event_id)
+        ] = prop
 
     cutoff = now - timedelta(seconds=_PROPLINE_EVIDENCE_TTL_SECONDS)
     stale = [
@@ -1219,8 +1251,9 @@ def _cache_propline_evidence(props: list[object]) -> None:
     # pick evaluation performs one direct lookup instead of scanning memory or
     # querying the persisted PropLine pool.
     _propline_evidence_by_identity.clear()
-    for prop in _propline_current_observations.values():
+    for key, prop in _propline_current_observations.items():
         identity = (
+            _propline_key_provider(key, prop),
             normalize_name(getattr(prop, "player_name", "")),
             str(getattr(prop, "sport", "") or "").strip().upper(),
             _normalize_prop_stat(getattr(prop, "stat_type", "")),
@@ -1228,9 +1261,14 @@ def _cache_propline_evidence(props: list[object]) -> None:
         _propline_evidence_by_identity.setdefault(identity, []).append(prop)
 
 
-def _propline_prop_key(prop: object) -> tuple[str, str, str, str]:
+def _propline_prop_key(
+    prop: object,
+    *,
+    provider: str = "PrizePicks",
+) -> tuple[str, str, str, str, str]:
     """Return a stable key for the latest PropLine observation buffer."""
     return (
+        str(provider),
         str(getattr(prop, "player_name", "") or "").strip().lower(),
         str(getattr(prop, "sport", "") or "").strip().upper(),
         str(getattr(prop, "stat_type", "") or "").strip().lower(),
@@ -1243,7 +1281,7 @@ def _propline_prop_key(prop: object) -> tuple[str, str, str, str]:
 
 
 async def propline_request_scan_job(context) -> None:
-    """Refresh every active PropLine sport in one complete feed pass.
+    """Refresh every active PropLine sport for every configured bookmaker.
 
     This job owns only provider-specific fetch, pacing, and durable ingestion.
     It is invoked by the shared Player Props monitoring cycle; evaluation and
@@ -1305,125 +1343,161 @@ async def propline_request_scan_job(context) -> None:
         ] + [
             index for index in eligible_indexes if index < first
         ]
-        failed_sports: list[str] = []
-        persisted_sports: list[str] = []
+        bookmakers = tuple(
+            str(bookmaker).strip().lower().replace(" ", "")
+            for bookmaker in getattr(config, "propline_bookmakers", [])
+            if str(bookmaker).strip()
+        ) or ("prizepicks",)
+        failed_feeds: list[str] = []
+        persisted_feeds: list[str] = []
+        failed_prizepicks = False
         last_attempted_index = first
         fetch_result = getattr(provider, "fetch_props_for_sport_result", None)
         fetch_props = getattr(provider, "fetch_props_for_sport", None)
         for offset, sport_index in enumerate(ordered_indexes):
             sport = sports[sport_index]
             last_attempted_index = sport_index
-            try:
-                if callable(fetch_result):
-                    try:
-                        result = await fetch_result(
-                            sport,
-                            bookmaker="prizepicks",
-                        )
-                    except TypeError:
-                        result = await fetch_result(
-                            sport,
-                            bookmaker="prizepicks",
-                        )
-                    props = list(getattr(result, "props", []) or [])
-                    succeeded = bool(
-                        getattr(result, "succeeded", False)
-                        and getattr(result, "complete", False)
-                    )
-                    failure_text = str(getattr(result, "error", "") or "")
-                    failure_kind = str(
-                        getattr(result, "failure_kind", "") or ""
-                    )
-                elif callable(fetch_props):
-                    props = list(await fetch_props(sport) or [])
-                    succeeded = True
-                    failure_text = ""
-                    failure_kind = ""
-                else:
-                    props = []
-                    succeeded = False
-                    failure_text = "PropLine provider has no sport fetch method"
-                    failure_kind = "configuration"
-                if not succeeded:
-                    failed_sports.append(sport)
-                    logger.warning(
-                        "propline_request_scan: sport=%s incomplete; "
-                        "observations are not evaluated: %s",
-                        sport,
-                        failure_text or failure_kind or "provider failure",
-                    )
-                    failure_lower = (
-                        f"{failure_kind} {failure_text}".lower()
-                    )
-                    if any(
-                        marker in failure_lower
-                        for marker in ("quota", "budget", "rate", "429", "backoff")
-                    ):
-                        break
+            for bookmaker in bookmakers:
+                source_provider = _propline_provider_label(bookmaker)
+                feed_key = f"{bookmaker}:{str(sport).strip().upper()}"
+                if _propline_empty_sport_until.get(feed_key, 0.0) > now:
                     continue
+                try:
+                    if callable(fetch_result):
+                        result = await fetch_result(
+                            sport,
+                            bookmaker=bookmaker,
+                        )
+                        props = list(getattr(result, "props", []) or [])
+                        succeeded = bool(
+                            getattr(result, "succeeded", False)
+                            and getattr(result, "complete", False)
+                        )
+                        failure_text = str(getattr(result, "error", "") or "")
+                        failure_kind = str(
+                            getattr(result, "failure_kind", "") or ""
+                        )
+                    elif callable(fetch_props):
+                        props = list(await fetch_props(sport) or [])
+                        succeeded = True
+                        failure_text = ""
+                        failure_kind = ""
+                    else:
+                        props = []
+                        succeeded = False
+                        failure_text = (
+                            "PropLine provider has no sport fetch method"
+                        )
+                        failure_kind = "configuration"
+                    if not succeeded:
+                        failed_feeds.append(feed_key)
+                        if bookmaker == "prizepicks":
+                            failed_prizepicks = True
+                        logger.warning(
+                            "propline_request_scan: provider=%s sport=%s "
+                            "incomplete; observations are not evaluated: %s",
+                            source_provider,
+                            sport,
+                            failure_text or failure_kind or "provider failure",
+                        )
+                        failure_lower = f"{failure_kind} {failure_text}".lower()
+                        if any(
+                            marker in failure_lower
+                            for marker in ("quota", "budget", "rate", "429", "backoff")
+                        ):
+                            break
+                        continue
 
-                persisted = await _persist_propline_observations(db, props)
-                if persisted != len(props):
-                    failed_sports.append(sport)
-                    logger.error(
-                        "propline_request_scan: persistence barrier failed "
-                        "sport=%s observations=%d persisted=%d; evaluation skipped",
+                    persisted = await _persist_propline_observations(
+                        db,
+                        props,
+                        provider=source_provider,
+                    )
+                    if persisted != len(props):
+                        failed_feeds.append(feed_key)
+                        if bookmaker == "prizepicks":
+                            failed_prizepicks = True
+                        logger.error(
+                            "propline_request_scan: persistence barrier failed "
+                            "provider=%s sport=%s observations=%d persisted=%d",
+                            source_provider,
+                            sport,
+                            len(props),
+                            persisted,
+                        )
+                        continue
+
+                    persisted_feeds.append(feed_key)
+                    try:
+                        _provider_health = get_health_monitor()
+                        if _provider_health is not None:
+                            _provider_health.record_success(source_provider)
+                    except Exception:
+                        pass
+                    try:
+                        _health = get_health_tracker()
+                        if _health is not None:
+                            _health.record_provider_fetch(source_provider)
+                    except Exception:
+                        pass
+                    _cache_propline_evidence(
+                        props,
+                        provider=source_provider,
+                    )
+                    # The legacy independent PrizePicks evaluator consumes this
+                    # handoff. Other PropLine bookmakers are persisted/tracked
+                    # but must never enter a PrizePicks delivery lane.
+                    if bookmaker == "prizepicks":
+                        for prop in props:
+                            _propline_pending_props[
+                                _propline_prop_key(
+                                    prop,
+                                    provider=source_provider,
+                                )
+                            ] = prop
+                    if props:
+                        _propline_empty_sport_until.pop(feed_key, None)
+                    else:
+                        cache_ttl = max(
+                            1.0,
+                            float(getattr(client, "cache_ttl", 240.0) or 240.0),
+                        )
+                        _propline_empty_sport_until[feed_key] = now + cache_ttl
+                    logger.info(
+                        "propline_request_scan: provider=%s sport=%s "
+                        "observations=%d pending=%d",
+                        source_provider,
                         sport,
                         len(props),
-                        persisted,
+                        len(_propline_pending_props),
                     )
-                    continue
-
-                persisted_sports.append(sport)
-                try:
-                    _provider_health = get_health_monitor()
-                    if _provider_health is not None:
-                        _provider_health.record_success("PrizePicks")
-                except Exception:
-                    pass
-                try:
-                    _health = get_health_tracker()
-                    if _health is not None:
-                        _health.record_provider_fetch("PrizePicks")
-                except Exception:
-                    pass
-                _cache_propline_evidence(props)
-                for prop in props:
-                    _propline_pending_props[_propline_prop_key(prop)] = prop
-                empty_key = str(sport).strip().upper()
-                if props:
-                    _propline_empty_sport_until.pop(empty_key, None)
-                else:
-                    cache_ttl = max(
-                        1.0,
-                        float(getattr(client, "cache_ttl", 240.0) or 240.0),
+                except Exception as exc:
+                    failed_feeds.append(feed_key)
+                    if bookmaker == "prizepicks":
+                        failed_prizepicks = True
+                    logger.warning(
+                        "propline_request_scan: provider=%s sport=%s failed: %s",
+                        source_provider,
+                        sport,
+                        type(exc).__name__,
                     )
-                    _propline_empty_sport_until[empty_key] = now + cache_ttl
-                logger.info(
-                    "propline_request_scan: sport=%s observations=%d pending=%d",
-                    sport,
-                    len(props),
-                    len(_propline_pending_props),
-                )
-            except Exception as exc:
-                failed_sports.append(sport)
-                logger.warning(
-                    "propline_request_scan: sport=%s failed: %s",
-                    sport,
-                    type(exc).__name__,
-                )
             _propline_request_cursor = (sport_index + 1) % len(sports)
 
         _propline_request_cursor = (last_attempted_index + 1) % len(sports)
-        if failed_sports:
+        if failed_feeds:
             logger.error(
-                "propline_request_scan: incomplete feed persisted_sports=%s "
-                "failed_sports=%s; pending evaluation withheld",
-                ",".join(persisted_sports) or "none",
-                ",".join(failed_sports),
+                "propline_request_scan: incomplete feeds persisted=%s "
+                "failed=%s",
+                ",".join(persisted_feeds) or "none",
+                ",".join(failed_feeds),
+            )
+        if failed_prizepicks:
+            logger.error(
+                "propline_request_scan: PrizePicks feed incomplete; "
+                "pending PrizePicks evaluation withheld"
             )
             _propline_pending_props.clear()
-        return not failed_sports
+        return not failed_prizepicks
 
 
 async def prizepicks_job(context) -> None:
@@ -1736,7 +1810,24 @@ async def _get_odds_api_confirmation(
         str(sport or "").strip().upper(),
         _normalize_prop_stat(stat_type),
     )
-    cached_pp_history = list(_propline_evidence_by_identity.get(pp_identity, ()))
+    cached_pp_history = list(
+        _propline_evidence_by_identity.get(
+            ("PrizePicks",) + pp_identity,
+            (),
+        )
+    )
+    if not cached_pp_history:
+        cached_pp_history = [
+            prop
+            for key, prop in _propline_current_observations.items()
+            if _propline_key_provider(key, prop) == "PrizePicks"
+            and normalize_name(getattr(prop, "player_name", ""))
+            == pp_identity[0]
+            and str(getattr(prop, "sport", "") or "").strip().upper()
+            == pp_identity[1]
+            and _normalize_prop_stat(getattr(prop, "stat_type", ""))
+            == pp_identity[2]
+        ]
     production_cache_only = isinstance(source_db, Database)
     pp_history_reader = getattr(source_db, "get_prop_line_history", None)
     pp_pool_reader = getattr(source_db, "get_all_active_prop_line_history_by_line", None)
@@ -1826,7 +1917,8 @@ async def _get_odds_api_confirmation(
                         ]
                         pp_history.extend(
                             prop
-                            for prop in _propline_current_observations.values()
+                            for key, prop in _propline_current_observations.items()
+                            if _propline_key_provider(key, prop) == "PrizePicks"
                             if normalize_name(getattr(prop, "player_name", ""))
                             == wanted_player
                             and str(getattr(prop, "sport", "") or "").strip().upper()
@@ -1861,7 +1953,8 @@ async def _get_odds_api_confirmation(
                         pp_history = list(pp_history or [])
                         pp_history.extend(
                             prop
-                            for prop in _propline_current_observations.values()
+                            for key, prop in _propline_current_observations.items()
+                            if _propline_key_provider(key, prop) == "PrizePicks"
                             if normalize_name(getattr(prop, "player_name", ""))
                             == normalize_name(player_name)
                             and str(getattr(prop, "sport", "") or "").strip().upper()

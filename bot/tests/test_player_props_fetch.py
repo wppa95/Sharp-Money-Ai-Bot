@@ -349,8 +349,8 @@ async def test_fetch_player_prop_odds_malformed_outcome_skipped():
 # ── _player_props_job ─────────────────────────────────────────────────────────
 
 @pytest.mark.asyncio
-async def test_player_props_job_writes_odds_records():
-    """Job should persist sportsbook lines through the canonical ledger."""
+async def test_player_props_job_is_disabled_for_propline_bookmakers():
+    """Legacy Odds API player-prop polling must not compete with PropLine."""
     import main as main_mod
 
     pl = PlayerPropLine(
@@ -384,13 +384,8 @@ async def test_player_props_job_writes_odds_records():
          ) as persist:
         await main_mod._player_props_job(MagicMock())
 
-    assert mock_engine.fetch_player_prop_odds.called
-    persist.assert_awaited_once()
-    provider, props = persist.call_args.args[1:3]
-    assert provider == "FanDuel"
-    assert props[0].player_name == "LeBron James"
-    assert props[0].stat_type == "Points"
-    assert props[0].line_value == 25.5
+    mock_engine.fetch_player_prop_odds.assert_not_called()
+    persist.assert_not_awaited()
 
 
 @pytest.mark.asyncio

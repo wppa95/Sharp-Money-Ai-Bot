@@ -87,8 +87,8 @@ def _make_prop_line(sport: Sport, market_key: str = "player_points") -> MagicMoc
 
 
 @pytest.mark.asyncio
-async def test_poll_odds_job_persists_only_configured_player_props():
-    """The Odds API job stores props and never calls game-line EV code."""
+async def test_poll_odds_job_does_not_fetch_player_props_from_odds_api():
+    """Player-prop feed ownership stays with PropLine."""
     import main as main_mod
 
     mock_db = MagicMock()
@@ -115,8 +115,8 @@ async def test_poll_odds_job_persists_only_configured_player_props():
          ) as persist:
         await main_mod._poll_odds_job(MagicMock())
 
-    mock_engine.fetch_player_prop_odds.assert_awaited_once_with(Sport.WNBA)
-    persist.assert_awaited_once()
+    mock_engine.fetch_player_prop_odds.assert_not_awaited()
+    persist.assert_not_awaited()
     mock_engine.fetch_live_odds.assert_not_called()
 
 

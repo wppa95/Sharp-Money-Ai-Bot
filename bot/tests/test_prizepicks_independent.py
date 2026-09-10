@@ -158,7 +158,7 @@ class TestIndependentPrizePicks:
                 self.saved = []
 
             async def upsert_prop_line_history_batch(self, provider, props, **kwargs):
-                self.saved.extend(props)
+                self.saved.append((provider, list(props)))
 
             async def track_prop_records(self, records):
                 return len(records)
@@ -179,11 +179,20 @@ class TestIndependentPrizePicks:
 
         assert complete is True
         assert calls == [
-            ("NBA", "prizepicks"),
-            ("MLB", "prizepicks"),
-            ("NHL", "prizepicks"),
+            (sport, bookmaker)
+            for sport in ("NBA", "MLB", "NHL")
+            for bookmaker in ("prizepicks", "draftkings", "fanduel", "underdog")
         ]
-        assert {prop.sport for prop in db.saved} == {"NBA", "MLB", "NHL"}
+        assert [provider for provider, _ in db.saved] == [
+            provider
+            for _sport in ("NBA", "MLB", "NHL")
+            for provider in ("PrizePicks", "DraftKings", "FanDuel", "Underdog")
+        ]
+        assert {
+            prop.sport
+            for _provider, props in db.saved
+            for prop in props
+        } == {"NBA", "MLB", "NHL"}
 
     async def test_incomplete_sport_persists_successes_but_withholds_pending_feed(
         self, monkeypatch

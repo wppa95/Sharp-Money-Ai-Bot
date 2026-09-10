@@ -4545,10 +4545,12 @@ def _retry_after_seconds(response: Any) -> float:
 
 
 class PropLinePrizePicksProvider(PropProviderBase):
-    """PropLine adapter used internally as the Underdog evidence feed.
+    """PropLine adapter for configured pick'em and sportsbook feeds.
 
     The legacy class name is retained for storage/API compatibility. PropLine
-    is not exposed as an independent Telegram provider or delivery stream.
+    remains a supplemental observation source; it is not an independent
+    Telegram provider or delivery stream. Native Underdog ingestion remains
+    active alongside PropLine's Underdog feed.
     """
 
     def __init__(

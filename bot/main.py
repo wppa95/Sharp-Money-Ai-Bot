@@ -843,9 +843,9 @@ async def post_init(application: Application) -> None:
     # Register background jobs
     jq = application.job_queue
     if jq:
-        # The OddsAPI poller has its own normalized sport scope and strict
-        # restart-safe pacing. It never reads ACTIVE_SPORTS for provider
-        # selection.
+        # Retain the compatibility callback for scheduler/state visibility.
+        # It is a no-op for player props because PropLine owns DK/FD/PP/UD
+        # player-prop ingestion.
         jq.run_repeating(
             _coordinated_job(
                 "odds_poller",
@@ -999,14 +999,14 @@ async def post_init(application: Application) -> None:
             "season_check: every %ds, "
             "heartbeat: every 60s "
              "[Unified Player Props cycle enabled=%s; "
-             "Odds API player-prop sportsbook feed enabled=%s]",
+             "Odds API player-prop feed disabled; PropLine bookmakers=%s]",
             config.UNDERDOG_POLL_INTERVAL,
             config.UNDERDOG_POLL_INTERVAL,
             config.OPPORTUNITY_GRADER_INTERVAL,
             config.PLAYER_HISTORY_POLL_INTERVAL,
             config.SEASON_CHECK_INTERVAL,
              _propline_enabled,
-             config.SPORTSBOOK_CONFIRMATION_ENABLED,
+             ",".join(getattr(config, "propline_bookmakers", [])),
         )
     else:
         logger.warning("JobQueue not available — background jobs disabled.")
@@ -1697,16 +1697,21 @@ async def _heartbeat_job(context) -> None:
 
 async def _player_props_job(context) -> None:
     """
-    Fetch sportsbook player props and persist them into the shared Player Props
-    ledger. H2H/totals polling and separate sportsbook EV alerts are retired.
+    Keep the legacy Odds API player-prop job disabled.
 
-    Underdog remains the bettable source. DraftKings/FanDuel rows are stored
-    with provider-owned identity so the Underdog pipeline can use them as
-    current market context without creating a second alert universe.
+    PropLine is the configured source for PrizePicks, DraftKings, FanDuel, and
+    supplemental Underdog observations. Underdog's native connector remains
+    active separately. H2H/totals confirmation is a separate path and is not
+    enabled by this player-prop job.
     """
     if _db is None or _engine is None:
         logger.debug("_player_props_job: DB or engine not ready, skipping")
         return
+    logger.info(
+        "_player_props_job: OddsAPI player-prop polling disabled; "
+        "PropLine owns PrizePicks/DraftKings/FanDuel/Underdog feed ingestion"
+    )
+    return
 
     now      = datetime.utcnow()
     pacer = get_quota_pacer()
