@@ -459,3 +459,9 @@ async def test_representative_bounded_picks_path_finishes_under_deadline(monkeyp
     )
     assert "Actionable Player Prop Picks" in sent_text
     assert "temporarily unavailable" not in sent_text
+
+
+def test_picks_comparison_does_not_reference_removed_prizepicks_rows():
+    source = inspect.getsource(commands._cmd_picks_inner)
+    assert "pp_rows        = pp_rows" not in source
+    assert "pp_rows        = []" in source

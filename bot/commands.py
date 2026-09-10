@@ -2258,7 +2258,7 @@ async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
                 ud_line        = plh.line_value,
                 previous_line  = plh.prev_line,
                 fetched_at     = plh.fetched_at,
-                pp_rows        = pp_rows,
+                pp_rows        = [],
                 now            = now,
                 min_confidence = 0,
             )
