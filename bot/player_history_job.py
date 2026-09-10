@@ -680,36 +680,58 @@ async def player_history_collector_job(context) -> None:
 
         persisted_rows = 0
         persist_deadline = time.monotonic() + _PLAYER_HISTORY_PERSIST_TIMEOUT_SECONDS
-        for start in range(
-            0, len(completed_results), _PLAYER_HISTORY_WRITE_BATCH_SIZE
-        ):
-            batch =  completed_results[start: start + _PLAYER_HISTORY_WRITE_BATCH_SIZE]
+        _history_slot_acquired = False
+        _release_history_slot = None
+        try:
             try:
-                remaining = persist_deadline - time.monotonic()
-                if remaining <= 0:
-                    raise asyncio.TimeoutError
-                await asyncio.wait_for(write_batch(batch), timeout=remaining)
-                persisted_rows += len(batch)
-                # Let monitoring persistence and command reads compete for the
-                # shared writer gate before immediately claiming it again.
-                await asyncio.sleep(_PLAYER_HISTORY_WRITE_YIELD_SECONDS)
-            except asyncio.TimeoutError:
-                logger.warning(
-                    "player_history_collector_job: persistence timeout; "
-                    "completed_rows=%d "
-                    "unpersisted_rows=%d",
-                    persisted_rows,
-                    len(completed_results) - persisted_rows,
+                from market_engine import (
+                    acquire_player_history_persistence_slot,
+                    release_player_history_persistence_slot,
                 )
-                break
-            except Exception as exc:
-                logger.warning(
-                    "player_history_collector_job: result persistence failed "
-                    "after completed_rows=%d: %s",
-                    persisted_rows,
-                    exc,
-                )
-                break
+
+                await acquire_player_history_persistence_slot()
+                _history_slot_acquired = True
+                _release_history_slot = release_player_history_persistence_slot
+            except ImportError:
+                # Lightweight compatibility environments may not load the
+                # monitoring engine; their database doubles remain valid.
+                pass
+
+            for start in range(
+                0, len(completed_results), _PLAYER_HISTORY_WRITE_BATCH_SIZE
+            ):
+                batch = completed_results[
+                    start: start + _PLAYER_HISTORY_WRITE_BATCH_SIZE
+                ]
+                try:
+                    remaining = persist_deadline - time.monotonic()
+                    if remaining <= 0:
+                        raise asyncio.TimeoutError
+                    await asyncio.wait_for(write_batch(batch), timeout=remaining)
+                    persisted_rows += len(batch)
+                    # Keep each transaction short while retaining exclusive
+                    # ownership of the history write window for the drain.
+                    await asyncio.sleep(_PLAYER_HISTORY_WRITE_YIELD_SECONDS)
+                except asyncio.TimeoutError:
+                    logger.warning(
+                        "player_history_collector_job: persistence timeout; "
+                        "completed_rows=%d "
+                        "unpersisted_rows=%d",
+                        persisted_rows,
+                        len(completed_results) - persisted_rows,
+                    )
+                    break
+                except Exception as exc:
+                    logger.warning(
+                        "player_history_collector_job: result persistence failed "
+                        "after completed_rows=%d: %s",
+                        persisted_rows,
+                        exc,
+                    )
+                    break
+        finally:
+            if _history_slot_acquired and _release_history_slot is not None:
+                _release_history_slot()
         no_result_targets = sum(no_result_by_sport.values())
         if no_result_targets:
             logger.warning(

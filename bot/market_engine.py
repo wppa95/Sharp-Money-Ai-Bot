@@ -1109,6 +1109,7 @@ _priority_override_sent: set = set()
 # Every scheduler trigger is retained by the coordinator. A trigger that finds
 # this flag set waits for the current full scan instead of starting a second one.
 _ud_full_scan_running: bool = False
+_player_history_persistence_running: bool = False
 
 # FPR is scheduled independently and waits for the shared full-scan slot when
 # Underdog is active. Each trigger remains a separate scheduled execution.
@@ -1131,6 +1132,24 @@ async def wait_for_underdog_persistence_idle() -> None:
         await asyncio.sleep(0.05)
 
 
+async def acquire_player_history_persistence_slot() -> None:
+    """Claim the SQLite write window for one bulk player-history drain."""
+    global _player_history_persistence_running
+    while (
+        _ud_full_scan_running
+        or _fpr_execution_running
+        or _player_history_persistence_running
+    ):
+        await asyncio.sleep(0.05)
+    _player_history_persistence_running = True
+
+
+def release_player_history_persistence_slot() -> None:
+    """Release the SQLite write window after the bulk history drain."""
+    global _player_history_persistence_running
+    _player_history_persistence_running = False
+
+
 async def reset_monitoring_runtime_state() -> None:
     """Destroy disposable market-monitoring state before a new session starts.
 
@@ -1146,7 +1165,8 @@ async def reset_monitoring_runtime_state() -> None:
     global _propline_pending_props, _propline_request_lock
     global _propline_ingest_task
     global _cold_start_done, _MARKET_FIRST_ALERT, _priority_override_sent
-    global _ud_full_scan_running, _fpr_execution_running, _prop_market_alerted
+    global _ud_full_scan_running, _fpr_execution_running
+    global _player_history_persistence_running, _prop_market_alerted
     global _failed_required_persistence_batches
     global _ud_scan_state, _ud_known_keys, _ud_scan_db_id, _prop_dedup_lock
     global _snapshot_cache, _analysis_engine, _confirmation_db, _propline_provider
@@ -1186,6 +1206,7 @@ async def reset_monitoring_runtime_state() -> None:
     _priority_override_sent.clear()
     _ud_full_scan_running = False
     _fpr_execution_running = False
+    _player_history_persistence_running = False
     _failed_required_persistence_batches.clear()
     _prop_market_alerted.clear()
     _ud_scan_state.clear()
@@ -4323,7 +4344,11 @@ async def underdog_job(context) -> None:
     # Claim the full-scan slot before state restoration. A queued trigger waits
     # for the prior scan to finish instead of taking a partial fast path.
     global _ud_full_scan_running
-    while _ud_full_scan_running or _fpr_execution_running:
+    while (
+        _ud_full_scan_running
+        or _fpr_execution_running
+        or _player_history_persistence_running
+    ):
         logger.debug(
             "underdog_job: another scan is completing — waiting for scan slot"
         )
@@ -7925,7 +7950,11 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
         _health.record_job_started("full_pool_rescan_job")
 
     global _fpr_execution_running, _ud_full_scan_running
-    while _fpr_execution_running or _ud_full_scan_running:
+    while (
+        _fpr_execution_running
+        or _ud_full_scan_running
+        or _player_history_persistence_running
+    ):
         logger.debug(
             "full_pool_rescan: another scan is completing — waiting for scan slot"
         )
