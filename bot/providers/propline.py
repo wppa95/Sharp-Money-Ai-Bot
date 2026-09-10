@@ -1,9 +1,9 @@
 """
-PropLine-backed PrizePicks provider.
+PropLine-backed player-prop provider.
 
-PropLine is an authorized, third-party source for PrizePicks projections.  This
-module deliberately knows nothing about Underdog or sportsbook markets.  It
-normalizes only PrizePicks player props into the shared ``PlayerProp`` model.
+PropLine is an authorized, third-party source for configured pick'em and
+sportsbook player-prop feeds. This module normalizes one requested bookmaker at
+a time into the shared ``PlayerProp`` model while preserving source identity.
 
 The official PropLine API base URL is used by default.  ``PROPLINE_API_URL``
 may override it only when PropLine documents a different authorized endpoint.
@@ -32,6 +32,24 @@ from providers.prop_provider import PlayerProp, PropProviderBase
 logger = logging.getLogger(__name__)
 
 PROPLINE_PROVIDER_NAME = "PrizePicks"
+_BOOKMAKER_PROVIDER_LABELS = {
+    "prizepicks": "PrizePicks",
+    "prizepick": "PrizePicks",
+    "draftkings": "DraftKings",
+    "fanduel": "FanDuel",
+    "underdog": "Underdog",
+}
+
+
+def provider_name_for_bookmaker(bookmaker: Any) -> str:
+    """Return the canonical provider label for a PropLine bookmaker key."""
+    normalized = _clean(bookmaker).lower().replace("_", "").replace("-", "")
+    if normalized == "prizepick":
+        normalized = "prizepicks"
+    return _BOOKMAKER_PROVIDER_LABELS.get(
+        normalized,
+        _clean(bookmaker).title() or PROPLINE_PROVIDER_NAME,
+    )
 DEFAULT_PROPLINE_API_URL = "https://api.prop-line.com"
 
 _STAT_NORMALIZATION = {
@@ -1578,12 +1596,21 @@ def _normalize_direction(value: Any) -> str:
     return match.group(1) if match else ""
 
 
-def _is_prizepicks_player_prop(raw: dict[str, Any]) -> bool:
-    """Strictly reject records outside PropLine's PrizePicks prop scope."""
+def _is_prizepicks_player_prop(
+    raw: dict[str, Any],
+    *,
+    expected_provider: Optional[str] = None,
+) -> bool:
+    """Reject records outside the requested PropLine player-prop scope."""
     provider = _clean(
         _first(raw, "provider", "source", "platform", "book", "bookmaker")
     ).lower()
-    if provider and provider.replace("_", "").replace("-", "").replace(" ", "") not in {
+    if provider and expected_provider:
+        expected = _clean(expected_provider).lower().replace("_", "").replace("-", "").replace(" ", "")
+        normalized_provider = provider.replace("_", "").replace("-", "").replace(" ", "")
+        if normalized_provider != expected:
+            return False
+    elif provider and provider.replace("_", "").replace("-", "").replace(" ", "") not in {
         "prizepicks",
         "prizepick",
     }:
@@ -1620,15 +1647,20 @@ def normalize_propline_prizepicks_record(
     raw_record: dict[str, Any],
     *,
     fetched_at: Optional[datetime] = None,
+    provider: str = PROPLINE_PROVIDER_NAME,
 ) -> Optional[PlayerProp]:
     """
     Normalize one PropLine record, returning ``None`` for unsafe records.
 
-    The endpoint is expected to be PrizePicks-specific, but provider and market
-    fields are still checked on every row so a mixed response can never leak
-    Underdog, sportsbook, moneyline, or game-total data into this pipeline.
+    The endpoint is requested for one bookmaker at a time. Provider and market
+    fields are still checked on every row so a mixed response can never leak a
+    different provider, moneyline, or game-total data into this pipeline.
     """
-    if not isinstance(raw_record, dict) or not _is_prizepicks_player_prop(raw_record):
+    provider_label = provider_name_for_bookmaker(provider)
+    if not isinstance(raw_record, dict) or not _is_prizepicks_player_prop(
+        raw_record,
+        expected_provider=provider_label,
+    ):
         return None
 
     player = _first(raw_record, "player_name", "player", "athlete", "name")
@@ -1726,7 +1758,7 @@ def normalize_propline_prizepicks_record(
     )
 
     return PlayerProp(
-        provider=PROPLINE_PROVIDER_NAME,
+        provider=provider_label,
         sport=sport,
         player_name=player_name,
         team=team,
@@ -2266,7 +2298,11 @@ def _official_sports_records(payload: Any) -> list[PropLineSport]:
 
 
 
-def _official_odds_records(payload: Any) -> list[dict[str, Any]]:
+def _official_odds_records(
+    payload: Any,
+    *,
+    bookmaker: str = "prizepicks",
+) -> list[dict[str, Any]]:
     """Flatten the documented PropLine odds response into normalizer records."""
     if isinstance(payload, dict) and payload.get("bookmakers") is not None:
         payload = [payload]
@@ -2276,6 +2312,9 @@ def _official_odds_records(payload: Any) -> list[dict[str, Any]]:
     if not isinstance(payload, list):
         return []
 
+    requested_bookmaker = _clean(bookmaker).lower().replace("_", "").replace("-", "")
+    if requested_bookmaker == "prizepick":
+        requested_bookmaker = "prizepicks"
     records: list[dict[str, Any]] = []
     for event in payload:
         if not isinstance(event, dict):
@@ -2298,7 +2337,9 @@ def _official_odds_records(payload: Any) -> list[dict[str, Any]]:
             if not isinstance(bookmaker, dict):
                 continue
             bookmaker_key = _clean(bookmaker.get("key")).lower().replace("_", "")
-            if bookmaker_key not in {"prizepicks", "prizepick"}:
+            if bookmaker_key == "prizepick":
+                bookmaker_key = "prizepicks"
+            if bookmaker_key != requested_bookmaker:
                 continue
             for market in bookmaker.get("markets") or []:
                 if not isinstance(market, dict):
@@ -2316,7 +2357,7 @@ def _official_odds_records(payload: Any) -> list[dict[str, Any]]:
                     )
                     records.append(
                         {
-                            "provider": "PrizePicks",
+                            "provider": provider_name_for_bookmaker(bookmaker_key),
                             "market_type": market_key,
                             "sport": _canonical_discovered_sport(sport_key),
                             "player": outcome.get("description"),
@@ -4078,7 +4119,12 @@ class PropLineClient:
         )
         try:
             raw_records, complete, error = await self._paginate_json(
-                url, params, extractor=_official_odds_records
+                url,
+                params,
+                extractor=lambda payload: _official_odds_records(
+                    payload,
+                    bookmaker=bookmaker,
+                ),
             )
         except PropLineNotFoundError as exc:
             return self._failed_result(scope, str(exc), "not_found")
@@ -4092,8 +4138,12 @@ class PropLineClient:
             )
         fetched_at = datetime.utcnow()
         props = [
-            prop for record in raw_records
-            if (prop := normalize_propline_prizepicks_record(record, fetched_at=fetched_at))
+                prop for record in raw_records
+                if (prop := normalize_propline_prizepicks_record(
+                    record,
+                    fetched_at=fetched_at,
+                    provider=bookmaker,
+                ))
             is not None
         ]
         if not complete:
@@ -4405,9 +4455,12 @@ class PropLineClient:
                     url,
                     params,
                     extractor=(
-                        _official_odds_records
+                        lambda payload: _official_odds_records(
+                            payload,
+                            bookmaker=bookmaker,
+                        )
                         if url.startswith(f"{DEFAULT_PROPLINE_API_URL}/v1/")
-                        else _extract_records
+                        else _extract_records(payload)
                     ),
                 )
             except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
@@ -4436,7 +4489,11 @@ class PropLineClient:
             props = [
                 prop
                 for record in raw_records
-                if (prop := normalize_propline_prizepicks_record(record, fetched_at=fetched_at))
+                if (prop := normalize_propline_prizepicks_record(
+                    record,
+                    fetched_at=fetched_at,
+                    provider=bookmaker,
+                ))
                 is not None
             ]
             # An empty, fully paginated response is a valid complete snapshot.
@@ -4445,8 +4502,9 @@ class PropLineClient:
             # the last known complete feed.
             snapshot_complete = complete and (not raw_records or bool(props))
             logger.info(
-                "PropLine PrizePicks snapshot: sport=%s raw_records=%d "
+                "PropLine %s snapshot: sport=%s raw_records=%d "
                 "normalized_props=%d complete=%s",
+                provider_name_for_bookmaker(bookmaker),
                 sport_key or "__custom__",
                 len(raw_records),
                 len(props),
@@ -4569,7 +4627,7 @@ class PropLinePrizePicksProvider(PropProviderBase):
 
     @property
     def provider_name(self) -> str:
-        return PROPLINE_PROVIDER_NAME
+        return provider_name_for_bookmaker(self.bookmaker)
 
     @property
     def sport_keys(self) -> list[str]:

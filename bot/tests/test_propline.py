@@ -1340,6 +1340,34 @@ def _event_odds(event_id, player="Alex Example", direction="Over"):
     ]
 
 
+@pytest.mark.parametrize(
+    ("bookmaker", "provider"),
+    [
+        ("prizepicks", "PrizePicks"),
+        ("draftkings", "DraftKings"),
+        ("fanduel", "FanDuel"),
+        ("underdog", "Underdog"),
+    ],
+)
+def test_official_odds_parser_preserves_requested_bookmaker_identity(
+    bookmaker, provider
+):
+    payload = _event_odds("game-1")
+    payload[0]["bookmakers"][0]["key"] = bookmaker
+
+    records = propline_module._official_odds_records(
+        payload,
+        bookmaker=bookmaker,
+    )
+    prop = normalize_propline_prizepicks_record(
+        records[0],
+        provider=bookmaker,
+    )
+
+    assert prop is not None
+    assert prop.provider == provider
+
+
 def _event_results(event_id, resolution="won"):
     return {
         "id": event_id,

@@ -4064,12 +4064,13 @@ class Database:
         stat_type: str,
         limit: int = 30,
         *,
+        provider: str = "PrizePicks",
         external_id: str = "",
         game_id: str = "",
     ) -> "list[PropLineHistory]":
-        """Return chronological PropLine observations for one source identity.
+        """Return chronological observations for one provider/source identity.
 
-        A source ID or event ID is required so separate PrizePicks events or
+        A source ID or event ID is required so separate provider events or
         alternate projections cannot be combined into one movement timeline.
         The existing append-only ``PropLineHistory`` rows remain the sole data
         source; this method only changes selection order and applies the
@@ -4082,7 +4083,7 @@ class Database:
         safe_limit = max(1, int(limit))
         async with self.session() as s:
             filters = [
-                PropLineHistory.provider == "PrizePicks",
+                PropLineHistory.provider == provider,
                 PropLineHistory.player_name == player_name,
                 PropLineHistory.sport == sport,
                 PropLineHistory.stat_type == stat_type,
@@ -4105,15 +4106,17 @@ class Database:
         sport: str,
         stat_type: str,
         *,
+        provider: str = "PrizePicks",
         external_id: str = "",
         game_id: str = "",
     ) -> Optional[PropLineHistory]:
-        """Return the first persisted PrizePicks observation for one source."""
+        """Return the first persisted provider observation for one source."""
         rows = await self.get_propline_line_movement_history(
             player_name,
             sport,
             stat_type,
             limit=1,
+            provider=provider,
             external_id=external_id,
             game_id=game_id,
         )
@@ -4125,17 +4128,18 @@ class Database:
         sport: str,
         stat_type: str,
         *,
+        provider: str = "PrizePicks",
         external_id: str = "",
         game_id: str = "",
     ) -> Optional[PropLineHistory]:
-        """Return the latest persisted PrizePicks observation for one source."""
+        """Return the latest persisted provider observation for one source."""
         source_id = str(external_id or "").strip()
         event_id = str(game_id or "").strip()
         if not source_id and not event_id:
             return None
         async with self.session() as s:
             filters = [
-                PropLineHistory.provider == "PrizePicks",
+                PropLineHistory.provider == provider,
                 PropLineHistory.player_name == player_name,
                 PropLineHistory.sport == sport,
                 PropLineHistory.stat_type == stat_type,
@@ -7297,13 +7301,16 @@ class Database:
     ) -> "dict[tuple[str, str, str, str, float, str], PropLineHistory]":
         """Return the current normalized active prop universe by provider/line.
 
-        PropLineHistory is the shared tracking stream for PrizePicks and
-        Underdog. The latest row is selected per provider-owned event identity,
-        so a removal marker cannot resurrect an older line.
+        PropLineHistory is the shared tracking stream for every configured
+        player-prop provider. The latest row is selected per provider-owned
+        event identity, so a removal marker cannot resurrect an older line.
         """
         provider_names = tuple(dict.fromkeys(
             str(provider).strip()
-            for provider in (providers or ("Underdog", "PrizePicks"))
+            for provider in (
+                providers
+                or ("Underdog", "PrizePicks", "DraftKings", "FanDuel")
+            )
             if str(provider).strip()
         ))
         if not provider_names:

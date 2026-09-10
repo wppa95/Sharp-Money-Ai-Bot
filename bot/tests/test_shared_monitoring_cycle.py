@@ -238,7 +238,7 @@ def test_scheduler_has_one_underdog_monitor_owner_and_no_heartbeat_handoff():
 
     assert "name=\"underdog_monitor\"" in main_source
     assert "name=\"prizepicks_monitor\"" not in main_source
-    assert "_shared_monitoring_cycle" not in main_source
+    assert "_shared_monitoring_cycle" in main_source
     assert "_start_prizepicks_cycle" not in main_source
     assert "_start_prizepicks_cycle" not in heartbeat_source
     assert "record_monitoring_cycle_complete" in inspect.getsource(

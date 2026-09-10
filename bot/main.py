@@ -98,6 +98,7 @@ from market_engine import (
     reset_monitoring_runtime_state,
     shutdown_db_persistence_worker,
     underdog_job,
+    _shared_monitoring_cycle,
     _full_pool_rescan_job,
 )
 from player_history_job import player_history_collector_job
@@ -869,10 +870,13 @@ async def post_init(application: Application) -> None:
                 name="odds_poller",
             )
         # jq.run_repeating(_steam_check_job,    interval=config.STEAM_CHECK_INTERVAL,      first=15,  name="steam_checker")
+        shared_player_props_cycle = _shared_monitoring_cycle(
+            _underdog_monitor_cycle
+        )
         jq.run_repeating(
             _coordinated_job(
                 "underdog_monitor",
-                _underdog_monitor_cycle,
+                shared_player_props_cycle,
                 exclusive_group=_SQLITE_WRITE_JOB_GROUP,
                 # Cadence-critical monitoring has its own full-scan handoff
                 # guard in market_engine. Do not make it wait behind FPR,

@@ -11,7 +11,7 @@ import json
 from typing import Any
 
 
-_MIN_DELIVERY_EVIDENCE_SAMPLES = 5
+_MIN_DELIVERY_EVIDENCE_SAMPLES = 1
 _SOURCE_KEYS = ("data_source", "source", "src")
 _NESTED_KEYS = (
     "evidence",

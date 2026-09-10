@@ -140,3 +140,4 @@
 - [Provider-aware prop ledger](provider-aware-prop-ledger.md) — every supported feed keeps source identity across observation, history, tracking, grading, and reports; sportsbook rows never enter the Underdog alert universe.
 - [Adaptive learning policy](adaptive-learning-policy.md) — provider-aware weights are explicit, audited, bounded ranking adjustments and never qualification or delivery gates.
 - [Optional score reporting](optional-score-reporting.md) — diagnostic ranking output must tolerate missing scores without aborting the monitoring cycle.
+- [PropLine shared ingestion](propline-shared-ingestion.md) — schedule the shared wrapper and account for canonical deduplication when validating provider batch persistence.

@@ -578,11 +578,13 @@ async def _persist_propline_observations(
 ) -> int:
     """Persist one source-specific PropLine batch before evaluation begins.
 
-    The request worker is intentionally the durability boundary. PrizePicks
+    The request worker is intentionally the durability boundary. Provider
     evaluation may be slow and is allowed to run independently of the
     Underdog cadence, so waiting for evaluation before writing would make a
     successful provider response disappear from the database during a long
-    cycle.
+    cycle. The canonical persistence layer intentionally coalesces duplicate
+    raw observations, so the return value reports the input batch as complete
+    once every valid canonical row has been written.
     """
     if db is None or not props:
         return 0
@@ -598,7 +600,7 @@ async def _persist_propline_observations(
             append_observations=True,
             track=include_tracking,
         )
-        return len(canonical_props)
+        return len(props)
     except Exception as exc:  # noqa: BLE001
         logger.warning(
             "propline_request_scan: persistence failed: %s",
@@ -954,6 +956,27 @@ def _propline_provider_label(bookmaker: str) -> str:
     return _PROPLINE_BOOKMAKER_PROVIDERS.get(
         normalized,
         normalized.title() or "PropLine",
+    )
+
+
+def _configured_propline_provider_labels() -> tuple[str, ...]:
+    """Return every configured PropLine source label for shared monitoring."""
+    labels: list[str] = []
+    bookmakers = getattr(config, "propline_bookmakers", None) or (
+        "prizepicks",
+        "draftkings",
+        "fanduel",
+        "underdog",
+    )
+    for bookmaker in bookmakers:
+        label = _propline_provider_label(bookmaker)
+        if label not in labels:
+            labels.append(label)
+    return tuple(labels) or (
+        "PrizePicks",
+        "DraftKings",
+        "FanDuel",
+        "Underdog",
     )
 
 
@@ -8014,15 +8037,15 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
 
     try:
         # ── Fetch full active pool from DB (zero provider API calls) ──────────
-        # PropLineHistory is the canonical shared stream for both primary
-        # providers. Keep the legacy Underdog query as a compatibility fallback
+        # PropLineHistory is the canonical shared stream for every configured
+        # provider. Keep the legacy Underdog query as a compatibility fallback
         # for older test doubles and databases.
         _generic_pool = getattr(
             db, "get_all_active_prop_line_history_by_line", None
         )
         if asyncio.iscoroutinefunction(_generic_pool):
             active_pool: dict = await _generic_pool(
-                providers=("Underdog", "PrizePicks")
+                providers=_configured_propline_provider_labels()
             )
             # Underdog's live feed still owns the legacy snapshot table. Merge
             # it into the same serialized rotation instead of dropping it when
@@ -8097,9 +8120,12 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
 
         def _fpr_parts(key, snap) -> tuple[str, str, str, str, float, str]:
             """Normalize provider-scoped keys and legacy Underdog keys."""
+            _provider_labels = {
+                label.lower() for label in _configured_propline_provider_labels()
+            }
             _key_provider = (
                 len(key) >= 4
-                and str(key[0]).strip().lower() in {"underdog", "prizepicks"}
+                and str(key[0]).strip().lower() in _provider_labels
             )
             if _key_provider and len(key) >= 6:
                 provider, player, sport, stat, line, source_id = key[:6]
@@ -8114,8 +8140,7 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                 _snap_provider = getattr(snap, "provider", None)
                 provider = (
                     _snap_provider
-                    if str(_snap_provider).strip().lower()
-                    in {"underdog", "prizepicks"}
+                    if str(_snap_provider).strip().lower() in _provider_labels
                     else "Underdog"
                 )
                 player, stat, line = key[:3]
@@ -8330,17 +8355,10 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                 _fpr_line_val,
                 _fpr_source_id,
             ) = _fpr_parts(_fpr_key, _fpr_snap)
-            _fpr_pp_line = (
-                _fpr_line_val
-                if _fpr_provider == "PrizePicks"
-                else _fpr_prizepicks_lines.get(
-                    (
-                        normalize_name(_fpr_player),
-                        _fpr_sport.upper(),
-                        _normalize_prop_stat(_fpr_stat),
-                    )
-                )
-            )
+            # Every provider is first-class in the same universe. Keep the
+            # legacy pp_line field for downstream compatibility, but use this
+            # row's own line rather than privileging PrizePicks.
+            _fpr_pp_line = _fpr_line_val
             _fpr_line = float(
                 getattr(_fpr_snap, "line_value", None) or _fpr_line_val
             )

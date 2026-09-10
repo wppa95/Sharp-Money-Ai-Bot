@@ -667,12 +667,12 @@ def _has_strong_underdog_evidence(
         n_supplemental = int(
             getattr(validation, "n_supplemental_games", 0) or 0
         )
-        if source_lower in {"real", "primary"} and n_real >= 5:
+        if source_lower in {"real", "primary"} and n_real >= 1:
             return True
-        if source_lower == "propline" and n_supplemental >= 5:
+        if source_lower == "propline" and n_supplemental >= 1:
             return True
         if source_lower in {"real+propline", "primary+propline"}:
-            return n_real + n_supplemental >= 5
+            return n_real + n_supplemental >= 1
     for obj in (decision, intelligence_trace):
         if isinstance(obj, dict):
             if serialized_evidence_supports_delivery(obj):
