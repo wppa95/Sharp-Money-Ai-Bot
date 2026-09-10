@@ -1133,7 +1133,7 @@ async def wait_for_underdog_persistence_idle() -> None:
 
 
 async def acquire_player_history_persistence_slot() -> None:
-    """Claim the SQLite write window for one bulk player-history drain."""
+    """Claim the SQLite write window for one bulk player-history batch."""
     global _player_history_persistence_running
     while (
         _ud_full_scan_running

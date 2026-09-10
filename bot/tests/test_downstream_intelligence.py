@@ -101,3 +101,28 @@ async def test_persistence_upsert_preserves_grade_and_updates_intelligence(db):
     assert row.actual_value == 25.0
     assert row.sharp_confidence is not None
     assert row.downstream_intelligence_json is not None
+
+
+@pytest.mark.asyncio
+async def test_bulk_opportunity_write_defaults_legacy_confidence(db):
+    written = await db.log_prop_opportunity_bulk([{
+        "external_id": "bulk-no-confidence",
+        "player_name": "Bulk Player",
+        "team": "TST",
+        "sport": "NFL",
+        "stat_type": "Rush Yards",
+        "line_value": 25.5,
+        "recommendation": "OVER",
+        "confidence": None,
+        "provider": "Underdog",
+    }])
+
+    assert written == 1
+    async with db.session() as session:
+        from sqlalchemy import select
+        row = (await session.execute(
+            select(PropOpportunityLog).where(
+                PropOpportunityLog.external_id == "bulk-no-confidence"
+            )
+        )).scalar_one()
+    assert row.confidence == 0

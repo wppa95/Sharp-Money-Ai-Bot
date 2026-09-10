@@ -6850,7 +6850,13 @@ class Database:
             _stat_type = str(_stat_type)
             # These fields remain writable for older direct callers while the
             # active scan paths pass them as empty/None during migration.
-            _confidence = opportunity.get("confidence", 0)
+            # Direction-only monitoring rows may intentionally omit the
+            # retired confidence field, but the legacy table column remains
+            # NOT NULL. Store neutral zero rather than letting one valid
+            # directional row abort the entire bulk transaction.
+            _confidence = opportunity.get("confidence")
+            if _confidence is None:
+                _confidence = 0
             _bet_quality = opportunity.get("bet_quality_score")
             _intelligence = opportunity.get("downstream_intelligence")
             _analyst = opportunity.get("analyst_result")
