@@ -618,7 +618,11 @@ async def _persist_underdog_postscan(
     """Bridge and update lifecycle rows as one required post-scan phase."""
     bridged = await db.sync_underdog_snapshots_to_prop_history(
         limit=100000,
-        since_hours=0.17,
+        # Bridge only the observations fetched by this scan.  Re-reading the
+        # previous ten minutes here made every cycle repeatedly rebuild the
+        # same snapshot/history population and could hold the SQLite writer
+        # past the monitoring cadence.
+        since_at=now,
     )
     if bridged:
         logger.debug("underdog_job: bridged %d rows to PropLineHistory", bridged)
@@ -4206,24 +4210,9 @@ def _shared_monitoring_cycle(cycle_branch):
                 "reusing its queued handoff"
             )
 
-        # The ingestion task is still the only paced PropLine request owner.
-        # Wait for its handoff before evaluating PropLine, but do not delay the
-        # already-running Underdog scan while provider pacing is in progress.
-        _ingest_task = _propline_ingest_task
-        if _ingest_task is not None and not _ingest_task.done():
-            try:
-                await _ingest_task
-            except asyncio.CancelledError:
-                raise
-            except Exception as exc:  # noqa: BLE001
-                logger.error(
-                    "shared_monitoring_cycle: PropLine ingestion failed: %s",
-                    exc,
-                )
-
-        # PropLine observations are already persisted and indexed as
-        # supplemental evidence. They must not enter a separate opportunity or
-        # Telegram-delivery lane.
+        # PropLine owns its pacing and persistence in the background task.
+        # Do not await the full bookmaker/sport rotation here: a slow optional
+        # feed must not hold the 60-second Underdog health cycle open.
         _propline_pending_props.clear()
         try:
             result = await _underdog_task
@@ -5404,9 +5393,9 @@ async def underdog_job(context) -> None:
                         "player":          player,
                         "stat_type":       stat_type,
                         "sport":           snap.sport or "UNKNOWN",
-                        "total":           None,
+                        "total":           score.total,
                         "path":            "new",
-                        "score_tier":      None,
+                        "score_tier":      score.tier,
                         "direction":       (
                             decision.recommendation
                             if decision is not None
@@ -5732,8 +5721,8 @@ async def underdog_job(context) -> None:
                             "stat_type":       stat_type,
                             "sport":           snap.sport or "UNKNOWN",
                             "team":            snap.team or "",
-                            "total":           None,
-                            "score_tier":      None,
+                            "total":           score.total,
+                            "score_tier":      score.tier,
                             "path":            "cs" if is_cold_start else "lc",
                             "direction":       (
                                 decision.recommendation
@@ -6000,9 +5989,27 @@ async def underdog_job(context) -> None:
             )
             record.removed = is_removed
             record.alert_sent = ud_result.sent
-            record.score_total = None
-            record.score_tier = None
-            record.score_stars = None
+            # Clamp diagnostic values at the persistence boundary. Delivery
+            # remains direction/evidence based, but clearing these fields made
+            # supported non-MLB evaluations appear as ``score=N/A`` in reports
+            # and made it impossible to distinguish "not scored" from "scored
+            # but no direction".
+            if score is not None:
+                _persisted_score_total = clamp_score(score.total, "ud_score.total")
+                _persisted_score_stars = clamp_score(score.stars, "ud_score.stars", 0, 5)
+            else:
+                _persisted_score_total = None
+                _persisted_score_stars = None
+            if (
+                decision is not None
+                and isinstance(getattr(decision, "confidence", None), (int, float))
+            ):
+                _persisted_confidence = clamp_score(decision.confidence, "decision.confidence", 0, 95)
+            else:
+                _persisted_confidence = None
+            record.score_total = _persisted_score_total
+            record.score_tier = getattr(score, "tier", None)
+            record.score_stars = _persisted_score_stars
             record.alert_outcome = _alert_outcome
             record.validation_json = (
                 validation.to_json() if validation is not None else None
@@ -6010,7 +6017,7 @@ async def underdog_job(context) -> None:
             record.bet_recommendation = (
                 decision.recommendation if decision is not None else None
             )
-            record.bet_confidence = None
+            record.bet_confidence = _persisted_confidence
             record.bet_reason = decision.reason if decision is not None else None
             record.bet_evidence_json = (
                 decision.to_json() if decision is not None else None
@@ -6018,8 +6025,8 @@ async def underdog_job(context) -> None:
             record.fetched_at = now
             _next_ud_scan_state[(player, stat_type)] = SimpleNamespace(
                 line_value=float(snap.line or 0.0),
-                score_tier=None,
-                score_total=None,
+                score_tier=getattr(score, "tier", None),
+                score_total=_persisted_score_total,
                 alert_sent=bool(ud_result.sent),
                 fetched_at=now,
             )
@@ -6975,9 +6982,9 @@ async def underdog_job(context) -> None:
                         "stat_type":            _cp.get("stat_type", ""),
                         "line_value":           float(_cp.get("line") or 0.0),
                         "provider":             "Underdog",
-                        "score_total":          None,
-                        "score_tier":           None,
-                        "confidence":           None,
+                        "score_total":          _cp.get("total"),
+                        "score_tier":           _cp.get("score_tier"),
+                        "confidence":           _cp.get("decision_conf"),
                         # Legacy column retained for schema compatibility.
                         # Current monitoring uses one neutral evaluated state;
                         # delivery is measured separately in ScanCycleLog.
@@ -8478,9 +8485,9 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                     "stat_type": _fpr_stat,
                     "line_value": _fpr_line,
                     "provider": _fpr_provider,
-                    "score_total": None,
-                    "score_tier": None,
-                    "confidence": None,
+                    "score_total": getattr(_fpr_score, "total", None),
+                    "score_tier": getattr(_fpr_score, "tier", None),
+                    "confidence": getattr(_fpr_dec, "confidence", None),
                     "gate_decision": "EVALUATED",
                     "rejection_reason": None,
                     "reason_codes": json.dumps(

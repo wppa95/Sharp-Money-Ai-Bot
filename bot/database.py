@@ -4454,6 +4454,7 @@ class Database:
         self,
         limit: int | None = None,
         since_hours: int = 48,
+        since_at: datetime | None = None,
     ) -> int:
         """
         Bridge Underdog snapshot records into the shared PropLineHistory table
@@ -4470,7 +4471,11 @@ class Database:
         from datetime import timedelta
         from sqlalchemy import update as sa_update
 
-        cutoff = datetime.utcnow() - timedelta(hours=since_hours)
+        cutoff = (
+            since_at
+            if since_at is not None
+            else datetime.utcnow() - timedelta(hours=since_hours)
+        )
 
         # Load recent Underdog snapshots (all, including removed — we track removals)
         async with self.session() as s:
@@ -4587,6 +4592,24 @@ class Database:
                 change_delta = (getattr(existing, "change_count", 0) or 0)
                 if line_changed:
                     change_delta += 1
+
+                # The live monitoring bridge receives a complete feed every
+                # minute, but a stable prop does not need a write on every
+                # observation.  The snapshot ledger is the authoritative
+                # freshness record; PropLineHistory only needs a write here
+                # when lifecycle, line, or diagnostic state changes.  Keep
+                # the legacy full-history behavior for maintenance callers
+                # that do not provide an explicit scan boundary.
+                if since_at is not None:
+                    _state_changed = (
+                        line_changed
+                        or bool(getattr(existing, "removed", False)) != is_removed
+                        or bool(getattr(latest_snap, "provider_status", None))
+                        and getattr(existing, "provider_status", None)
+                        != getattr(latest_snap, "provider_status", None)
+                    )
+                    if not _state_changed:
+                        continue
 
                 uvals: dict = {
                     "line_value": new_line,
@@ -7043,12 +7066,13 @@ class Database:
                     stat_type            = c.get("stat_type", ""),
                     line_value           = float(c.get("line_value") or 0.0),
                     provider             = c.get("provider", "Underdog"),
-                    # Candidate telemetry retains its row shape for schema
-                    # compatibility, but the active framework does not write
-                    # composite score, tier, or confidence metadata.
-                    score_total          = None,
-                    score_tier           = None,
-                    confidence           = None,
+                    # Preserve diagnostic score metadata when the evaluator
+                    # supplied it. Direction and evidence remain the delivery
+                    # gates, but reports must distinguish an evaluated prop
+                    # from one that was never scored.
+                    score_total          = c.get("score_total"),
+                    score_tier           = c.get("score_tier"),
+                    confidence           = c.get("confidence"),
                     gate_decision        = c.get("gate_decision", "EVALUATED"),
                     rejection_reason     = c.get("rejection_reason"),
                     reason_codes         = c.get("reason_codes"),

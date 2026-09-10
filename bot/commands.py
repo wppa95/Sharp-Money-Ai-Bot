@@ -609,8 +609,6 @@ async def cmd_health(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
 
         _JOB_LABELS = {
             "underdog_monitor":      "Underdog monitor",
-            "clv_seeder":            "CLV seeder",
-            "clv_harvester":         "CLV harvester",
             "budget_checker":        "Budget checker",
             "season_checker":        "Season checker",
             "opportunity_grader":    "Opportunity grader",

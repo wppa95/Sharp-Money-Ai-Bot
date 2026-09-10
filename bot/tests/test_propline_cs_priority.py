@@ -10,6 +10,7 @@ import pytest
 
 import market_engine
 from alerts import _has_strong_underdog_evidence
+from engine.delivery_evidence import serialized_evidence_supports_delivery
 from engine.player_validator import PlayerPropValidation
 from providers.player_stats import RawGameResult
 
@@ -127,6 +128,33 @@ def test_serialized_validation_json_keeps_propline_provenance_and_count():
 
     assert _has_strong_underdog_evidence(decision=decision) is True
     assert market_engine._has_strong_delivery_evidence(decision=decision) is True
+
+
+@pytest.mark.parametrize(
+    "source",
+    ["historical_average", "historical-average", "historical line average fallback"],
+)
+def test_historical_average_is_delivery_evidence_without_settled_windows(source):
+    validation = SimpleNamespace(
+        has_supporting_data=True,
+        data_source=source,
+        n_real_games=0,
+        n_supplemental_games=0,
+    )
+    decision = SimpleNamespace(
+        recommendation="OVER",
+        avg_vs_line_pct=0.12,
+        l5_games=None,
+        l10_games=None,
+    )
+
+    assert _has_strong_underdog_evidence(
+        validation=validation,
+        decision=decision,
+    ) is True
+    assert serialized_evidence_supports_delivery(
+        {"evidence": {"data_source": source}}
+    ) is True
 
 
 def test_telegram_delivery_requires_strong_over_in_every_window():

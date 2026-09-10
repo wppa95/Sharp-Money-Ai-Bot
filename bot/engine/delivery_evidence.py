@@ -23,6 +23,27 @@ _NESTED_KEYS = (
 )
 
 
+def is_historical_average_source(value: Any) -> bool:
+    """Return whether a source label identifies line-average fallback evidence."""
+    if not isinstance(value, str):
+        return False
+    source = " ".join(value.strip().lower().replace("_", " ").replace("-", " ").split())
+    if source in {
+        "historical average",
+        "historical avg",
+        "historical line",
+        "historical line average",
+        "historical average fallback",
+        "average fallback",
+        "line average fallback",
+    }:
+        return True
+    return (
+        "historical" in source
+        and any(token in source for token in ("average", "avg", "line", "fallback"))
+    )
+
+
 def _nonnegative_int(value: Any) -> int | None:
     if isinstance(value, bool):
         return None
@@ -77,6 +98,10 @@ def _payload_has_sufficient_evidence(payload: dict[str, Any]) -> bool:
         "",
     )
     source = str(source_value).strip().lower()
+    if is_historical_average_source(source):
+        # Historical-average fallback is the evidence itself. It intentionally
+        # does not require settled last-5/last-10 windows or a game count.
+        return True
     if source not in {
         "real",
         "game_results",

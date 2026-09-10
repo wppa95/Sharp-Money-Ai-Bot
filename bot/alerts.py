@@ -35,7 +35,10 @@ from config import config
 from engine.delivery_gates import directional_evidence_gate as _directional_evidence_gate
 from engine.score_validation import clamp_score
 from engine.sport_policy import is_football_related_sport
-from engine.delivery_evidence import serialized_evidence_supports_delivery
+from engine.delivery_evidence import (
+    is_historical_average_source,
+    serialized_evidence_supports_delivery,
+)
 from models import EVOpportunity, Recommendation, SteamAlert
 
 if TYPE_CHECKING:
@@ -663,6 +666,10 @@ def _has_strong_underdog_evidence(
                 return True
             return False
         source_lower = source.lower().strip()
+        if is_historical_average_source(source_lower):
+            # Historical line/average fallback is valid evidence for
+            # non-football props even when settled game windows are absent.
+            return True
         n_real = int(getattr(validation, "n_real_games", 0) or 0)
         n_supplemental = int(
             getattr(validation, "n_supplemental_games", 0) or 0

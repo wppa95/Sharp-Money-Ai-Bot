@@ -63,7 +63,6 @@ from commands import (
     cmd_alerts,
     cmd_reconcile,
     cmd_grade,
-    cmd_clv,
     cmd_market,
     cmd_performance,
     cmd_backtest,
@@ -153,7 +152,6 @@ TELEGRAM_COMMAND_HANDLERS = (
     ("market", cmd_market),
     ("steam", cmd_steam),
     ("ev", cmd_ev),
-    ("clv", cmd_clv),
     ("performance", cmd_performance),
     ("backtest", cmd_backtest),
     ("stats", cmd_stats),
@@ -194,7 +192,6 @@ TELEGRAM_COMMAND_CATALOG = [
     {"command": "market", "description": "Line movement and validation summary", "category": "Market Analysis", "sort_order": 110},
     {"command": "steam", "description": "Recent steam moves", "category": "Market Analysis", "sort_order": 120},
     {"command": "ev", "description": "Recent EV opportunities", "category": "Market Analysis", "sort_order": 130},
-    {"command": "clv", "description": "Closing Line Value history", "category": "Market Analysis", "sort_order": 140},
     {"command": "performance", "description": "Pick performance by sport", "category": "Performance", "sort_order": 200},
     {"command": "backtest", "description": "Replay resolved picks through the model", "category": "Performance", "sort_order": 210},
     {"command": "stats", "description": "Pick generation and outcome summary", "category": "Performance", "sort_order": 220},
@@ -257,7 +254,7 @@ async def sync_telegram_command_catalog(
         # older databases may still contain their catalog rows. Disable them
         # before publishing Telegram's menu so retired provider surfaces do
         # not reappear after restart.
-        await db.disable_telegram_commands(("pp_import", "propdata"))
+        await db.disable_telegram_commands(("pp_import", "propdata", "clv"))
         command_rows = await db.get_telegram_commands(enabled_only=True)
     except Exception as exc:
         logger.warning(
@@ -534,7 +531,10 @@ _scheduled_execution_coordinator = _ScheduledExecutionCoordinator()
 # ownership group so they wait before starting instead of competing for the
 # process-wide writer gate while a full Underdog persistence drain is active.
 _SQLITE_WRITE_JOB_GROUP = "sqlite_write_jobs"
-_SCAN_JOB_KWARGS = {"coalesce": False, "max_instances": 1000}
+# Let APScheduler coalesce a slow scan instead of queueing overlapping scans.
+# The coordinator still serializes named callbacks, but an unbounded scheduler
+# backlog can make the next health cycle appear permanently stale.
+_SCAN_JOB_KWARGS = {"coalesce": True}
 
 
 def _coordinated_job(
@@ -946,32 +946,6 @@ async def post_init(application: Application) -> None:
         )
         # Underdog, PropLine, full-pool, grading, and player history each own
         # independent scheduler callbacks. None is a child of another cycle.
-        # CLV seed job — every 15 minutes (creates AlertCLVSeed entries for alerts)
-        jq.run_repeating(
-            _coordinated_job(
-                "clv_seeder",
-                _clv_seed_job,
-                exclusive_group=_SQLITE_WRITE_JOB_GROUP,
-                # CLV seeding uses the database's process-wide writer gate;
-                # keeping it out of the scheduler-level group prevents a
-                # long monitoring pass from leaving /health at "never ran".
-                use_exclusive_group=False,
-            ),
-            interval=900,
-            first=10,
-            name="clv_seeder",
-        )
-        # CLV harvest job — every hour (processes seeds after game_time passes)
-        jq.run_repeating(
-            _coordinated_job(
-                "clv_harvester",
-                _clv_harvest_job,
-                exclusive_group=_SQLITE_WRITE_JOB_GROUP,
-            ),
-            interval=3600,
-            first=20,
-            name="clv_harvester",
-        )
         # Player-result collection uses the dedicated history pool, but shares
         # the heavy-job ownership group with monitoring. It waits for the live
         # scan and its persistence drain before claiming SQLite.
