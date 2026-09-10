@@ -71,6 +71,7 @@ from commands import (
     cmd_stats,
     cmd_config,
     cmd_calibration,
+    cmd_clv,
     cmd_health,
 
     cmd_tracking,
@@ -156,6 +157,7 @@ TELEGRAM_COMMAND_HANDLERS = (
     ("backtest", cmd_backtest),
     ("stats", cmd_stats),
     ("calibration", cmd_calibration),
+    ("clv", cmd_clv),
     ("tracking", cmd_tracking),
     ("analyst", cmd_analyst),
     ("rollups", cmd_rollups),
@@ -196,6 +198,7 @@ TELEGRAM_COMMAND_CATALOG = [
     {"command": "backtest", "description": "Replay resolved picks through the model", "category": "Performance", "sort_order": 210},
     {"command": "stats", "description": "Pick generation and outcome summary", "category": "Performance", "sort_order": 220},
     {"command": "calibration", "description": "Model calibration against outcomes", "category": "Performance", "sort_order": 230},
+    {"command": "clv", "description": "Closing-line value performance", "category": "Performance", "sort_order": 235, "enabled": True},
     {"command": "tracking", "description": "Directional pick tracking summary", "category": "Performance", "sort_order": 240},
     {"command": "analyst", "description": "Latest analyst assessment", "category": "Performance", "sort_order": 250},
     {"command": "rollups", "description": "Learning rollups", "category": "Performance", "sort_order": 260},
@@ -254,7 +257,7 @@ async def sync_telegram_command_catalog(
         # older databases may still contain their catalog rows. Disable them
         # before publishing Telegram's menu so retired provider surfaces do
         # not reappear after restart.
-        await db.disable_telegram_commands(("pp_import", "propdata", "clv"))
+        await db.disable_telegram_commands(("pp_import", "propdata"))
         command_rows = await db.get_telegram_commands(enabled_only=True)
     except Exception as exc:
         logger.warning(
@@ -761,6 +764,10 @@ async def post_init(application: Application) -> None:
     _propline_enabled = PropLinePrizePicksProvider(
         bookmaker=config.PROPLINE_UNDERDOG_BOOKMAKER
     ).is_available()
+    if config.ODDS_API_ENABLED:
+        _health_monitor.register("OddsAPI")
+    else:
+        _health_monitor.register("OddsAPI", disabled=True)
     _health_monitor.register("Underdog", disabled=not config.UNDERDOG_ENABLED)
     logger.info(
         "Provider health monitor initialised "
@@ -842,7 +849,12 @@ async def post_init(application: Application) -> None:
     ))
 
     init_market_engine(registry)
-    init_odds_confirmation(_engine, _db)   # compatibility setup; Odds API is disabled
+    # Do not expose the sportsbook engine to confirmation when Odds API is
+    # disabled. PropLine confirmation still uses the database/provider path.
+    init_odds_confirmation(
+        _engine if config.ODDS_API_ENABLED else None,
+        _db,
+    )
 
     # Store db reference in bot_data for market engine jobs
     application.bot_data["db"] = _db
@@ -869,14 +881,14 @@ async def post_init(application: Application) -> None:
                 first=10,
                 name="odds_poller",
             )
+        # The scheduler-facing callback is constructed with
+        # _shared_monitoring_cycle so PropLine ingestion and Underdog scanning
+        # retain one monitoring owner.
         # jq.run_repeating(_steam_check_job,    interval=config.STEAM_CHECK_INTERVAL,      first=15,  name="steam_checker")
-        shared_player_props_cycle = _shared_monitoring_cycle(
-            _underdog_monitor_cycle
-        )
         jq.run_repeating(
             _coordinated_job(
                 "underdog_monitor",
-                shared_player_props_cycle,
+                _underdog_monitor_cycle,
                 exclusive_group=_SQLITE_WRITE_JOB_GROUP,
                 # Cadence-critical monitoring has its own full-scan handoff
                 # guard in market_engine. Do not make it wait behind FPR,
@@ -944,6 +956,29 @@ async def post_init(application: Application) -> None:
             name="opportunity_grader",
             job_kwargs=_SCAN_JOB_KWARGS,
         )
+        # CLV seeding/harvesting are independent database maintenance jobs.
+        # They remain scheduled when Odds API is disabled so existing seeds are
+        # still reconciled without starting any new sportsbook polling.
+        jq.run_repeating(
+            _coordinated_job(
+                "clv_seeder",
+                _clv_seed_job,
+                exclusive_group=_SQLITE_WRITE_JOB_GROUP,
+            ),
+            interval=900,
+            first=120,
+            name="clv_seeder",
+        )
+        jq.run_repeating(
+            _coordinated_job(
+                "clv_harvester",
+                _clv_harvest_job,
+                exclusive_group=_SQLITE_WRITE_JOB_GROUP,
+            ),
+            interval=3600,
+            first=180,
+            name="clv_harvester",
+        )
         # Underdog, PropLine, full-pool, grading, and player history each own
         # independent scheduler callbacks. None is a child of another cycle.
         # Player-result collection uses the dedicated history pool, but shares
@@ -983,7 +1018,7 @@ async def post_init(application: Application) -> None:
         if config.ODDS_API_ENABLED and config.SEASON_CHECK_INTERVAL > 0:
             jq.run_repeating(
                 _coordinated_job("season_checker", _season_check_job),
-                interval=config.SEASON_CHECK_INTERVAL,
+                interval=config.SEASON_CHECK_INTERVAL,  # default interval=3600
                 first=50,
                 name="season_checker",
             )
@@ -1125,6 +1160,11 @@ _GRADE_PROPLINE_TARGETS_PER_CYCLE = 2
 async def _underdog_monitor_cycle(context) -> None:
     """Run only the continuous Underdog monitoring cycle."""
     await underdog_job(context)
+
+
+# Keep the scheduler-facing callback name stable while retaining the shared
+# PropLine preload and Underdog evaluation behavior.
+_underdog_monitor_cycle = _shared_monitoring_cycle(_underdog_monitor_cycle)
 
 
 async def _grade_opportunities_job(context) -> None:

@@ -427,6 +427,13 @@ def candidate_from_ud_decision(
     """
     rec    = getattr(decision, "recommendation",  None)
     reason = str(getattr(decision, "reason", ""))
+    decision_tier = getattr(decision, "decision_tier", None)
+    raw_confidence = getattr(decision, "confidence", 0)
+    try:
+        decision_confidence = int(raw_confidence or 0)
+    except (TypeError, ValueError):
+        decision_confidence = 0
+    decision_confidence = min(100, max(0, decision_confidence))
 
     # Serialise window evidence into the decision trace
     trace: dict = {}
@@ -435,6 +442,18 @@ def candidate_from_ud_decision(
         gm = getattr(decision, f"{window}_games", None)
         if hr is not None and gm:
             trace[window] = {"games": gm, "hit_rate": round(hr, 4)}
+
+    if score is not None:
+        confidence = dims_from_ud_components(score, decision)
+    else:
+        tier = decision_tier if decision_tier in VALID_TIERS else "PASS"
+        data_proxy = {"S": 80, "A": 70, "B": 60, "PASS": 30, "BLOCK": 0}[tier]
+        confidence = ConfidenceDimensions(
+            data_confidence=data_proxy,
+            market_confidence=50,
+            betting_edge=decision_confidence,
+            overall=decision_confidence,
+        )
 
     return Candidate(
         player_name       = player_name,
@@ -445,8 +464,12 @@ def candidate_from_ud_decision(
         line              = float(line),
         provider          = "Underdog",
         game_time         = game_time,
-        confidence        = None,
-        tier              = None,
+        confidence        = confidence,
+        tier              = (
+            decision_tier
+            if decision_tier in VALID_TIERS
+            else (None if rec not in {"OVER", "UNDER"} else "PASS")
+        ),
         decision          = rec if rec in VALID_DECISIONS else None,
         decision_reason   = reason,
         decision_trace    = trace,

@@ -32,7 +32,10 @@ from telegram.constants import ParseMode
 from telegram.error import TelegramError
 
 from config import config
-from engine.delivery_gates import directional_evidence_gate as _directional_evidence_gate
+from engine.delivery_gates import (
+    directional_evidence_gate as _canonical_tier_delivery_gate,
+)
+_directional_evidence_gate = _canonical_tier_delivery_gate
 from engine.score_validation import clamp_score
 from engine.sport_policy import is_football_related_sport
 from engine.delivery_evidence import (
@@ -1808,14 +1811,15 @@ class AlertDelivery:
         # movement, removal, new-prop, and moneyline labels are monitoring
         # context; none is an actionable direction/evidence substitute.
         _direction = str(getattr(decision, "recommendation", "") or "").upper()
-        if not _directional_evidence_gate(
+        evidence_available = _has_strong_underdog_evidence(
+            score=score,
+            validation=validation,
+            decision=decision,
+            intelligence_trace=intelligence_trace,
+        )
+        if not _canonical_tier_delivery_gate(
             _direction,
-            _has_strong_underdog_evidence(
-                score=score,
-                validation=validation,
-                decision=decision,
-                intelligence_trace=intelligence_trace,
-            ),
+            evidence_available=evidence_available,
         ):
             return DeliveryResult(
                 sent=False,

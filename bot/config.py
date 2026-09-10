@@ -156,7 +156,7 @@ class Config:
     # active catalog remains authoritative when it is available.
     ACTIVE_SPORTS_RAW: str = os.environ.get(
         "ACTIVE_SPORTS",
-        "NFL,NBA,MLB,NHL,NCAAF,NCAAB,UFC,WNBA,EPL,LaLiga,SerieA,"
+        "NFL,CFB,NBA,MLB,NHL,NCAAF,NCAAB,UFC,WNBA,EPL,LaLiga,SerieA,"
         "Bundesliga,Ligue1,MLS,UCL,SOCCER,CS,LOL,VAL,VALORANT,DOTA,"
         "TENNIS,FIFA,PGA,MMA,GOLF,TT,BADMINTON",
     )
@@ -210,13 +210,13 @@ class Config:
     CONNECTOR_POLL_INTERVAL:  int = int(os.environ.get("CONNECTOR_POLL_INTERVAL",  "120"))
     CONSENSUS_CHECK_INTERVAL: int = int(os.environ.get("CONSENSUS_CHECK_INTERVAL", "120"))
     CLV_CHECK_INTERVAL:       int = int(os.environ.get("CLV_CHECK_INTERVAL",       "120"))
-    # One shared Player Props evaluation cycle every 60 seconds by default.
+    # One shared Player Props evaluation cycle every 120 seconds by default.
     # Environment overrides are bounded to the one-to-two-minute range.
     # Each cycle fetches the complete current Underdog feed; the evaluation
     # budget is a lower bound rather than a feed-size cap.
     UNDERDOG_POLL_INTERVAL:   int = max(
         60,
-        min(120, int(os.environ.get("UNDERDOG_POLL_INTERVAL", "60"))),
+        min(120, int(os.environ.get("UNDERDOG_POLL_INTERVAL", "120"))),
     )
     # Thirty-minute cadence for settlement grading. The grader reads durable
     # player-game evidence and independently fetches missing settlement rows.

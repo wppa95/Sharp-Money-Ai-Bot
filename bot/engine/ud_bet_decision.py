@@ -167,7 +167,7 @@ class UDBetDecision:
         return cls(
             recommendation     = None,
             decision_tier      = None,
-            confidence         = None,
+            confidence         = 0,
             reason             = reason,
             avg_vs_line_pct    = avg_vs_line_pct,
             at_historical_low  = at_historical_low,
@@ -176,11 +176,27 @@ class UDBetDecision:
         )
 
     @classmethod
+    def make_pass(
+        cls,
+        reason: str,
+        hit_rates: "Optional[PlayerHitRates]" = None,
+        avg_vs_line_pct: Optional[float] = None,
+        at_historical_low: bool = False,
+    ) -> "UDBetDecision":
+        """Compatibility constructor for a monitored, non-directional result."""
+        return cls.make_no_direction(
+            reason=reason,
+            hit_rates=hit_rates,
+            avg_vs_line_pct=avg_vs_line_pct,
+            at_historical_low=at_historical_low,
+        )
+
+    @classmethod
     def make_pick(
         cls,
         recommendation: str,
         reason: str,
-        hit_rates: "PlayerHitRates",
+        hit_rates: "PlayerHitRates | int | float | None",
         avg_vs_line_pct: Optional[float] = None,
         at_historical_low: bool = False,
         evidence_source: Optional[str] = None,
@@ -189,11 +205,30 @@ class UDBetDecision:
         confidence: Optional[int] = None,
     ) -> "UDBetDecision":
         """Construct an OVER/UNDER decision."""
+        # Older callers used:
+        #   make_pick(recommendation, tier, confidence, reason, hit_rates)
+        # Keep that positional contract working while production callers use
+        # the named, evidence-first arguments above.
+        if (
+            isinstance(hit_rates, (int, float))
+            and not isinstance(hit_rates, bool)
+            and isinstance(avg_vs_line_pct, str)
+            and not isinstance(at_historical_low, bool)
+        ):
+            legacy_tier = reason
+            legacy_confidence = int(round(hit_rates))
+            legacy_reason = avg_vs_line_pct
+            hit_rates = at_historical_low
+            reason = legacy_reason
+            avg_vs_line_pct = None
+            at_historical_low = False
+            decision_tier = legacy_tier
+            confidence = legacy_confidence
         w = _windows_from_hit_rates(hit_rates)
         return cls(
             recommendation     = recommendation,
-            decision_tier      = None,
-            confidence         = None,
+            decision_tier      = decision_tier,
+            confidence         = confidence,
             reason             = reason,
             avg_vs_line_pct    = avg_vs_line_pct,
             at_historical_low  = at_historical_low,
@@ -214,7 +249,12 @@ class UDBetDecision:
         return {"OVER": "🟢", "UNDER": "🔴"}.get(self.recommendation, "⚪")
 
     def confidence_display(self) -> str:
-        return "—"
+        if self.confidence is None or self.confidence <= 0:
+            return "—"
+        return f"{self.confidence}/100"
+
+    def tier_display(self) -> str:
+        return self.decision_tier or "—"
 
     def avg_vs_line_display(self) -> str:
         if self.avg_vs_line_pct is None:
@@ -251,6 +291,8 @@ class UDBetDecision:
         return json.dumps(
             {
                 "rec":  self.recommendation,
+                "tier": self.decision_tier,
+                "conf": self.confidence or 0,
                 "evidence_source": self.evidence_source,
                 "evidence_label": self.evidence_source_display(),
                 "l5":   {"g": self.l5_games, "o": self.l5_over, "r": _r(self.l5_hit_rate), "avg": _r(self.l5_avg)},
@@ -334,6 +376,16 @@ def make_ud_bet_decision(
 
         avg_line = float(getattr(validation, "avg_line"))
         relation = "below" if direction == "OVER" else "above"
+        legacy_tier = str(getattr(score, "tier", "") or "").upper()
+        if legacy_tier not in {"S", "A", "B", "C", "PASS"}:
+            legacy_tier = None
+        raw_confidence = getattr(score, "total", None)
+        if isinstance(raw_confidence, (int, float)) and not isinstance(
+            raw_confidence, bool
+        ):
+            legacy_confidence = max(0, min(_MAX_CONFIDENCE, int(round(raw_confidence))))
+        else:
+            legacy_confidence = 0
         return UDBetDecision.make_pick(
             recommendation=direction,
             reason=(
@@ -346,6 +398,8 @@ def make_ud_bet_decision(
             avg_vs_line_pct=avg_vs_line_pct,
             at_historical_low=at_low,
             evidence_source=EVIDENCE_HISTORICAL_AVERAGE,
+            decision_tier=legacy_tier,
+            confidence=legacy_confidence,
         )
 
     # ── Gate 1: supporting evidence/history required ─────────────────────────
@@ -387,6 +441,8 @@ def make_ud_bet_decision(
         avg_vs_line_pct, at_low,
     )
 
+    tier = _determine_tier(hit_rates, direction, primary)
+    confidence = _compute_confidence(hit_rates, direction, tier, primary)
     return UDBetDecision.make_pick(
         recommendation     = direction,
         reason             = reason,
@@ -394,6 +450,8 @@ def make_ud_bet_decision(
         avg_vs_line_pct    = avg_vs_line_pct,
         at_historical_low  = at_low,
         evidence_source    = EVIDENCE_SETTLED_RESULTS,
+        decision_tier      = tier,
+        confidence         = confidence,
     )
 
 

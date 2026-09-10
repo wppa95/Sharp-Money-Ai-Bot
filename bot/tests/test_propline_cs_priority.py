@@ -157,6 +157,27 @@ def test_historical_average_is_delivery_evidence_without_settled_windows(source)
     ) is True
 
 
+def test_historical_average_evidence_source_is_read_from_decision_json():
+    decision = {
+        "recommendation": "OVER",
+        "evidence_source": "historical_average",
+        "l5_games": None,
+        "l10_games": None,
+    }
+    validation = SimpleNamespace(
+        has_supporting_data=True,
+        data_source="historical-average",
+        n_real_games=0,
+        n_supplemental_games=0,
+    )
+
+    assert serialized_evidence_supports_delivery(decision) is True
+    assert market_engine._has_delivery_evidence(
+        validation=validation,
+        decision=decision,
+    ) is True
+
+
 def test_telegram_delivery_requires_strong_over_in_every_window():
     validation = SimpleNamespace(
         has_supporting_data=True,

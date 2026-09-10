@@ -371,7 +371,7 @@ class DashboardReport:
         # Historical trend data is preserved in DB for backtesting/reporting.
         trend_days = [d for d in self.daily_trend if d.total > 0]
         if trend_days:
-            parts.append("📅 <b>Today</b>")
+            parts.append("📅 <b>Activity Summary</b>  <i>(Today)</i>")
             for d in trend_days[-1:]:
                 parts.append(
                     f"  {d.date_str}  UD <code>{d.ud_count}</code>"

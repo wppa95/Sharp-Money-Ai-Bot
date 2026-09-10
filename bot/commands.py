@@ -603,6 +603,7 @@ async def cmd_health(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             "",
             f"Uptime:           {_uptime_str()}",
             f"Heartbeat:        {ht.heartbeat_age_str()}",
+            f"Last startup:     {_html.escape(ht.last_startup() or 'unknown')}",
             "",
             "<b>📋 Background Jobs</b>",
         ]
@@ -1718,10 +1719,10 @@ def _has_current_prop_data(
     qualification, cadence, or persisted tracking.
 
     A directional label by itself is not enough for a current pick. Reports
-    must have provider-owned identity and a fresh upcoming event. The
-    ``require_scoring`` argument remains only for caller compatibility; tiers,
-    composite/bet-quality scores, market-quality scores, and PASS are not
-    current eligibility concepts.
+    must have provider-owned identity and a fresh upcoming event. Shape-only
+    refreshes may explicitly set ``require_scoring=False``; the default
+    current-row view requires a directional recommendation and positive stored
+    confidence.
     """
     now = now or datetime.utcnow()
     provider = str(getattr(prop, "provider", "") or "").strip().lower()
@@ -1756,12 +1757,28 @@ def _has_current_prop_data(
         return False
     if getattr(prop, "removed", False) is True:
         return False
+    recommendation = str(
+        getattr(prop, "bet_recommendation", "") or ""
+    ).upper()
     if require_direction:
-        recommendation = str(
-            getattr(prop, "bet_recommendation", "") or ""
-        ).upper()
         if recommendation not in {"OVER", "UNDER"}:
             return False
+    if require_scoring:
+        if recommendation not in {"OVER", "UNDER"}:
+            return False
+        try:
+            confidence = float(getattr(prop, "bet_confidence", 0) or 0)
+        except (TypeError, ValueError):
+            return False
+        if confidence <= 0:
+            return False
+        market_quality = getattr(prop, "market_quality_score", None)
+        if market_quality is not None:
+            try:
+                if float(market_quality) <= 0:
+                    return False
+            except (TypeError, ValueError):
+                return False
     return True
 
 

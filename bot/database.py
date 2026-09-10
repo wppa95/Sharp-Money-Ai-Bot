@@ -508,6 +508,23 @@ def _tier_from_confidence(ai_confidence: int) -> str:
     return "PASS"
 
 
+def _bounded_score(value: object, *, maximum: float) -> float | None:
+    """Keep diagnostic score values numeric and within their display range."""
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        return max(0.0, min(float(maximum), float(value)))
+    except (TypeError, ValueError):
+        return None
+
+
+def _normalized_score_tier(value: object) -> str | None:
+    if value is None:
+        return None
+    tier = str(value).strip().upper()
+    return tier if tier in {"S", "A", "B", "C", "PASS"} else None
+
+
 # ── ORM base ──────────────────────────────────────────────────────────────────
 
 class Base(DeclarativeBase):
@@ -1409,6 +1426,8 @@ class Database:
                 else:
                     for key, value in values.items():
                         setattr(row, key, value)
+                    if "enabled" in definition:
+                        row.enabled = bool(definition["enabled"])
                 rows_written += 1
             await s.commit()
         return rows_written
@@ -5337,13 +5356,12 @@ class Database:
                     pass  # column already exists — safe to ignore
 
     async def save_underdog_snapshot(self, record: "UnderdogSnapshotRecord") -> "UnderdogSnapshotRecord":
-        # Legacy scoring fields remain in old schemas only; the active
-        # framework persists direction and evidence, never tiers, quality, or
-        # PASS-style decisions.
-        record.score_total = None
-        record.score_tier = None
-        record.score_stars = None
-        record.bet_confidence = None
+        # Scores are diagnostic metadata, not delivery gates, but retaining
+        # them is required for audit, CLV seeding, and historical reports.
+        record.score_total = _bounded_score(record.score_total, maximum=100)
+        record.score_tier = _normalized_score_tier(record.score_tier)
+        record.score_stars = _bounded_score(record.score_stars, maximum=5)
+        record.bet_confidence = _bounded_score(record.bet_confidence, maximum=100)
         async with self.session() as s:
             s.add(record)
             await s.commit()
@@ -5415,13 +5433,13 @@ class Database:
                                     "line_delta": record.line_delta,
                                     "removed": bool(record.removed),
                                     "alert_sent": bool(record.alert_sent),
-                                     "score_total": None,
-                                     "score_tier": None,
-                                     "score_stars": None,
+                                     "score_total": _bounded_score(record.score_total, maximum=100),
+                                     "score_tier": _normalized_score_tier(record.score_tier),
+                                     "score_stars": _bounded_score(record.score_stars, maximum=5),
                                     "alert_outcome": record.alert_outcome,
                                     "validation_json": record.validation_json,
                                     "bet_recommendation": record.bet_recommendation,
-                                     "bet_confidence": None,
+                                     "bet_confidence": _bounded_score(record.bet_confidence, maximum=100),
                                     "bet_reason": record.bet_reason,
                                     "bet_evidence_json": record.bet_evidence_json,
                                     "fetched_at": record.fetched_at or datetime.utcnow(),

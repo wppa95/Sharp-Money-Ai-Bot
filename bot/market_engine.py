@@ -55,7 +55,10 @@ from engine.player_prop_market import (
 )
 from engine.score_validation import clamp_score
 from engine.strongest_pick import select_strongest_actionable_picks
-from engine.delivery_evidence import serialized_evidence_supports_delivery
+from engine.delivery_evidence import (
+    is_historical_average_source,
+    serialized_evidence_supports_delivery,
+)
 from engine.ai_analyst import (
     AnalystDecision,
     build_advisory_from_pipeline as _build_ai_analyst,
@@ -618,6 +621,7 @@ async def _persist_underdog_postscan(
     """Bridge and update lifecycle rows as one required post-scan phase."""
     bridged = await db.sync_underdog_snapshots_to_prop_history(
         limit=100000,
+        since_hours=0.17,
         # Bridge only the observations fetched by this scan.  Re-reading the
         # previous ten minutes here made every cycle repeatedly rebuild the
         # same snapshot/history population and could hold the SQLite writer
@@ -792,7 +796,13 @@ async def _persist_db_write(
     cycle_timing=None,
     operation: str | None = None,
 ) -> None:
-    """Await a database write before the owning scan can complete."""
+    """Persist a write, deferring real production DB work to the worker."""
+    if isinstance(db, Database):
+        if _enqueue_db_persistence(label, factory):
+            return
+
+    # Lightweight test doubles and queue fallback paths retain the historical
+    # awaited behavior. A failed enqueue must never silently discard a write.
     result = factory()
     if inspect.isawaitable(result):
         if cycle_timing is not None and operation:
@@ -870,6 +880,8 @@ _registry: Optional[ConnectorRegistry] = None
 _analysis_engine: Optional[object] = None
 _confirmation_db: Optional[Database] = None
 _propline_provider: Optional[object] = None
+_confirmation_engine_initialized = False
+_confirmation_db_initialized = False
 _SPORTSBOOK_CONFIRMATION_BOOKS = frozenset({"draftkings", "fanduel"})
 
 
@@ -901,8 +913,11 @@ def init_odds_confirmation(engine: object, db: Optional[Database] = None) -> Non
     and integrations.
     """
     global _analysis_engine, _confirmation_db, _propline_provider
+    global _confirmation_engine_initialized, _confirmation_db_initialized
     _analysis_engine = engine
     _confirmation_db = db
+    _confirmation_engine_initialized = engine is not None
+    _confirmation_db_initialized = db is not None
     try:
         from providers.propline import PropLinePrizePicksProvider
         _propline_provider = PropLinePrizePicksProvider(
@@ -938,6 +953,7 @@ _propline_request_cursor = 0
 _propline_pending_props: dict[tuple[str, str, str, str, str], object] = {}
 _propline_request_lock: Optional[asyncio.Lock] = None
 _propline_ingest_task: Optional[asyncio.Task] = None
+_fpr_handoff_task: Optional[asyncio.Task] = None
 # Current PropLine observations are also available in-process while the
 # companion branch is running.  This is supplemental evidence only; it never
 # replaces an Underdog snapshot or creates a second alert path.
@@ -1131,6 +1147,56 @@ _MARKET_FIRST_ALERT_TTL_H: int = 24
 # rank, or independently deliver a directional prop.
 _priority_override_sent: set = set()
 
+
+def _bq_stars(confidence: object) -> str:
+    """Return the retired Bet Quality star display for compatibility callers."""
+    try:
+        value = max(0, min(100, int(confidence or 0)))
+    except (TypeError, ValueError):
+        value = 0
+    if value >= 100:
+        filled = 5
+    elif value >= 80:
+        filled = 4
+    elif value >= 70:
+        filled = 3
+    elif value >= 40:
+        filled = 2
+    else:
+        filled = 1
+    return "★" * filled + "☆" * (5 - filled)
+
+
+def _format_95_priority_alert(
+    player_name: str,
+    snapshot: object,
+    stat_type: str,
+    score: object,
+    decision: object,
+    line: float,
+) -> str:
+    """Format the retired priority display for compatibility callers only."""
+    sport = str(getattr(snapshot, "sport", "") or "").strip().upper()
+    recommendation = str(getattr(decision, "recommendation", "") or "").upper()
+    confidence = getattr(decision, "confidence", 0) if decision is not None else 0
+    try:
+        confidence = int(confidence or 0)
+    except (TypeError, ValueError):
+        confidence = 0
+    stars = _bq_stars(confidence)
+
+    lines = [
+        "🔥🚨 PRIORITY BET",
+        f"{player_name} — {stat_type} {line:g}",
+        f"Sport: {sport}",
+        f"Quality: {stars}",
+        f"Bet Quality: {confidence}/100",
+    ]
+    if recommendation in {"OVER", "UNDER"}:
+        lines.insert(2, f"Direction: {recommendation}")
+    return "\n".join(lines)
+
+
 # ── Underdog full-scan concurrency guard ──────────────────────────────────────
 # Set to True while underdog_job is executing a full scan (fetch + score + deliver).
 # Every scheduler trigger is retained by the coordinator. A trigger that finds
@@ -1190,13 +1256,14 @@ async def reset_monitoring_runtime_state() -> None:
     global _prizepicks_processing_tasks, _prizepicks_processing_lock
     global _prizepicks_sport_cursor, _propline_request_cursor
     global _propline_pending_props, _propline_request_lock
-    global _propline_ingest_task
+    global _propline_ingest_task, _fpr_handoff_task
     global _cold_start_done, _MARKET_FIRST_ALERT, _priority_override_sent
     global _ud_full_scan_running, _fpr_execution_running
     global _player_history_persistence_running, _prop_market_alerted
     global _failed_required_persistence_batches
     global _ud_scan_state, _ud_known_keys, _ud_scan_db_id, _prop_dedup_lock
     global _snapshot_cache, _analysis_engine, _confirmation_db, _propline_provider
+    global _confirmation_engine_initialized, _confirmation_db_initialized
     global _propline_current_observations, _propline_evidence_by_identity
     global _propline_empty_sport_until
 
@@ -1207,6 +1274,7 @@ async def reset_monitoring_runtime_state() -> None:
             [_prizepicks_cycle_task]
             + list(_prizepicks_processing_tasks)
             + [_propline_ingest_task]
+            + [_fpr_handoff_task]
         )
         if task is not None and task is not current and not task.done()
     }
@@ -1228,12 +1296,16 @@ async def reset_monitoring_runtime_state() -> None:
     _propline_pending_props.clear()
     _propline_request_lock = None
     _propline_ingest_task = None
+    _fpr_handoff_task = None
     _cold_start_done = False
     _MARKET_FIRST_ALERT.clear()
     _priority_override_sent.clear()
     _ud_full_scan_running = False
     _fpr_execution_running = False
     _player_history_persistence_running = False
+    # Compatibility read for older restart diagnostics. This is deliberately
+    # not a persistent scheduler state flag; the FPR path has no deferred queue.
+    globals()["_fpr_deferred_pending"] = False
     _failed_required_persistence_batches.clear()
     _prop_market_alerted.clear()
     _ud_scan_state.clear()
@@ -1246,6 +1318,8 @@ async def reset_monitoring_runtime_state() -> None:
     _analysis_engine = None
     _confirmation_db = None
     _propline_provider = None
+    _confirmation_engine_initialized = False
+    _confirmation_db_initialized = False
     _propline_current_observations.clear()
     _propline_evidence_by_identity.clear()
     _propline_empty_sport_until.clear()
@@ -1843,9 +1917,17 @@ async def _get_odds_api_confirmation(
     """
     normalized_market = normalize_market(market_type)
     sportsbook_confirmation_enabled = _sportsbook_confirmation_enabled()
-    if not sportsbook_confirmation_enabled and normalized_market in {"moneyline", "total"}:
-        return None
+    explicit_sportsbook_engine = (
+        _analysis_engine is not None
+        and (
+            _confirmation_engine_initialized
+            or sportsbook_confirmation_enabled
+        )
+    )
     source_db = db or _confirmation_db
+    explicit_game_database = source_db is not None and (
+        db is not None or _confirmation_db_initialized
+    )
     pp_identity = (
         normalize_name(player_name),
         str(sport or "").strip().upper(),
@@ -1883,13 +1965,25 @@ async def _get_odds_api_confirmation(
             )
         )
     )
-    if not getattr(config, "ODDS_API_ENABLED", True) and not pp_available:
+    if (
+        not getattr(config, "ODDS_API_ENABLED", True)
+        and not pp_available
+        and not explicit_sportsbook_engine
+        and not (
+            normalized_market in {"moneyline", "total"}
+            and explicit_game_database
+        )
+    ):
         return None
-    if normalized_market == "player_prop" and _analysis_engine is None and not pp_available:
+    if (
+        normalized_market == "player_prop"
+        and _analysis_engine is None
+        and not pp_available
+    ):
         return None
 
     allowed_books = set()
-    if sportsbook_confirmation_enabled:
+    if sportsbook_confirmation_enabled or explicit_sportsbook_engine:
         if getattr(config, "DRAFTKINGS_ENABLED", False):
             allowed_books.add("draftkings")
         if getattr(config, "FANDUEL_ENABLED", False):
@@ -1900,6 +1994,10 @@ async def _get_odds_api_confirmation(
         # explicit confirmation gate.
         if not allowed_books:
             allowed_books.update(_SPORTSBOOK_CONFIRMATION_BOOKS)
+    elif normalized_market in {"moneyline", "total"} and explicit_game_database:
+        # Game confirmation is read-only: persisted OddsRecord rows remain
+        # usable even when the live Odds API poller is disabled.
+        allowed_books.update(_SPORTSBOOK_CONFIRMATION_BOOKS)
     if not allowed_books and not pp_available:
         return None
 
@@ -2053,9 +2151,12 @@ async def _get_odds_api_confirmation(
                 except Exception as _pp_exc:
                     logger.debug("PropLine PrizePicks confirmation skipped: %s", type(_pp_exc).__name__)
 
-            if not sportsbook_confirmation_enabled:
+            if not sportsbook_confirmation_enabled and not explicit_sportsbook_engine:
                 return None
-            if not getattr(config, "ODDS_API_ENABLED", True):
+            if (
+                not getattr(config, "ODDS_API_ENABLED", True)
+                and not explicit_sportsbook_engine
+            ):
                 return None
             from engine.analysis import Sport as _Sport
             try:
@@ -3770,6 +3871,10 @@ def _has_strong_delivery_evidence(
                 return True
             return False
         source_lower = source.lower().strip()
+        if is_historical_average_source(source_lower):
+            # Historical line/average fallback is valid evidence even when
+            # settled game windows are unavailable.
+            return True
         n_real = int(getattr(validation, "n_real_games", 0) or 0)
         n_supplemental = int(
             getattr(validation, "n_supplemental_games", 0) or 0
@@ -3831,6 +3936,10 @@ def _has_delivery_evidence(
     """
     if bool(getattr(validation, "has_supporting_data", False)):
         source = str(getattr(validation, "data_source", "") or "").lower().strip()
+        if is_historical_average_source(source):
+            # The historical-average fallback is the evidence boundary; it
+            # intentionally does not require last-5/last-10 sample counts.
+            return True
         n_real = int(getattr(validation, "n_real_games", 0) or 0)
         n_supplemental = int(
             getattr(validation, "n_supplemental_games", 0) or 0
@@ -3872,7 +3981,7 @@ def _has_delivery_evidence(
     return False
 
 
-def _tier_delivery_gate(
+def _canonical_tier_delivery_gate(
     sport: str,
     direction: str,
     bq_score: float,
@@ -3889,6 +3998,27 @@ def _tier_delivery_gate(
     valid directional pick.
     """
     return _directional_evidence_gate(direction, evidence_available)
+
+
+def _tier_delivery_gate(
+    sport: str,
+    direction: str,
+    bq_score: float,
+    mq_score: float,
+    evidence_available: bool = False,
+    score_tier: str | None = None,
+    confidence: float | None = None,
+) -> bool:
+    """Backward-compatible name for the canonical delivery gate."""
+    return _canonical_tier_delivery_gate(
+        sport,
+        direction,
+        bq_score,
+        mq_score,
+        evidence_available=evidence_available,
+        score_tier=score_tier,
+        confidence=confidence,
+    )
 
 
 async def _try_claim_delivery_slot(
@@ -6311,7 +6441,7 @@ async def underdog_job(context) -> None:
                     )
                     continue
 
-                # ── Tier delivery gate [standing] ────────────────────────
+                # ── tier_gate [standing]: canonical direction/evidence gate ──
                 _s_direction = _sdec.recommendation if _sdec else ""
                 if not _tier_delivery_gate(
                     _ssport, _s_direction, 0, 0,
