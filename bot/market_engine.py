@@ -964,6 +964,10 @@ _propline_empty_sport_until: dict[str, float] = {}
 _propline_empty_feed_streak: dict[str, int] = {}
 _PROPLINE_EMPTY_BACKOFF_BASE_SECONDS = 15 * 60
 _PROPLINE_EMPTY_BACKOFF_MAX_SECONDS = 2 * 60 * 60
+# Four bookmaker requests per sport take about 15 seconds under the shared
+# 1,020/hour provider pacing. Five sports therefore leave enough headroom for
+# native-feed evaluation and persistence inside the two-minute cycle.
+_PROPLINE_SPORTS_PER_CYCLE = 5
 
 _PROPLINE_BOOKMAKER_PROVIDERS = {
     "prizepicks": "PrizePicks",
@@ -1434,9 +1438,21 @@ async def propline_request_scan_job(context) -> None:
                 cooldown,
             )
             return False
-        sports = await _get_prizepicks_scan_sports(provider)
+        from engine.sport_policy import (
+            canonical_sport_key,
+            is_football_related_sport,
+        )
+
+        discovered_sports = await _get_prizepicks_scan_sports(provider)
+        sports = tuple(
+            sport
+            for sport in discovered_sports
+            if not is_football_related_sport(sport)
+        )
         if not sports:
-            logger.info("propline_request_scan: no active PrizePicks sports")
+            logger.info(
+                "propline_request_scan: no eligible non-football sports"
+            )
             return True
         now = time.monotonic()
         eligible_indexes = [
@@ -1462,6 +1478,7 @@ async def propline_request_scan_job(context) -> None:
         ] + [
             index for index in eligible_indexes if index < first
         ]
+        ordered_indexes = ordered_indexes[:_PROPLINE_SPORTS_PER_CYCLE]
         bookmakers = tuple(
             str(bookmaker).strip().lower().replace(" ", "")
             for bookmaker in getattr(config, "propline_bookmakers", [])

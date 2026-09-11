@@ -194,6 +194,50 @@ class TestIndependentPrizePicks:
             for prop in props
         } == {"NBA", "MLB", "NHL"}
 
+    async def test_request_worker_excludes_only_football_and_bounds_cycle(
+        self, monkeypatch
+    ):
+        calls = []
+
+        class FakeProvider:
+            client = None
+
+            def is_available(self):
+                return True
+
+            async def fetch_props_for_sport_result(self, sport, bookmaker=None):
+                calls.append((sport, bookmaker))
+                return PropLineFetchResult(
+                    [], datetime.utcnow(), succeeded=True, complete=True
+                )
+
+        monkeypatch.setattr(market_engine, "_propline_provider", FakeProvider())
+        monkeypatch.setattr(market_engine, "_propline_request_cursor", 0)
+        monkeypatch.setattr(market_engine, "_propline_empty_sport_until", {})
+        monkeypatch.setattr(market_engine, "_propline_empty_feed_streak", {})
+        monkeypatch.setattr(
+            market_engine,
+            "_get_prizepicks_scan_sports",
+            AsyncMock(
+                return_value=(
+                    "MLB", "NFL", "NCAAF",
+                    "NBA", "WNBA", "NHL", "TENNIS", "UFC", "CS", "SOCCER",
+                )
+            ),
+        )
+
+        await market_engine.propline_request_scan_job(
+            SimpleNamespace(bot_data={"db": None})
+        )
+
+        attempted_sports = []
+        for sport, _bookmaker in calls:
+            if sport not in attempted_sports:
+                attempted_sports.append(sport)
+        assert attempted_sports == ["MLB", "NBA", "WNBA", "NHL", "TENNIS"]
+        assert len(calls) == 5 * 4
+        assert all(sport not in {"NFL", "NCAAF"} for sport, _ in calls)
+
     async def test_request_worker_backs_off_only_empty_bookmaker_sport_pairs(
         self, monkeypatch
     ):

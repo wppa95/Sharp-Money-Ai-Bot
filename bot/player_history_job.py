@@ -78,9 +78,9 @@ _PLAYER_HISTORY_PROPLINE_TARGETS_PER_CYCLE = 1
 
 
 def _uses_propline_history(sport: str) -> bool:
-    """Reserve PropLine history calls for non-MLB, non-football sports."""
+    """Reserve PropLine history calls for non-football sports."""
     canonical = canonical_sport_key(sport)
-    return canonical != "MLB" and not is_football_related_sport(canonical)
+    return not is_football_related_sport(canonical)
 
 
 def _history_sport_order(sport: str) -> tuple[int, str]:
