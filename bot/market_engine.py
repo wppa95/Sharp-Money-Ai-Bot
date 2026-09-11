@@ -961,6 +961,9 @@ _PROPLINE_EVIDENCE_TTL_SECONDS = 20 * 60
 _propline_current_observations: dict[tuple[str, str, str, str, str], object] = {}
 _propline_evidence_by_identity: dict[tuple[str, str, str, str], list[object]] = {}
 _propline_empty_sport_until: dict[str, float] = {}
+_propline_empty_feed_streak: dict[str, int] = {}
+_PROPLINE_EMPTY_BACKOFF_BASE_SECONDS = 15 * 60
+_PROPLINE_EMPTY_BACKOFF_MAX_SECONDS = 2 * 60 * 60
 
 _PROPLINE_BOOKMAKER_PROVIDERS = {
     "prizepicks": "PrizePicks",
@@ -1265,7 +1268,7 @@ async def reset_monitoring_runtime_state() -> None:
     global _snapshot_cache, _analysis_engine, _confirmation_db, _propline_provider
     global _confirmation_engine_initialized, _confirmation_db_initialized
     global _propline_current_observations, _propline_evidence_by_identity
-    global _propline_empty_sport_until
+    global _propline_empty_sport_until, _propline_empty_feed_streak
 
     current = asyncio.current_task()
     tasks = {
@@ -1323,6 +1326,7 @@ async def reset_monitoring_runtime_state() -> None:
     _propline_current_observations.clear()
     _propline_evidence_by_identity.clear()
     _propline_empty_sport_until.clear()
+    _propline_empty_feed_streak.clear()
 
 
 def _cache_propline_evidence(
@@ -1572,12 +1576,24 @@ async def propline_request_scan_job(context) -> None:
                             ] = prop
                     if props:
                         _propline_empty_sport_until.pop(feed_key, None)
+                        _propline_empty_feed_streak.pop(feed_key, None)
                     else:
-                        cache_ttl = max(
-                            1.0,
-                            float(getattr(client, "cache_ttl", 240.0) or 240.0),
+                        empty_streak = _propline_empty_feed_streak.get(feed_key, 0) + 1
+                        _propline_empty_feed_streak[feed_key] = empty_streak
+                        empty_backoff = min(
+                            _PROPLINE_EMPTY_BACKOFF_MAX_SECONDS,
+                            _PROPLINE_EMPTY_BACKOFF_BASE_SECONDS
+                            * (2 ** min(empty_streak - 1, 3)),
                         )
-                        _propline_empty_sport_until[feed_key] = now + cache_ttl
+                        _propline_empty_sport_until[feed_key] = now + empty_backoff
+                        logger.info(
+                            "propline_request_scan: empty feed backoff "
+                            "provider=%s sport=%s streak=%d retry_in=%ds",
+                            source_provider,
+                            sport,
+                            empty_streak,
+                            empty_backoff,
+                        )
                     logger.info(
                         "propline_request_scan: provider=%s sport=%s "
                         "observations=%d pending=%d",

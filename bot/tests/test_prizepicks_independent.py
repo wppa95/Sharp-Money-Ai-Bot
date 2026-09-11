@@ -194,6 +194,69 @@ class TestIndependentPrizePicks:
             for prop in props
         } == {"NBA", "MLB", "NHL"}
 
+    async def test_request_worker_backs_off_only_empty_bookmaker_sport_pairs(
+        self, monkeypatch
+    ):
+        calls = []
+
+        class FakeProvider:
+            client = None
+
+            def is_available(self):
+                return True
+
+            async def fetch_props_for_sport_result(self, sport, bookmaker=None):
+                calls.append((sport, bookmaker))
+                props = (
+                    []
+                    if bookmaker == "fanduel"
+                    else [
+                        SimpleNamespace(
+                            player_name="Working Player",
+                            team="TM",
+                            sport=sport,
+                            stat_type="Points",
+                            line_value=20.5,
+                            game_time=None,
+                            external_id=f"{bookmaker}-{sport}",
+                            event_id=f"{sport}-event",
+                            fetched_at=datetime.utcnow(),
+                        )
+                    ]
+                )
+                return PropLineFetchResult(
+                    props,
+                    datetime.utcnow(),
+                    succeeded=True,
+                    complete=True,
+                )
+
+        class FakeDB:
+            async def upsert_prop_line_history_batch(self, provider, props, **kwargs):
+                return len(props)
+
+            async def track_prop_records(self, records):
+                return len(records)
+
+        monkeypatch.setattr(market_engine, "_propline_provider", FakeProvider())
+        monkeypatch.setattr(market_engine, "_propline_request_cursor", 0)
+        monkeypatch.setattr(market_engine, "_propline_empty_sport_until", {})
+        monkeypatch.setattr(market_engine, "_propline_empty_feed_streak", {})
+        monkeypatch.setattr(
+            market_engine,
+            "_get_prizepicks_scan_sports",
+            AsyncMock(return_value=("NHL",)),
+        )
+
+        context = SimpleNamespace(bot_data={"db": FakeDB()})
+        await market_engine.propline_request_scan_job(context)
+        await market_engine.propline_request_scan_job(context)
+
+        assert calls.count(("NHL", "fanduel")) == 1
+        assert calls.count(("NHL", "prizepicks")) == 2
+        assert calls.count(("NHL", "draftkings")) == 2
+        assert calls.count(("NHL", "underdog")) == 2
+
     async def test_incomplete_sport_persists_successes_but_withholds_pending_feed(
         self, monkeypatch
     ):
