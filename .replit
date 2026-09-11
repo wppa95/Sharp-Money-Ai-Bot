@@ -53,7 +53,7 @@ packages = ["nano"]
 [userenv]
 
 [userenv.shared]
-ALLOWED_USER_IDS = "7245518659"
+ALLOWED_USER_IDS = "7245518658"
 UD_SLEEPER_ENABLED = "true"
 ODDS_API_ENABLED = "true"
 
