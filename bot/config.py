@@ -230,7 +230,7 @@ class Config:
     # this compatibility setting above the current approximately 5,200-target
     # book; the collector never uses it to truncate the active target list.
     PLAYER_HISTORY_BATCH_SIZE: int = int(
-        os.environ.get("PLAYER_HISTORY_BATCH_SIZE", "6000")
+        os.environ.get("PLAYER_HISTORY_BATCH_SIZE", "20000")
     )
     # Safety margin kept free inside the player-history scheduler interval so
     # the collector can finish cleanly before the next cadence tick.
