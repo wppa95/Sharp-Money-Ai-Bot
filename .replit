@@ -55,6 +55,7 @@ packages = ["nano"]
 [userenv.shared]
 UD_SLEEPER_ENABLED = "true"
 ODDS_API_ENABLED = "true"
+ALERT_DISABLED_SPORTS = "NFL,NCAAF,CFB,CFL,FCS"
 
 [[ports]]
 localPort = 8080
