@@ -7,7 +7,7 @@ import re
 import time
 from types import SimpleNamespace
 
-from engine.sport_policy import canonical_sport_key
+from engine.sport_policy import canonical_sport_key, is_football_related_sport
 
 logger = logging.getLogger(__name__)
 
@@ -75,6 +75,12 @@ _PLAYER_PROP_PROVIDERS = (
 # cycle avoids queueing requests past this collector's five-second target
 # budget; the cursor still rotates the complete target universe fairly.
 _PLAYER_HISTORY_PROPLINE_TARGETS_PER_CYCLE = 1
+
+
+def _uses_propline_history(sport: str) -> bool:
+    """Reserve PropLine history calls for non-MLB, non-football sports."""
+    canonical = canonical_sport_key(sport)
+    return canonical != "MLB" and not is_football_related_sport(canonical)
 
 
 def _history_sport_order(sport: str) -> tuple[int, str]:
@@ -444,27 +450,32 @@ async def player_history_collector_job(context) -> None:
             except Exception:
                 return "unmapped"
 
-        if cycle_targets:
+        propline_eligible_targets = [
+            target
+            for target in cycle_targets
+            if _uses_propline_history(target[1])
+        ]
+        if propline_eligible_targets:
             try:
                 propline_start = (
                     int(bot_data.get(_PROPLINE_CURSOR_KEY, 0))
-                    % len(cycle_targets)
+                    % len(propline_eligible_targets)
                 )
             except (TypeError, ValueError):
                 propline_start = 0
             propline_count = min(
                 _PLAYER_HISTORY_PROPLINE_TARGETS_PER_CYCLE,
-                len(cycle_targets),
+                len(propline_eligible_targets),
             )
             propline_targets = {
-                cycle_targets[
-                    (propline_start + offset) % len(cycle_targets)
+                propline_eligible_targets[
+                    (propline_start + offset) % len(propline_eligible_targets)
                 ]
                 for offset in range(propline_count)
             }
             propline_cursor_next = (
                 propline_start + propline_count
-            ) % len(cycle_targets)
+            ) % len(propline_eligible_targets)
             for _player, _sport, _stat in propline_targets:
                 propline_attempts_by_sport[_sport] = (
                     propline_attempts_by_sport.get(_sport, 0) + 1

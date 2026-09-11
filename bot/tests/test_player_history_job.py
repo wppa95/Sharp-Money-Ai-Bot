@@ -16,6 +16,7 @@ from player_history_job import (
     _API_CALL_TARGET,
     _SUPPORTED_HISTORY_SPORTS,
     _fair_cycle_targets,
+    _uses_propline_history,
     player_history_collector_job,
 )
 from providers.player_history import PropLineHistoryCoverage
@@ -366,6 +367,29 @@ async def test_propline_rotation_covers_each_non_mlb_market_across_cycles(caplog
         for _player, sport, stat in targets
     }
     assert "propline_coverage_by_sport_market" in caplog.text
+
+
+@pytest.mark.parametrize(
+    ("sport", "expected"),
+    [
+        ("NBA", True),
+        ("WNBA", True),
+        ("NHL", True),
+        ("TENNIS", True),
+        ("SOCCER", True),
+        ("CS", True),
+        ("MMA", True),
+        ("MLB", False),
+        ("BASEBALL", False),
+        ("NFL", False),
+        ("NCAAF", False),
+        ("CFB", False),
+        ("CFL", False),
+        ("FCS", False),
+    ],
+)
+def test_propline_history_scope_excludes_only_mlb_and_football(sport, expected):
+    assert _uses_propline_history(sport) is expected
 
 
 @pytest.mark.asyncio
