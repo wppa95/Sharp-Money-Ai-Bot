@@ -30,7 +30,11 @@ Scenarios tested:
 from __future__ import annotations
 
 import pytest
-from market_engine import _cand_priority, _apply_delivery_diversification
+from market_engine import (
+    _apply_delivery_diversification,
+    _cand_priority,
+    _select_best_over_under,
+)
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
@@ -45,7 +49,10 @@ def _make_cand(
     mq: float = 50.0,
     is_tier1: bool = True,
     is_meaningful_change: bool = False,
+    direction: str = "OVER",
+    evidence_count: int = 5,
 ) -> dict:
+    decision = type("Decision", (), {"recommendation": direction})()
     return {
         "player":               player,
         "stat_type":            stat_type,
@@ -56,6 +63,9 @@ def _make_cand(
         "mq":                   mq,
         "is_tier1":             is_tier1,
         "is_meaningful_change": is_meaningful_change,
+        "direction":             direction,
+        "decision":              decision,
+        "evidence_count":        evidence_count,
         "_sent":                False,
     }
 
@@ -208,3 +218,33 @@ class TestDeliveryDiversification:
         assert result[0]["player"] == "B"
         assert result[0]["_group_rank"] == 0
         assert result[1]["_group_rank"] == 0   # each is first in its own group
+
+
+class TestBestDirectionalDelivery:
+    def test_keeps_only_best_over_and_best_under(self):
+        queue = [
+            _make_cand(player="Weak Over", direction="OVER", evidence_count=5),
+            _make_cand(player="Best Over", direction="OVER", evidence_count=20),
+            _make_cand(player="Weak Under", direction="UNDER", evidence_count=6),
+            _make_cand(player="Best Under", direction="UNDER", evidence_count=18),
+        ]
+        selected = _select_best_over_under(queue)
+        assert [candidate["player"] for candidate in selected] == [
+            "Best Over",
+            "Best Under",
+        ]
+
+    def test_returns_one_when_only_one_direction_qualifies(self):
+        queue = [
+            _make_cand(player="Over A", direction="OVER", evidence_count=5),
+            _make_cand(player="Over B", direction="OVER", evidence_count=10),
+        ]
+        selected = _select_best_over_under(queue)
+        assert [candidate["player"] for candidate in selected] == ["Over B"]
+
+    def test_ignores_non_directional_candidates(self):
+        queue = [
+            _make_cand(player="Pass", direction="PASS", evidence_count=100),
+            _make_cand(player="Missing", direction="", evidence_count=100),
+        ]
+        assert _select_best_over_under(queue) == []
