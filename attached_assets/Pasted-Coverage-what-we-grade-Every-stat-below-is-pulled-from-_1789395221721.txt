@@ -1,0 +1,60 @@
+Coverage — what we grade
+Every stat below is pulled from the league's own free, unauthenticated stats API on a 5-minute cadence post-game. No third-party stats vendor, no scraping fragile pages we don't control.
+
+Sport	Data source	Markets graded
+MLB	statsapi.mlb.com	Pitcher K / ER / Hits Allowed / Outs; batter H / HR / RBI / TB / SB / R / 1B / 2B / Walks; H+R+RBI combo; 2+ Hits / 2+ HR / 2+ RBI / 3+ RBI; every alt line
+NBA	cdn.nba.com	Points / Rebounds / Assists / Threes / Steals / Blocks / Turnovers; PRA + every 2-way combo; Double-Double / Triple-Double; every milestone N+ tier
+NHL	api-web.nhle.com	Goals / Shots on Goal / Blocked Shots / Points (1+/2+/3+); Goalie Saves; Anytime / First Goal scorer; First Period scorer where posted
+WNBA	cdn.wnba.com	Points / Rebounds / Assists / Threes / Steals / Blocks / Turnovers; PRA + every 2-way combo; Double-Double / Triple-Double
+NCAAB	ESPN	Game lines (h2h / spreads / totals) — player props off-season, returns in November
+29 of 30 soccer leagues	ESPN site.api	h2h / spreads / totals / BTTS / Double Chance / Draw No Bet / Correct Score / Total Corners / Total Cards / Anytime + First Goal Scorer / Player Assists / Goal-or-Assist / Player Shots + Shots on Target. Swiss Super League is odds-only — ESPN's feed for it is stuck on the 2025 season
+College Baseball	ESPN	Game lines (h2h / run line / total) — no player props posted on this sport
+Rugby League + Rugby Union	ESPN	Game lines (3-way h2h with Draw / spreads / totals). NRL and the major union competitions; fixtures outside ESPN's competition list stay ungraded rather than guessed
+Racing	ESPN F1 / NASCAR / IndyCar	Single-race winner. F1 grades reliably; sponsor-named NASCAR and IndyCar races stay pending rather than risk a brand-token mismatch, and season championships are never graded from a single race
+Esports (CS2)	Sleeper settled stats	Counter-Strike Kills maps 1-2 and Headshots maps 1-2, graded from 2026-08-14 forward. CS2 player props only — esports game lines, total kills and the non-CS titles stay odds-only
+Golf	ESPN PGA scoreboard	Tournament winner (order=1 competitor)
+Tennis	ESPN ATP + WTA · Sleeper settled stats	Match winner, set / game totals, alt spreads from set linescores; plus PLAYER props from 2026-08-14 — Aces / Double Faults / Break Points Won / Games Won / Total Games / Total Tiebreaks / Total Sets. Singles only; a retired or walkover match is left ungraded rather than settled on partial counts
+UFC	ufcstats.com	Fight winner / Total Rounds / Fight Distance Yes-No / Round Betting (using completed_rounds = round − 1 + time/300)
+NFL + NCAAF	ESPN football API	Game lines live. Player props grade today wherever a book posts them — passing / rushing / receiving yards, pass TDs, interceptions, sacks, extra points, anytime TD and first TD scorer. Coverage widens as the traditional books post their 2026 boards through September
+Get graded props in 2 lines
+Same auth as every other PropLine endpoint — ?apiKey= or X-API-Key header. Free tier returns the market structure with resolution nulled and redacted: true set. Paid tiers (from Hobby, $9/mo) return the full graded view.
+
+Python (official SDK)
+
+# pip install propline
+from propline import PropLine
+
+client = PropLine(api_key="YOUR_KEY")
+
+results = client.get_event_results(
+    sport="baseball_mlb",
+    event_id="11049",
+)
+
+for bm in results["bookmakers"]:
+    for market in bm["markets"]:
+        for o in market["outcomes"]:
+            if o.get("resolution") == "won":
+                print(
+                    f'{o["description"]} {market["key"]} '
+                    f'{o["name"]} {o["point"]} hit '
+                    f'(actual: {o["actual_value"]})'
+                )
+curl
+
+curl "https://api.prop-line.com/v1/sports/\
+baseball_mlb/events/11049/results\
+?apiKey=YOUR_KEY"
+Node / TypeScript
+
+// npm install propline
+import { PropLine } from "propline";
+
+const client = new PropLine({
+  apiKey: process.env.PROPLINE_API_KEY!,
+});
+
+const results = await client.getEventResults({
+  sport: "baseball_mlb",
+  eventId: "11049",
+});
