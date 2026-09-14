@@ -3304,7 +3304,7 @@ async def _run_prizepicks_independent_cycle(
         )
         return
 
-    actionable = _select_best_over_under(
+    actionable = _select_best_per_sport(
         select_strongest_actionable_picks(actionable)
     )
     delivered = 0
@@ -4284,6 +4284,59 @@ def _select_best_over_under(candidates: list[dict]) -> list[dict]:
         winner[1]
         for direction in ("OVER", "UNDER")
         if (winner := winners.get(direction)) is not None
+    ]
+
+
+def _select_best_per_sport(candidates: list[dict]) -> list[dict]:
+    """Keep the strongest evidence-backed directional pick for each sport.
+
+    This is intentionally not a fixed global pick count and does not prefer
+    OVER over UNDER (or vice versa).  Each sport gets one winner from its
+    eligible OVER/UNDER candidates, so a strong NBA pick cannot suppress a
+    strong NHL, MLB, tennis, or esports pick.
+    """
+    winners: dict[str, tuple[tuple[float, ...], dict]] = {}
+    for candidate in candidates:
+        decision = candidate.get("decision")
+        direction = str(
+            getattr(decision, "recommendation", None)
+            or candidate.get("direction")
+            or ""
+        ).strip().upper()
+        if direction not in {"OVER", "UNDER"}:
+            continue
+
+        sport = str(
+            candidate.get("sport")
+            or candidate.get("league")
+            or getattr(candidate.get("prop"), "sport", None)
+            or ""
+        ).strip().upper()
+        if not sport:
+            continue
+
+        validation = candidate.get("validation")
+        evidence_count = float(
+            candidate.get("evidence_count")
+            or (
+                getattr(validation, "n_real_games", 0)
+                + getattr(validation, "n_supplemental_games", 0)
+            )
+            or 0
+        )
+        rank = (
+            evidence_count,
+            float(bool(candidate.get("is_meaningful_change"))),
+            _cand_priority(candidate),
+        )
+        current = winners.get(sport)
+        if current is None or rank > current[0]:
+            winners[sport] = (rank, candidate)
+
+    return [
+        winner[1]
+        for sport in sorted(winners)
+        for winner in (winners[sport],)
     ]
 
 
@@ -6610,7 +6663,7 @@ async def underdog_job(context) -> None:
         if _delivery_queue and chat_ids:
             _delivery_queue[:] = select_strongest_actionable_picks(_delivery_queue)
             _apply_delivery_diversification(_delivery_queue)
-            _delivery_queue[:] = _select_best_over_under(_delivery_queue)
+            _delivery_queue[:] = _select_best_per_sport(_delivery_queue)
             _n_dq_deferred   = 0
             _dq_deferred_log: list[str] = []
             for _dq in _delivery_queue:
@@ -8988,7 +9041,7 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
         _fpr_selected = select_strongest_actionable_picks(
             _fpr_delivery_candidates
         )
-        _fpr_selected = _select_best_over_under(_fpr_selected)
+        _fpr_selected = _select_best_per_sport(_fpr_selected)
         _fpr_selected_ids = {id(candidate) for candidate in _fpr_selected}
         for _fpr_candidate in _fpr_delivery_candidates:
             if id(_fpr_candidate) not in _fpr_selected_ids:

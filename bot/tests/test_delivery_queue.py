@@ -33,6 +33,7 @@ import pytest
 from market_engine import (
     _apply_delivery_diversification,
     _cand_priority,
+    _select_best_per_sport,
     _select_best_over_under,
 )
 
@@ -248,3 +249,33 @@ class TestBestDirectionalDelivery:
             _make_cand(player="Missing", direction="", evidence_count=100),
         ]
         assert _select_best_over_under(queue) == []
+
+
+class TestBestPerSportDelivery:
+    def test_keeps_best_directional_pick_for_each_sport(self):
+        queue = [
+            _make_cand(player="Weak NBA", sport="NBA", direction="OVER", evidence_count=5),
+            _make_cand(player="Best NBA", sport="NBA", direction="UNDER", evidence_count=20),
+            _make_cand(player="Best NHL", sport="NHL", direction="OVER", evidence_count=12),
+            _make_cand(player="Weak NHL", sport="NHL", direction="UNDER", evidence_count=3),
+            _make_cand(player="Best MLB", sport="MLB", direction="UNDER", evidence_count=9),
+        ]
+
+        selected = _select_best_per_sport(queue)
+
+        assert {(candidate["sport"], candidate["player"]) for candidate in selected} == {
+            ("NBA", "Best NBA"),
+            ("NHL", "Best NHL"),
+            ("MLB", "Best MLB"),
+        }
+
+    def test_direction_does_not_create_a_second_pick_in_one_sport(self):
+        queue = [
+            _make_cand(player="Over", sport="TENNIS", direction="OVER", evidence_count=20),
+            _make_cand(player="Under", sport="TENNIS", direction="UNDER", evidence_count=19),
+        ]
+
+        selected = _select_best_per_sport(queue)
+
+        assert len(selected) == 1
+        assert selected[0]["player"] == "Over"
