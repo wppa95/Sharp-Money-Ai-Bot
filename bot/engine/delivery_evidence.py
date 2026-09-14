@@ -23,6 +23,46 @@ _NESTED_KEYS = (
     "bet_evidence_json",
 )
 
+_HISTORY_OPTIONAL_SPORTS = frozenset({
+    # Esports identifiers used by the configured feeds.
+    "ESPORTS",
+    "CS",
+    "CS2",
+    "LOL",
+    "LEAGUE OF LEGENDS",
+    "VAL",
+    "VALORANT",
+    "DOTA",
+    "DOTA2",
+    # Tennis and soccer identifiers used by the configured feeds.
+    "TENNIS",
+    "SOCCER",
+    "FIFA",
+    "EPL",
+    "LALIGA",
+    "LA LIGA",
+    "SERIEA",
+    "SERIE A",
+    "BUNDESLIGA",
+    "LIGUE1",
+    "LIGUE 1",
+    "MLS",
+    "UCL",
+    "NWSL",
+})
+
+
+def is_history_optional_sport(sport: Any) -> bool:
+    """Return whether direction alone may qualify delivery for *sport*.
+
+    Esports, tennis, and soccer feeds may lack completed player-game history
+    at alert time. Every other sport must provide qualifying history.
+    """
+    normalized = " ".join(
+        str(sport or "").strip().upper().replace("_", " ").replace("-", " ").split()
+    )
+    return normalized in _HISTORY_OPTIONAL_SPORTS
+
 
 def is_historical_average_source(value: Any) -> bool:
     """Return whether a source label identifies line-average fallback evidence."""
@@ -146,7 +186,11 @@ def _total_count(payload: dict[str, Any]) -> tuple[int | None, bool]:
     return (max(window_counts) if window_counts else None), present
 
 
-def _payload_has_sufficient_evidence(payload: dict[str, Any]) -> bool:
+def _payload_has_sufficient_evidence(
+    payload: dict[str, Any],
+    *,
+    allow_historical_average: bool = True,
+) -> bool:
     source_value = next(
         (
             payload.get(key)
@@ -159,7 +203,7 @@ def _payload_has_sufficient_evidence(payload: dict[str, Any]) -> bool:
     if is_historical_average_source(source):
         # Historical-average fallback is the evidence itself. It intentionally
         # does not require settled last-5/last-10 windows or a game count.
-        return True
+        return allow_historical_average
     if source not in {
         "real",
         "game_results",
@@ -198,7 +242,12 @@ def _payload_has_sufficient_evidence(payload: dict[str, Any]) -> bool:
     return count is not None and count >= _MIN_DELIVERY_EVIDENCE_SAMPLES
 
 
-def serialized_evidence_supports_delivery(value: Any, *, _depth: int = 0) -> bool:
+def serialized_evidence_supports_delivery(
+    value: Any,
+    *,
+    _depth: int = 0,
+    allow_historical_average: bool = True,
+) -> bool:
     """Return whether a serialized evidence tree carries sufficient provenance.
 
     The helper accepts parsed dictionaries, JSON strings, and nested evidence
@@ -219,17 +268,28 @@ def serialized_evidence_supports_delivery(value: Any, *, _depth: int = 0) -> boo
             return False
 
     if isinstance(value, dict):
-        if _payload_has_sufficient_evidence(value):
+        if _payload_has_sufficient_evidence(
+            value,
+            allow_historical_average=allow_historical_average,
+        ):
             return True
         return any(
-            serialized_evidence_supports_delivery(child, _depth=_depth + 1)
+            serialized_evidence_supports_delivery(
+                child,
+                _depth=_depth + 1,
+                allow_historical_average=allow_historical_average,
+            )
             for key in _NESTED_KEYS
             if (child := value.get(key)) is not None
         )
 
     if isinstance(value, (list, tuple)):
         return any(
-            serialized_evidence_supports_delivery(child, _depth=_depth + 1)
+            serialized_evidence_supports_delivery(
+                child,
+                _depth=_depth + 1,
+                allow_historical_average=allow_historical_average,
+            )
             for child in value
         )
 

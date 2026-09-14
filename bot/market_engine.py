@@ -57,6 +57,7 @@ from engine.score_validation import clamp_score
 from engine.strongest_pick import select_strongest_actionable_picks
 from engine.delivery_evidence import (
     has_strict_directional_history,
+    is_history_optional_sport,
     is_historical_average_source,
     serialized_evidence_supports_delivery,
 )
@@ -3158,6 +3159,7 @@ async def _run_prizepicks_independent_cycle(
             float(getattr(score, "total", 0) or 0),
             float(getattr(market_quality, "score", 0) or 0),
             _has_delivery_evidence(
+                sport=sport,
                 score=score,
                 validation=validation,
                 decision=decision,
@@ -3879,6 +3881,7 @@ def _has_strong_delivery_evidence(
 
 def _has_delivery_evidence(
     *,
+    sport: str = "",
     score: object = None,
     validation: object = None,
     decision: object = None,
@@ -3886,30 +3889,25 @@ def _has_delivery_evidence(
 ) -> bool:
     """Return whether a directional candidate has sufficient evidence to send.
 
-    Unlike the strong-label helper, this only requires a provenance-labeled
-    sample or a persisted historical-average/serialized evidence payload.
-    The canonical direction gate still rejects missing or invalid directions.
+    Esports, tennis, and soccer may qualify on direction alone. Every other
+    sport requires qualifying completed-game history or supplemental history.
     """
-    # Production UDBetDecision objects carry the historical-average provenance
-    # directly on evidence_source.  Do not require callers to serialize the
-    # decision or duplicate that provenance onto validation.
-    if decision is not None and not isinstance(decision, dict):
-        decision_source = getattr(decision, "evidence_source", None)
-        decision_direction = str(
-            getattr(decision, "recommendation", "") or ""
-        ).upper()
-        if (
-            decision_direction in {"OVER", "UNDER"}
-            and is_historical_average_source(decision_source)
-        ):
-            return True
+    direction = str(
+        getattr(decision, "recommendation", "")
+        or (
+            decision.get("recommendation") or decision.get("rec")
+            if isinstance(decision, dict)
+            else ""
+        )
+        or ""
+    ).upper()
+    if direction not in {"OVER", "UNDER"}:
+        return False
+    if is_history_optional_sport(sport):
+        return True
 
     if bool(getattr(validation, "has_supporting_data", False)):
         source = str(getattr(validation, "data_source", "") or "").lower().strip()
-        if is_historical_average_source(source):
-            # The historical-average fallback is the evidence boundary; it
-            # intentionally does not require last-5/last-10 sample counts.
-            return True
         n_real = int(getattr(validation, "n_real_games", 0) or 0)
         n_supplemental = int(
             getattr(validation, "n_supplemental_games", 0) or 0
@@ -3924,29 +3922,18 @@ def _has_delivery_evidence(
         ):
             return True
 
-        fallback_direction = str(
-            getattr(decision, "recommendation", "")
-            or (decision.get("rec") if isinstance(decision, dict) else "")
-            or ""
-        ).upper()
-        fallback_avg = getattr(decision, "avg_vs_line_pct", None)
-        if (
-            fallback_direction in {"OVER", "UNDER"}
-            and isinstance(fallback_avg, (int, float))
-            and not isinstance(fallback_avg, bool)
-            and (
-                (fallback_direction == "OVER" and fallback_avg > 0)
-                or (fallback_direction == "UNDER" and fallback_avg < 0)
-            )
-        ):
-            return True
-
     for obj in (decision, intelligence_trace):
-        if isinstance(obj, dict) and serialized_evidence_supports_delivery(obj):
+        if isinstance(obj, dict) and serialized_evidence_supports_delivery(
+            obj,
+            allow_historical_average=False,
+        ):
             return True
         if obj is not None and not isinstance(obj, dict):
             for attr in ("evidence", "bet_evidence", "intelligence_trace"):
-                if serialized_evidence_supports_delivery(getattr(obj, attr, None)):
+                if serialized_evidence_supports_delivery(
+                    getattr(obj, attr, None),
+                    allow_historical_average=False,
+                ):
                     return True
     return False
 
@@ -5622,6 +5609,7 @@ async def underdog_job(context) -> None:
                     _np_gate_ok   = _tier_delivery_gate(
                         snap.sport or "UNKNOWN", _np_direction, 0, 0,
                         _has_delivery_evidence(
+                            sport=snap.sport or "UNKNOWN",
                             score=score, validation=validation, decision=decision,
                             intelligence_trace=_np_intel_trace,
                         ),
@@ -6141,6 +6129,7 @@ async def underdog_job(context) -> None:
                     if not is_removed and not _tier_delivery_gate(
                         snap.sport or "UNKNOWN", _lc_direction, 0, 0,
                         _has_delivery_evidence(
+                            sport=snap.sport or "UNKNOWN",
                             score=score, validation=validation, decision=decision,
                             intelligence_trace=_lc_intel_trace,
                         ),
@@ -6579,6 +6568,7 @@ async def underdog_job(context) -> None:
                 if not _tier_delivery_gate(
                     _ssport, _s_direction, 0, 0,
                     _has_delivery_evidence(
+                        sport=_ssport,
                         score=_sscore, validation=_sval, decision=_sdec,
                         intelligence_trace=_s_intel_trace,
                     ),
@@ -6680,6 +6670,7 @@ async def underdog_job(context) -> None:
                 if not _tier_delivery_gate(
                      _dq_sport, _dq_direction, 0, 0,
                     _has_delivery_evidence(
+                        sport=_dq_sport,
                         score=_dq_score, validation=_dq_val, decision=_dq_dec,
                         intelligence_trace=_dq_intel,
                     ),
@@ -7936,6 +7927,7 @@ async def _stable_refresh_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
             if not _tier_delivery_gate(
                 _sr_sport, _sr_dec.recommendation, 0, 0,
                 _has_delivery_evidence(
+                    sport=_sr_sport,
                     score=_sr_score,
                     validation=_sr_val,
                     decision=_sr_dec,
@@ -8803,6 +8795,7 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                     _fpr_evidence_ok = _tier_delivery_gate(
                         _fpr_sport, _fpr_dec.recommendation, 0, 0,
                         _has_delivery_evidence(
+                            sport=_fpr_sport,
                             score=_fpr_score,
                             validation=_fpr_val,
                             decision=_fpr_dec,

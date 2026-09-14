@@ -811,22 +811,22 @@ def test_underdog_evaluation_budget_does_not_cap_the_feed():
     assert "len(ud_snaps)" in src
 
 
-def test_player_history_interval_default_300s():
-    """Player history runs on the requested five-minute cadence."""
+def test_player_history_interval_default_180s():
+    """Player history runs on the configured three-minute cadence."""
     src = _src("config.py")
     assert re.search(
-        r'PLAYER_HISTORY_POLL_INTERVAL[\s\S]*?os\.environ\.get\([^,]+,\s*["\']300["\']\)',
+        r'PLAYER_HISTORY_POLL_INTERVAL[\s\S]*?os\.environ\.get\([^,]+,\s*["\']180["\']\)',
         src,
-    ), "PLAYER_HISTORY_POLL_INTERVAL default must be '300'"
+    ), "PLAYER_HISTORY_POLL_INTERVAL default must be '180'"
 
 
-def test_opportunity_grader_interval_default_1200s():
-    """Settlement grading must run every 20 minutes, not every live scan."""
+def test_opportunity_grader_interval_default_600s():
+    """Settlement grading must run every ten minutes, not every live scan."""
     src = _src("config.py")
     assert re.search(
-        r'OPPORTUNITY_GRADER_INTERVAL[\s\S]*?os\.environ\.get\([^,]+,\s*["\']1200["\']\)',
+        r'OPPORTUNITY_GRADER_INTERVAL[\s\S]*?os\.environ\.get\([^,]+,\s*["\']600["\']\)',
         src,
-    ), "OPPORTUNITY_GRADER_INTERVAL default must be '1200'"
+    ), "OPPORTUNITY_GRADER_INTERVAL default must be '600'"
 
 
 # ── 2. scheduled execution coordinator ───────────────────────────────────────

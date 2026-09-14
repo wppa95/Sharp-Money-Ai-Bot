@@ -181,12 +181,12 @@ class TestIndependentPrizePicks:
         assert calls == [
             (sport, bookmaker)
             for sport in ("NBA", "MLB", "NHL")
-            for bookmaker in ("prizepicks", "draftkings", "fanduel", "underdog")
+            for bookmaker in ("prizepicks", "underdog")
         ]
         assert [provider for provider, _ in db.saved] == [
             provider
             for _sport in ("NBA", "MLB", "NHL")
-            for provider in ("PrizePicks", "DraftKings", "FanDuel", "Underdog")
+            for provider in ("PrizePicks", "Underdog")
         ]
         assert {
             prop.sport
@@ -235,7 +235,7 @@ class TestIndependentPrizePicks:
             if sport not in attempted_sports:
                 attempted_sports.append(sport)
         assert attempted_sports == ["MLB", "NBA", "WNBA", "NHL", "TENNIS"]
-        assert len(calls) == 5 * 4
+        assert len(calls) == 5 * 2
         assert all(sport not in {"NFL", "NCAAF"} for sport, _ in calls)
 
     async def test_request_worker_backs_off_only_empty_bookmaker_sport_pairs(
@@ -296,9 +296,9 @@ class TestIndependentPrizePicks:
         await market_engine.propline_request_scan_job(context)
         await market_engine.propline_request_scan_job(context)
 
-        assert calls.count(("NHL", "fanduel")) == 1
+        assert calls.count(("NHL", "fanduel")) == 0
         assert calls.count(("NHL", "prizepicks")) == 2
-        assert calls.count(("NHL", "draftkings")) == 2
+        assert calls.count(("NHL", "draftkings")) == 0
         assert calls.count(("NHL", "underdog")) == 2
 
     async def test_incomplete_sport_persists_successes_but_withholds_pending_feed(

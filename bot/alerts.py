@@ -38,7 +38,7 @@ from engine.delivery_gates import (
 _directional_evidence_gate = _canonical_tier_delivery_gate
 from engine.score_validation import clamp_score
 from engine.delivery_evidence import (
-    is_historical_average_source,
+    is_history_optional_sport,
     serialized_evidence_supports_delivery,
 )
 from models import EVOpportunity, Recommendation, SteamAlert
@@ -655,12 +655,11 @@ def _has_strong_underdog_evidence(
     validation: object = None,
     decision: object = None,
     intelligence_trace: object = None,
+    sport: str = "",
 ) -> bool:
-    """Mirror the delivery evidence check without importing market_engine."""
+    """Apply the terminal history/direction rule without importing market_engine."""
     # Polling snapshots are monitoring evidence, not completed player games.
     # Only real game-result evidence can qualify a Telegram PLAY.
-    # This is the terminal history gate: persisted historical-average
-    # direction without all six displayed windows is not actionable.
     decision_direction = str(
         (
             decision.get("recommendation") or decision.get("rec") or ""
@@ -668,11 +667,9 @@ def _has_strong_underdog_evidence(
             else getattr(decision, "recommendation", "") or ""
         )
     ).upper()
-    decision_source = getattr(decision, "evidence_source", None)
-    if (
-        decision_direction in {"OVER", "UNDER"}
-        and is_historical_average_source(decision_source)
-    ):
+    if decision_direction not in {"OVER", "UNDER"}:
+        return False
+    if is_history_optional_sport(sport):
         return True
 
     if bool(getattr(validation, "has_supporting_data", False)):
@@ -680,14 +677,8 @@ def _has_strong_underdog_evidence(
         # A supporting-data flag without provenance is not enough for a
         # production delivery.  Monitoring snapshots remain non-actionable.
         if not isinstance(source, str):
-            if getattr(type(source), "__module__", "") == "unittest.mock":
-                return True
             return False
         source_lower = source.lower().strip()
-        if is_historical_average_source(source_lower):
-            # Historical line/average fallback is valid evidence for
-            # non-football props even when settled game windows are absent.
-            return True
         n_real = int(getattr(validation, "n_real_games", 0) or 0)
         n_supplemental = int(
             getattr(validation, "n_supplemental_games", 0) or 0
@@ -700,13 +691,19 @@ def _has_strong_underdog_evidence(
             return n_real + n_supplemental >= 5
     for obj in (decision, intelligence_trace):
         if isinstance(obj, dict):
-            if serialized_evidence_supports_delivery(obj):
+            if serialized_evidence_supports_delivery(
+                obj,
+                allow_historical_average=False,
+            ):
                 return True
             continue
         if obj is not None:
             for attr in ("evidence", "bet_evidence", "intelligence_trace"):
                 value = getattr(obj, attr, None)
-                if serialized_evidence_supports_delivery(value):
+                if serialized_evidence_supports_delivery(
+                    value,
+                    allow_historical_average=False,
+                ):
                     return True
     return False
 
@@ -1838,6 +1835,7 @@ class AlertDelivery:
             validation=validation,
             decision=decision,
             intelligence_trace=intelligence_trace,
+            sport=sport,
         )
         if not _canonical_tier_delivery_gate(
             _direction,

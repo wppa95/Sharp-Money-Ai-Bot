@@ -95,29 +95,46 @@ def test_propline_history_is_valid_delivery_evidence():
         supplemental_sources=("propline_history",),
     )
 
-    assert _has_strong_underdog_evidence(validation=validation) is True
+    assert _has_strong_underdog_evidence(
+        sport="CS",
+        validation=validation,
+        decision=SimpleNamespace(recommendation="OVER"),
+    ) is True
     assert market_engine._has_strong_delivery_evidence(validation=validation) is True
 
 
 def test_serialized_propline_evidence_requires_sample_count():
     source_only = {"evidence": {"data_source": "propline"}}
     sufficient = {"evidence": {"data_source": "propline", "n_supp": 5}}
+    sufficient_directional = {
+        **sufficient,
+        "recommendation": "OVER",
+    }
 
     assert _has_strong_underdog_evidence(decision=source_only) is False
     assert market_engine._has_strong_delivery_evidence(decision=source_only) is False
-    assert _has_strong_underdog_evidence(decision=sufficient) is True
+    assert _has_strong_underdog_evidence(
+        sport="CS",
+        decision=sufficient_directional,
+    ) is True
     assert market_engine._has_strong_delivery_evidence(decision=sufficient) is True
 
 
 def test_serialized_validation_json_keeps_propline_provenance_and_count():
     decision = {
+        "recommendation": "OVER",
         "validation_json": json.dumps(
             {"src": "propline", "n": 5, "n_real": 0, "n_supp": 5}
         )
     }
 
-    assert _has_strong_underdog_evidence(decision=decision) is True
-    assert market_engine._has_strong_delivery_evidence(decision=decision) is True
+    assert _has_strong_underdog_evidence(
+        sport="CS",
+        decision={**decision, "recommendation": "OVER"},
+    ) is True
+    assert market_engine._has_strong_delivery_evidence(
+        decision={"validation_json": decision["validation_json"]},
+    ) is True
 
 
 @pytest.mark.parametrize(
@@ -139,6 +156,7 @@ def test_historical_average_without_windows_is_telegram_deliverable(source):
     )
 
     assert _has_strong_underdog_evidence(
+        sport="SOCCER",
         validation=validation,
         decision=decision,
     ) is True
@@ -183,6 +201,7 @@ def test_mixed_over_history_with_provenance_is_telegram_deliverable():
     )
 
     assert _has_strong_underdog_evidence(
+        sport="MLB",
         validation=validation,
         decision=decision,
     ) is True
@@ -208,6 +227,7 @@ def test_historical_average_evidence_source_is_read_from_decision_json():
 
     assert serialized_evidence_supports_delivery(decision) is True
     assert market_engine._has_delivery_evidence(
+        sport="SOCCER",
         validation=validation,
         decision=decision,
     ) is True
@@ -227,13 +247,74 @@ def test_historical_average_evidence_source_without_windows_is_deliverable():
     )
 
     assert market_engine._has_delivery_evidence(
+        sport="TENNIS",
         validation=validation,
         decision=decision,
     ) is True
     assert _has_strong_underdog_evidence(
+        sport="TENNIS",
         validation=validation,
         decision=decision,
     ) is True
+
+
+@pytest.mark.parametrize(
+    "sport",
+    ["CS", "LOL", "DOTA", "VALORANT", "TENNIS", "SOCCER", "FIFA"],
+)
+def test_history_optional_sports_still_require_direction(sport):
+    no_history = SimpleNamespace(
+        recommendation="OVER",
+        evidence_source=None,
+    )
+
+    assert market_engine._has_delivery_evidence(
+        sport=sport,
+        decision=no_history,
+    ) is True
+    assert _has_strong_underdog_evidence(
+        sport=sport,
+        decision=no_history,
+    ) is True
+
+    no_direction = SimpleNamespace(
+        recommendation="",
+        evidence_source=None,
+    )
+    assert market_engine._has_delivery_evidence(
+        sport=sport,
+        decision=no_direction,
+    ) is False
+    assert _has_strong_underdog_evidence(
+        sport=sport,
+        decision=no_direction,
+    ) is False
+
+
+@pytest.mark.parametrize("sport", ["MLB", "NBA", "NFL", "NHL"])
+def test_non_optional_sports_require_history_even_with_direction(sport):
+    validation = SimpleNamespace(
+        has_supporting_data=True,
+        data_source="historical_average",
+        n_real_games=0,
+        n_supplemental_games=0,
+    )
+    decision = SimpleNamespace(
+        recommendation="OVER",
+        evidence_source="historical_average",
+        avg_vs_line_pct=0.12,
+    )
+
+    assert market_engine._has_delivery_evidence(
+        sport=sport,
+        validation=validation,
+        decision=decision,
+    ) is False
+    assert _has_strong_underdog_evidence(
+        sport=sport,
+        validation=validation,
+        decision=decision,
+    ) is False
 
 
 def test_telegram_delivery_requires_strong_over_in_every_window():

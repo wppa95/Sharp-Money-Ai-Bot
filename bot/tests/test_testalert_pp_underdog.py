@@ -108,6 +108,16 @@ def _make_db_mock() -> MagicMock:
     return mock_db
 
 
+def _make_real_validation() -> SimpleNamespace:
+    """Provide the completed-game evidence required by non-optional sports."""
+    return SimpleNamespace(
+        has_supporting_data=True,
+        data_source="real",
+        n_real_games=10,
+        n_supplemental_games=0,
+    )
+
+
 def _make_delivery(
     chat_ids: list | None = None,
     bot: object = None,
@@ -358,7 +368,7 @@ class TestDeliverUnderdog:
             stat_type   = "Points",
             old_line    = 0.5,
             new_line    = 1.5,
-            validation  = MagicMock(has_supporting_data=True),
+            validation  = _make_real_validation(),
             decision    = MagicMock(recommendation="OVER", confidence=80),
         )
         assert not result.filtered
@@ -497,7 +507,7 @@ class TestDeliverUnderdog:
             stat_type   = "Points",
             old_line    = 0.5,
             new_line    = 1.5,
-            validation  = MagicMock(has_supporting_data=True),
+            validation  = _make_real_validation(),
             decision    = MagicMock(
                 recommendation="OVER",
                 confidence=66,
@@ -532,7 +542,7 @@ class TestDeliverUnderdog:
             stat_type="Shots on Goal",
             old_line=3.5,
             new_line=2.5,
-            validation=MagicMock(has_supporting_data=True),
+            validation=_make_real_validation(),
             decision=MagicMock(
                 recommendation="UNDER",
                 confidence=66,
@@ -564,7 +574,7 @@ class TestDeliverUnderdog:
             stat_type   = "Shots on Goal",
             old_line    = 3.5,
             new_line    = 2.5,
-            validation  = MagicMock(has_supporting_data=True),
+            validation  = _make_real_validation(),
             decision    = MagicMock(recommendation="UNDER", confidence=80),
         )
 
@@ -608,7 +618,7 @@ class TestDeliverUnderdog:
             stat_type   = "Points",
             old_line    = 0.5,
             new_line    = 1.5,
-            validation  = MagicMock(has_supporting_data=True),
+            validation  = _make_real_validation(),
             decision    = MagicMock(recommendation="OVER", confidence=80),
         )
         assert result.sent is True
@@ -623,7 +633,7 @@ class TestDeliverUnderdog:
             stat_type   = "Points",
             old_line    = 0.5,
             new_line    = 1.5,
-            validation  = MagicMock(has_supporting_data=True),
+            validation  = _make_real_validation(),
             decision    = MagicMock(recommendation="OVER", confidence=80),
         )
         assert result.sent is False
@@ -640,7 +650,7 @@ class TestDeliverUnderdog:
             stat_type   = "Points",
             old_line    = 0.5,
             new_line    = 1.5,
-            validation  = MagicMock(has_supporting_data=True),
+            validation  = _make_real_validation(),
             decision    = MagicMock(recommendation="OVER", confidence=80),
         )
         assert result.recipients_sent   == 3
@@ -669,7 +679,7 @@ class TestDeliverUnderdog:
             old_line    = 0.5,
             new_line    = 1.5,
             game_time   = game_ts,
-            validation  = MagicMock(has_supporting_data=True),
+            validation  = _make_real_validation(),
             decision    = MagicMock(recommendation="OVER", confidence=80),
         )
 
@@ -718,7 +728,7 @@ class TestDeliverUnderdog:
             stat_type   = "Points",
             old_line    = 26.5,
             new_line    = 28.5,
-            validation  = MagicMock(has_supporting_data=True),
+            validation  = _make_real_validation(),
             decision    = MagicMock(recommendation="OVER", confidence=80),
         )
         assert "🏀" in sent_messages[0]
@@ -736,7 +746,7 @@ class TestDeliverUnderdog:
             stat_type   = "Points",
             old_line    = 0.5,
             new_line    = 1.5,
-            validation  = MagicMock(has_supporting_data=True),
+            validation  = _make_real_validation(),
             decision    = MagicMock(recommendation="OVER", confidence=80),
         )
         assert result.sent is False

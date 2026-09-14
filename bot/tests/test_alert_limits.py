@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import pytest
 from datetime import datetime
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 
@@ -260,7 +261,12 @@ async def test_underdog_cap_disabled_when_limit_is_zero():
                 25.5, 26.0,
                 game_time=None,
                 score=MagicMock(total=75),
-                validation=MagicMock(has_supporting_data=True),
+                validation=SimpleNamespace(
+                    has_supporting_data=True,
+                    data_source="real",
+                    n_real_games=10,
+                    n_supplemental_games=0,
+                ),
                 decision=MagicMock(recommendation="OVER", confidence=80),
             )
 
@@ -288,7 +294,12 @@ async def test_underdog_allowed_when_under_cap():
             25.5, 26.0,
             game_time=None,
             score=MagicMock(total=75),
-            validation=MagicMock(has_supporting_data=True),
+            validation=SimpleNamespace(
+                has_supporting_data=True,
+                data_source="real",
+                n_real_games=10,
+                n_supplemental_games=0,
+            ),
             decision=MagicMock(recommendation="OVER", confidence=80),
         )
 
