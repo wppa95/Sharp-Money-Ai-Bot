@@ -968,7 +968,7 @@ _PROPLINE_EMPTY_BACKOFF_BASE_SECONDS = 15 * 60
 _PROPLINE_EMPTY_BACKOFF_MAX_SECONDS = 2 * 60 * 60
 # Four bookmaker requests per sport take about 15 seconds under the shared
 # 1,020/hour provider pacing. Five sports therefore leave enough headroom for
-# native-feed evaluation and persistence inside the two-minute cycle.
+# native-feed evaluation and persistence inside the 150-second cycle.
 _PROPLINE_SPORTS_PER_CYCLE = 5
 
 _PROPLINE_BOOKMAKER_PROVIDERS = {
@@ -1849,7 +1849,7 @@ _prop_market_alerted: dict = {}
 
 # Previous fetched Underdog state used for in-process line-change detection.
 # The database remains the durable source of record; this avoids a full-table
-# grouped-history scan on every two-minute polling cycle.
+# grouped-history scan on every 150-second polling cycle.
 _ud_scan_state: dict[tuple[str, str], object] = {}
 _ud_known_keys: set[tuple[str, str]] = set()
 _ud_scan_db_id: int | None = None
@@ -4560,7 +4560,7 @@ async def underdog_job(context) -> None:
     # unrelated jobs remain free to run concurrently.
     _cycle_deadline = time.monotonic() + max(
         5.0,
-        float(getattr(config, "UNDERDOG_POLL_INTERVAL", 120)) - 5.0,
+        float(getattr(config, "UNDERDOG_POLL_INTERVAL", 150)) - 5.0,
     )
 
     async def _await_cycle_budget(awaitable, operation: str):
@@ -7575,7 +7575,7 @@ async def underdog_job(context) -> None:
     )
     _job_activity_end("underdog")
     _cycle_elapsed = time.monotonic() - _cycle_timing.started_mono
-    _cycle_cadence = float(getattr(config, "UNDERDOG_POLL_INTERVAL", 120))
+    _cycle_cadence = float(getattr(config, "UNDERDOG_POLL_INTERVAL", 150))
     _cycle_complete = (
         not _cycle_budget_exhausted
         and _snapshot_failed_records == 0
@@ -7649,7 +7649,7 @@ async def _stable_refresh_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
         _health.record_job_started("stable_refresh_job")
 
     # Do not compete with the first Underdog scan while it restores state and
-    # establishes the canonical active pool.  The next two-minute trigger will
+    # establishes the canonical active pool.  The next 150-second trigger will
     # retry after the scan releases the slot.
     if _ud_full_scan_running:
         logger.info(
