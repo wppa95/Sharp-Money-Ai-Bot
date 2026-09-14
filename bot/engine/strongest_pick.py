@@ -13,6 +13,10 @@ from engine.ud_scoring import _HIGH_FLOOR_STATS
 
 
 _PRIMARY_PROVIDERS = {"prizepicks", "underdog"}
+_LOW_LINE_GREEN_GOBLIN_SPORTS = {"NFL", "MLB"}
+_GREEN_GOBLIN_STAT_KEYS = frozenset(
+    stat.casefold() for stat in _HIGH_FLOOR_STATS
+)
 
 
 def _number(value, default: float = 0.0) -> float:
@@ -60,12 +64,12 @@ def _line(candidate: dict) -> float:
     return _number(value)
 
 
-def _is_nfl_green_goblin(candidate: dict) -> bool:
-    """Return whether an NFL candidate uses a configured high-floor market."""
+def _is_low_line_green_goblin(candidate: dict) -> bool:
+    """Return whether an NFL/MLB candidate uses a high-floor market."""
     return (
-        _sport(candidate) == "NFL"
+        _sport(candidate) in _LOW_LINE_GREEN_GOBLIN_SPORTS
         and _stat(candidate).casefold()
-        in {stat.casefold() for stat in _HIGH_FLOOR_STATS}
+        in _GREEN_GOBLIN_STAT_KEYS
     )
 
 
@@ -162,14 +166,17 @@ def select_strongest_actionable_picks(
 
     selected: list[dict] = []
     for group in groups.values():
-        # NFL delivery is intentionally narrower than the general selector:
-        # only high-floor ("green goblin") markets are eligible, and the
-        # lowest available line wins before evidence-based tie-breakers.
-        nfl_group = [candidate for candidate in group if _sport(candidate) == "NFL"]
-        if nfl_group:
+        # NFL and MLB delivery are intentionally narrower than the general
+        # selector: only high-floor ("green goblin") markets are eligible,
+        # and the lowest available line wins before evidence tie-breakers.
+        low_line_group = [
+            candidate for candidate in group
+            if _sport(candidate) in _LOW_LINE_GREEN_GOBLIN_SPORTS
+        ]
+        if low_line_group:
             green_goblin_group = [
-                candidate for candidate in nfl_group
-                if _is_nfl_green_goblin(candidate)
+                candidate for candidate in low_line_group
+                if _is_low_line_green_goblin(candidate)
             ]
             if not green_goblin_group:
                 continue
