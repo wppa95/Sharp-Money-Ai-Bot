@@ -70,11 +70,33 @@ _PLAYER_PROP_PROVIDERS = (
     "DraftKings",
     "FanDuel",
 )
-# The shared PropLine history endpoint is currently advertised at 27/hour
-# (about one request every 133 seconds). One scheduled target per five-minute
-# cycle avoids queueing requests past this collector's five-second target
-# budget; the cursor still rotates the complete target universe fairly.
-_PLAYER_HISTORY_PROPLINE_TARGETS_PER_CYCLE = 1
+# PropLine's Pro allowance is shared by every authenticated endpoint and
+# client process.  The collector owns the history-target portion of that
+# allowance; the client limiter is the final admission gate for all endpoint
+# kinds.  At the default five-minute cadence this selects a quota-sized target
+# batch per cycle, rather than the old one-target throttle.
+_PROPLINE_REQUESTS_PER_HOUR = 1_020
+_PLAYER_HISTORY_PROPLINE_TARGETS_PER_CYCLE = max(
+    1,
+    int(
+        _PROPLINE_REQUESTS_PER_HOUR
+        * max(
+            1.0,
+            float(getattr(_config, "PLAYER_HISTORY_POLL_INTERVAL", 300))
+            - max(
+                0.0,
+                float(
+                    getattr(
+                        _config,
+                        "PLAYER_HISTORY_CADENCE_HEADROOM_SECONDS",
+                        15,
+                    )
+                ),
+            ),
+        )
+        / 3600.0
+    ),
+)
 
 
 def _uses_propline_history(sport: str) -> bool:
@@ -516,6 +538,19 @@ async def player_history_collector_job(context) -> None:
                         remaining = cycle_deadline - time.monotonic()
                         if remaining <= 0:
                             return "deadline", None
+                        # PropLine requests are admitted by the shared
+                        # rolling-hour limiter.  They may wait for their
+                        # quota slot; the invocation-level deadline, rather
+                        # than the five-second public-provider timeout,
+                        # bounds the complete batch.
+                        scheduled_timeout = (
+                            remaining
+                            if (player, sport, stat) in propline_targets
+                            else min(
+                                _PLAYER_HISTORY_OPERATION_TIMEOUT_SECONDS,
+                                remaining,
+                            )
+                        )
                         coverage = await asyncio.wait_for(
                             history_provider.fetch_scheduled_results(
                                 raw or [],
@@ -526,11 +561,11 @@ async def player_history_collector_job(context) -> None:
                                 allow_propline=(
                                     (player, sport, stat) in propline_targets
                                 ),
+                                force_propline=(
+                                    (player, sport, stat) in propline_targets
+                                ),
                             ),
-                            timeout=min(
-                                _PLAYER_HISTORY_OPERATION_TIMEOUT_SECONDS,
-                                remaining,
-                            ),
+                            timeout=scheduled_timeout,
                         )
                     return "ok", coverage
                 except asyncio.TimeoutError:

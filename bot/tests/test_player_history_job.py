@@ -272,7 +272,7 @@ async def test_player_history_reports_scheduled_propline_coverage_by_sport(caplo
 
 
 @pytest.mark.asyncio
-async def test_propline_rotation_covers_each_non_mlb_market_across_cycles(caplog):
+async def test_propline_quota_batch_covers_each_non_mlb_market_each_cycle(caplog):
     targets = [
         ("NHL Player", "NHL", "goals"),
         ("Tennis Player", "TENNIS", "aces"),
@@ -351,7 +351,7 @@ async def test_propline_rotation_covers_each_non_mlb_market_across_cycles(caplog
             for player, sport, stat, allowed in propline_calls
             if allowed and (player, sport, stat) == target
         )
-        == 1
+        == len(targets)
         for target in targets
     )
     persisted = [

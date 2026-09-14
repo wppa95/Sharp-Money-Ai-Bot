@@ -556,6 +556,7 @@ class PlayerHistoryProvider:
         min_samples: int = 5,
         source_provider: str = "",
         allow_propline: bool = True,
+        force_propline: bool = False,
         instrumentation=None,
     ) -> PropLineHistoryCoverage:
         """Supplement a scheduled provider fetch with safe PropLine history.
@@ -571,7 +572,7 @@ class PlayerHistoryProvider:
         wait longer than this collector's per-target budget.
         """
         primary = list(primary_results or ())
-        if len(primary) >= max(1, int(min_samples)):
+        if len(primary) >= max(1, int(min_samples)) and not force_propline:
             return PropLineHistoryCoverage(
                 rows=tuple(primary),
                 status=PROPLINE_COVERAGE_NOT_NEEDED,

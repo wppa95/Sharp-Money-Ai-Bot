@@ -820,13 +820,13 @@ def test_player_history_interval_default_300s():
     ), "PLAYER_HISTORY_POLL_INTERVAL default must be '300'"
 
 
-def test_opportunity_grader_interval_default_1800s():
-    """Settlement grading must run every 30 minutes, not every live scan."""
+def test_opportunity_grader_interval_default_1200s():
+    """Settlement grading must run every 20 minutes, not every live scan."""
     src = _src("config.py")
     assert re.search(
-        r'OPPORTUNITY_GRADER_INTERVAL[\s\S]*?os\.environ\.get\([^,]+,\s*["\']1800["\']\)',
+        r'OPPORTUNITY_GRADER_INTERVAL[\s\S]*?os\.environ\.get\([^,]+,\s*["\']1200["\']\)',
         src,
-    ), "OPPORTUNITY_GRADER_INTERVAL default must be '1800'"
+    ), "OPPORTUNITY_GRADER_INTERVAL default must be '1200'"
 
 
 # ── 2. scheduled execution coordinator ───────────────────────────────────────

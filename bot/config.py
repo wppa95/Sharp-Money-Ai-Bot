@@ -218,10 +218,10 @@ class Config:
         60,
         min(120, int(os.environ.get("UNDERDOG_POLL_INTERVAL", "120"))),
     )
-    # Thirty-minute cadence for settlement grading. The grader reads durable
+    # Twenty-minute cadence for settlement grading. The grader reads durable
     # player-game evidence and independently fetches missing settlement rows.
     OPPORTUNITY_GRADER_INTERVAL: int = int(
-        os.environ.get("OPPORTUNITY_GRADER_INTERVAL", "1800")
+        os.environ.get("OPPORTUNITY_GRADER_INTERVAL", "1200")
     )
     PLAYER_HISTORY_POLL_INTERVAL: int = int(
         os.environ.get("PLAYER_HISTORY_POLL_INTERVAL", "300")
