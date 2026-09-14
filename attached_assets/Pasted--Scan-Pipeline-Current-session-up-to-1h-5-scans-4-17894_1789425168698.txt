@@ -1,0 +1,80 @@
+━━━━━━━━━━━━━━━━━━
+📡 Scan Pipeline
+━━━━━━━━━━━━━━━━━━
+
+
+Current session (up to 1h)  ·  5 scans · ~4.4min between scans
+
+📡 Full Monitoring Pipeline
+
+📥 Fetched from Underdog:          21,708
+🚫 Removed from feed:              283
+👁 Prop observations (cumulative scan total): 20,980
+   └─ Not re-alerted / below movement threshold: 0
+   └─ New first-appearance:        4,238
+   └─ Line moved (re-scored):      16,735
+
+🔬 Scored this period:             29,694
+   ├─ New:                         4,238
+   ├─ Line moved:                  16,735
+   └─ Full-pool rotation:           8,721
+🎯 Qualified directional candidates: 6,440
+📤 Delivered to Telegram:          7
+
+━━━━━━━━━━━━━━━━━━
+🌐 Full-Pool Rescan Rotation  (last batch)
+━━━━━━━━━━━━━━━━━━
+
+Rotation:           #6  (✅ complete — next started)
+Next rotation:      #7
+Progress:           100.0%
+Coverage:           8,721 / 8,721 active props
+Active source IDs:  8,391
+Uncovered remainder: 0
+🔬 Rescored:        8,721
+📤 Sent:            0
+
+━━━━━━━━━━━━━━━━━━
+🔭 Tracking & Grading Funnel
+━━━━━━━━━━━━━━━━━━
+
+Scan = feed observations/evaluations. Tracking, delivery, and grading use the same durable opportunity records; they are stages, not a second alert path.
+
+📥 Active tracked props: 6,700
+🧾 Historical observations: 11,929
+🔬 Evaluated candidates: 46,491
+🎯 Directional OVER/UNDER opportunities: 488
+✅ Actionable persisted: 488
+   └─ Evidence basis: settled results 397 · historical-average fallback 91 · unavailable 0
+🔬 Rescored: 29,694
+📈 Line movers: 16,735
+📤 Delivered alerts: 58
+⏳ Pending grading (tracked props): 7,128
+🏁 Resolved tracked outcomes: 0
+   └─ HIT / MISS / PUSH: 0 / 0 / 0
+
+
+────────────────
+
+⚽ Sport Funnel Breakdown
+
+
+Sport   Obs  Act Eval  Dir  Del
+---------------- ---------------
+MLB    2285 2092 20940  384   23
+TENNIS 2616 1345  7971    2    2
+NFL    1030  931  9499   90   28
+LALIGA 2268  756   887    0    0
+WNBA   2399  716  1307    4    0
+FIFA    353  353  3883    0    0
+CFB     151  151  1661    1    0
+NBA     516  129   129    0    0
+NHL      89   89     0    0    0
+CS       69   63   691    7    5
+MMA      39   39   429    0    0
+UFC     104   26    26    0    0
+LOL      10   10   110    0    0
+CHAMPI    0  206   206    0    0
+LIGA M    0  210   210    0    0
+
+━━━━━━━━━━━━━━━━━━
