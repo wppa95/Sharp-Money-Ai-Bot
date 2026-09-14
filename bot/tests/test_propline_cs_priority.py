@@ -134,7 +134,7 @@ def test_serialized_validation_json_keeps_propline_provenance_and_count():
     "source",
     ["historical_average", "historical-average", "historical line average fallback"],
 )
-def test_historical_average_is_delivery_evidence_without_settled_windows(source):
+def test_historical_average_without_windows_is_not_telegram_deliverable(source):
     validation = SimpleNamespace(
         has_supporting_data=True,
         data_source=source,
@@ -151,10 +151,55 @@ def test_historical_average_is_delivery_evidence_without_settled_windows(source)
     assert _has_strong_underdog_evidence(
         validation=validation,
         decision=decision,
-    ) is True
+    ) is False
     assert serialized_evidence_supports_delivery(
         {"evidence": {"data_source": source}}
     ) is True
+
+
+def test_mixed_over_history_is_not_telegram_deliverable():
+    validation = SimpleNamespace(
+        has_supporting_data=True,
+        data_source="real",
+        n_real_games=31,
+        n_supplemental_games=0,
+    )
+    decision = SimpleNamespace(
+        recommendation="OVER",
+        **{
+            **{
+                f"{window}_games": games
+                for window, games in (
+                    ("l5", 5),
+                    ("l10", 10),
+                    ("l15", 15),
+                    ("l20", 20),
+                    ("l30", 30),
+                    ("season", 31),
+                )
+            },
+            **{
+                f"{window}_over": over
+                for window, over in (
+                    ("l5", 5),
+                    ("l10", 6),
+                    ("l15", 8),
+                    ("l20", 11),
+                    ("l30", 17),
+                    ("season", 17),
+                )
+            },
+        },
+    )
+
+    assert _has_strong_underdog_evidence(
+        validation=validation,
+        decision=decision,
+    ) is False
+    assert market_engine._has_strong_delivery_evidence(
+        validation=validation,
+        decision=decision,
+    ) is False
 
 
 def test_historical_average_evidence_source_is_read_from_decision_json():
@@ -178,7 +223,7 @@ def test_historical_average_evidence_source_is_read_from_decision_json():
     ) is True
 
 
-def test_historical_average_evidence_source_on_decision_object_is_deliverable():
+def test_historical_average_evidence_source_without_windows_is_not_deliverable():
     validation = SimpleNamespace(
         has_supporting_data=True,
         data_source="proxy",
@@ -198,7 +243,7 @@ def test_historical_average_evidence_source_on_decision_object_is_deliverable():
     assert _has_strong_underdog_evidence(
         validation=validation,
         decision=decision,
-    ) is True
+    ) is False
 
 
 def test_telegram_delivery_requires_strong_over_in_every_window():

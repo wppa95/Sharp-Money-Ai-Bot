@@ -587,7 +587,7 @@ def test_strong_bet_thresholds_are_inclusive_and_directional():
     assert _has_strong_directional_history(validation, under_at_boundary) is True
     assert _has_strong_directional_history(
         validation, under_above_allowed_over_rate
-    ) is False
+    ) is True
 
 
 def test_clean_reason_removes_repeated_history_and_internal_tier():

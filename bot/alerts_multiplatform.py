@@ -537,20 +537,9 @@ def _has_strong_directional_history(
     # Every displayed primary window must agree.  Do not let one favorable
     # window produce a STRONG BET label while L15/L20 or Season contradicts
     # the direction.
-    prefixes = ("l5", "l10", "l15", "l20", "l30", "season")
-    directional_field = "over" if recommendation == "OVER" else "under"
-    threshold = 0.70
-    for prefix in prefixes:
-        games = _numeric_attr(decision, f"{prefix}_games")
-        directional_count = _numeric_attr(
-            decision,
-            f"{prefix}_{directional_field}",
-        )
-        if games is None or games < 5 or directional_count is None:
-            return False
-        if directional_count / games < threshold:
-            return False
-    return True
+    from engine.delivery_evidence import has_strict_directional_history
+
+    return has_strict_directional_history(decision)
 
 
 def _display_label(value: object) -> str:

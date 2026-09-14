@@ -57,7 +57,18 @@ def _make_cand(
     decision = type(
         "Decision",
         (),
-        {"recommendation": direction, "confidence": conf},
+        {
+            "recommendation": direction,
+            "confidence": conf,
+            **{
+                f"{window}_games": 10
+                for window in ("l5", "l10", "l15", "l20", "l30", "season")
+            },
+            **{
+                f"{window}_over": 7 if direction == "OVER" else 3
+                for window in ("l5", "l10", "l15", "l20", "l30", "season")
+            },
+        },
     )()
     return {
         "player":               player,

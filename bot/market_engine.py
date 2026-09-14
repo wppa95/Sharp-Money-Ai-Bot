@@ -56,6 +56,7 @@ from engine.player_prop_market import (
 from engine.score_validation import clamp_score
 from engine.strongest_pick import select_strongest_actionable_picks
 from engine.delivery_evidence import (
+    has_strict_directional_history,
     is_historical_average_source,
     serialized_evidence_supports_delivery,
 )
@@ -3862,13 +3863,14 @@ def _has_strong_delivery_evidence(
                 return False
             windows.append((float(games), float(over_count)))
 
-        return all(
-            (
-                over_count / games >= 0.70
-                if recommendation == "OVER"
-                else over_count / games <= 0.30
-            )
-            for games, over_count in windows
+        return has_strict_directional_history(
+            {
+                "recommendation": recommendation,
+                **{
+                    prefix: {"g": games, "o": over_count}
+                    for prefix, (games, over_count) in zip(prefixes, windows)
+                },
+            }
         )
 
     if bool(getattr(validation, "has_supporting_data", False)):
@@ -4363,8 +4365,10 @@ def _select_strong_directional_picks(candidates: list[dict]) -> list[dict]:
 
     There is deliberately no global count and no per-sport cap.  A sport may
     have several strong OVER and/or UNDER picks.  OVER requires confidence
-    >=70%; UNDER requires confidence <=35%.  The middle band is retained for
-    persistence and grading but never sent.
+    >=70% plus all six displayed history windows at >=70% OVER. UNDER requires
+    confidence <=35% plus all six windows at <=40% OVER. The middle band and
+    incomplete histories are retained for persistence and grading but never
+    sent.
     """
     selected: list[dict] = []
     for candidate in candidates:
@@ -4391,6 +4395,8 @@ def _select_strong_directional_picks(candidates: list[dict]) -> list[dict]:
         ) or (
             direction == "UNDER" and confidence > _STRONG_UNDER_CONFIDENCE
         ):
+            continue
+        if not has_strict_directional_history(decision):
             continue
 
         selected.append(candidate)

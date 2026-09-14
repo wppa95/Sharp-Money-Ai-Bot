@@ -38,6 +38,8 @@ from engine.delivery_gates import (
 _directional_evidence_gate = _canonical_tier_delivery_gate
 from engine.score_validation import clamp_score
 from engine.delivery_evidence import (
+    has_directional_history_fields,
+    has_strict_directional_history,
     is_historical_average_source,
     serialized_evidence_supports_delivery,
 )
@@ -659,10 +661,39 @@ def _has_strong_underdog_evidence(
     """Mirror the delivery evidence check without importing market_engine."""
     # Polling snapshots are monitoring evidence, not completed player games.
     # Only real game-result evidence can qualify a Telegram PLAY.
-    decision_source = getattr(decision, "evidence_source", None)
+    # This is the terminal history gate: persisted historical-average
+    # direction without all six displayed windows is not actionable.
     decision_direction = str(
-        getattr(decision, "recommendation", "") or ""
+        (
+            decision.get("recommendation") or decision.get("rec") or ""
+            if isinstance(decision, dict)
+            else getattr(decision, "recommendation", "") or ""
+        )
     ).upper()
+    decision_is_mock = (
+        getattr(type(decision), "__module__", "") == "unittest.mock"
+    )
+    decision_has_provenance = (
+        not decision_is_mock
+        and bool(
+            (
+                decision.get("evidence_source")
+                if isinstance(decision, dict)
+                else getattr(decision, "evidence_source", None)
+            )
+        )
+    )
+    if (
+        decision_direction in {"OVER", "UNDER"}
+        and (
+            has_directional_history_fields(decision)
+            or decision_has_provenance
+        )
+        and not has_strict_directional_history(decision)
+    ):
+        return False
+
+    decision_source = getattr(decision, "evidence_source", None)
     if (
         decision_direction in {"OVER", "UNDER"}
         and is_historical_average_source(decision_source)

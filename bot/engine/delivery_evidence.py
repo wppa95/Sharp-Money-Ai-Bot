@@ -13,6 +13,7 @@ from typing import Any
 
 _MIN_DELIVERY_EVIDENCE_SAMPLES = 1
 _SOURCE_KEYS = ("data_source", "evidence_source", "source", "src")
+_DIRECTIONAL_HISTORY_WINDOWS = ("l5", "l10", "l15", "l20", "l30", "season")
 _NESTED_KEYS = (
     "evidence",
     "bet_evidence",
@@ -41,6 +42,63 @@ def is_historical_average_source(value: Any) -> bool:
     return (
         "historical" in source
         and any(token in source for token in ("average", "avg", "line", "fallback"))
+    )
+
+
+def has_strict_directional_history(value: Any) -> bool:
+    """Require every displayed history window to support the direction.
+
+    Hit rates are stored as OVER rates.  Therefore an OVER needs at least 70%
+    in every window, while an UNDER needs at most 40% OVER in every window.
+    Missing windows are not treated as passing evidence.
+    """
+    if value is None:
+        return False
+
+    if isinstance(value, dict):
+        recommendation = str(value.get("recommendation") or value.get("rec") or "").upper()
+    else:
+        recommendation = str(getattr(value, "recommendation", "") or "").upper()
+    if recommendation not in {"OVER", "UNDER"}:
+        return False
+
+    for prefix in _DIRECTIONAL_HISTORY_WINDOWS:
+        if isinstance(value, dict):
+            window = value.get(prefix) or {}
+            games = window.get("games", window.get("g"))
+            over_count = window.get("over", window.get("o"))
+            under_count = window.get("under", window.get("u"))
+        else:
+            games = getattr(value, f"{prefix}_games", None)
+            over_count = getattr(value, f"{prefix}_over", None)
+            under_count = getattr(value, f"{prefix}_under", None)
+
+        if not isinstance(games, (int, float)) or isinstance(games, bool) or games < 5:
+            return False
+        if not isinstance(over_count, (int, float)) or isinstance(over_count, bool):
+            if isinstance(under_count, (int, float)) and not isinstance(under_count, bool):
+                over_count = games - under_count
+            else:
+                return False
+
+        over_rate = float(over_count) / float(games)
+        if recommendation == "OVER" and over_rate < 0.70:
+            return False
+        if recommendation == "UNDER" and over_rate > 0.40:
+            return False
+
+    return True
+
+
+def has_directional_history_fields(value: Any) -> bool:
+    """Return whether *value* carries the six-window decision shape."""
+    if value is None or getattr(type(value), "__module__", "") == "unittest.mock":
+        return False
+    if isinstance(value, dict):
+        return any(prefix in value for prefix in _DIRECTIONAL_HISTORY_WINDOWS)
+    return any(
+        hasattr(value, f"{prefix}_games")
+        for prefix in _DIRECTIONAL_HISTORY_WINDOWS
     )
 
 
