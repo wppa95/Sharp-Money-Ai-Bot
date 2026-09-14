@@ -381,6 +381,29 @@ class TestCmdFunnelSportBreakdown:
         msg = update.message.reply_text.call_args[0][0]
         assert "accumulates" in msg
 
+    @pytest.mark.asyncio
+    async def test_funnel_allows_large_aggregate_report_window(self):
+        import commands as commands_module
+        from commands import cmd_funnel
+
+        update, ctx = self._make_update()
+        mock_db = MagicMock()
+        aggregate_reads = AsyncMock(return_value=[
+            {"cycles": 1, "analyzed": 1, "qualified": 0, "alert_delivered": 0},
+            {"tracked": 1, "by_sport": []},
+            {"observations_by_sport": {}, "historical_observations": 0},
+        ])
+        with (
+            patch("commands._db", mock_db),
+            patch("commands._independent_report_reads", aggregate_reads),
+        ):
+            await cmd_funnel(update, ctx)
+
+        assert aggregate_reads.call_args.kwargs["timeout"] == (
+            commands_module._COMMAND_TIMEOUT_SECONDS
+            * commands_module._AGGREGATE_REPORT_TIMEOUT_MULTIPLIER
+        )
+
 
 # ═══════════════════════════════════════════════════════════════════════════
 # DK/FD removal — verify connectors module no longer exports them
