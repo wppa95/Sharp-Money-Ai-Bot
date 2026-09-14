@@ -129,6 +129,35 @@ async def test_preloaded_snapshot_never_reads_or_supplements_database():
 
 
 @pytest.mark.asyncio
+async def test_cache_only_snapshot_miss_does_not_fetch_or_supplement():
+    provider = PlayerHistoryProvider()
+    database = SimpleNamespace(
+        get_player_results=AsyncMock(return_value=[]),
+    )
+    provider._ensure_real_results = AsyncMock(
+        side_effect=AssertionError("live scan fetched primary history")
+    )
+    provider.supplement_missing_results = AsyncMock(
+        side_effect=AssertionError("live scan fetched supplemental history")
+    )
+
+    snapshot = await provider.get_snapshot(
+        database,
+        "Player One",
+        "CS",
+        "Kills",
+        18.5,
+        source_provider="Underdog",
+        ensure_real_results=False,
+    )
+
+    assert snapshot.has_real_data is False
+    database.get_player_results.assert_awaited_once()
+    provider._ensure_real_results.assert_not_awaited()
+    provider.supplement_missing_results.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_empty_preloaded_results_do_not_reopen_database_or_enrich():
     database = SimpleNamespace(
         get_player_results=AsyncMock(

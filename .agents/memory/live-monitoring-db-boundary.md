@@ -15,6 +15,12 @@ History collection is a storage/enrichment worker, not a monitoring job. It must
 
 **How to apply:** Skip the collector when monitoring is active, bound its independent work window and provider calls, and preempt any active collector before live scan, Stable Refresh, or full-pool rescan activity begins.
 
+Live scan history snapshots must remain cache/DB-only even when the cache is empty. Remote primary-provider fetches and PropLine supplementation belong exclusively to the independent history collector; a scan miss yields an evidence-free result for that cycle.
+
+**Why:** Per-player enrichment inside new-prop, line-change, re-entry, standing, Stable Refresh, full-pool, or PrizePicks paths lets a large scan consume history quota and makes monitoring latency depend on provider response time.
+
+**How to apply:** Pass `ensure_real_results=False` to scan-time snapshots and `allow_remote=False` to scan-time hit-rate computation. Keep scheduled primary and PropLine history calls inside the collector's bounded batch.
+
 Production writes emitted by a live scan must be serialized outside the scan coroutine, drained during graceful shutdown, and discarded when an event loop is replaced.
 
 **Why:** SQLite persistence can outlive the monitoring work, but asyncio queues and tasks belong to the loop that created them; carrying them across loops risks stale tasks and lost shutdown writes.

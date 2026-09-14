@@ -3120,6 +3120,7 @@ async def _run_prizepicks_independent_cycle(
                 db, player, sport, stat, line, ud_history=history,
                 source_provider="PrizePicks",
                 opponent=getattr(prop, "opponent", None),
+                ensure_real_results=False,
             )
         except Exception:
             pass
@@ -3138,6 +3139,7 @@ async def _run_prizepicks_independent_cycle(
         if enrichment_used < enrichment_budget:
             hit_rates = await _fetch_and_compute_hit_rates(
                 db, player, sport, stat, line,
+                allow_remote=False,
                 source_provider="PrizePicks",
                 opponent=getattr(prop, "opponent", None),
             )
@@ -5493,10 +5495,7 @@ async def underdog_job(context) -> None:
                                 source_provider="Underdog",
                                 opponent=getattr(snap, "opponent", None),
                                 instrumentation=_cycle_timing,
-                                ensure_real_results=(
-                                    _cached_player_results is None
-                                    and isinstance(db, Database)
-                                ),
+                                ensure_real_results=False,
                                 preloaded_results=_cached_player_results,
                             ),
                             "new-prop history",
@@ -5811,10 +5810,7 @@ async def underdog_job(context) -> None:
                                 source_provider="Underdog",
                                 opponent=getattr(snap, "opponent", None),
                                 instrumentation=_cycle_timing,
-                                ensure_real_results=(
-                                    _cached_player_results is None
-                                    and isinstance(db, Database)
-                                ),
+                                ensure_real_results=False,
                                 preloaded_results=_cached_player_results,
                             ),
                             "line-change history",
@@ -6001,10 +5997,7 @@ async def underdog_job(context) -> None:
                                 source_provider="Underdog",
                                 opponent=getattr(snap, "opponent", None),
                                 instrumentation=_cycle_timing,
-                                ensure_real_results=(
-                                    _cached_player_results is None
-                                    and isinstance(db, Database)
-                                ),
+                                ensure_real_results=False,
                                 preloaded_results=_cached_player_results,
                             ),
                             "re-entry history",
@@ -6515,10 +6508,7 @@ async def underdog_job(context) -> None:
                             source_provider="Underdog",
                             opponent=getattr(_ssnap, "opponent", None),
                             instrumentation=_cycle_timing,
-                            ensure_real_results=(
-                                _cached_player_results is None
-                                and isinstance(db, Database)
-                            ),
+                            ensure_real_results=False,
                             preloaded_results=_cached_player_results,
                         ),
                         "standing history",
@@ -7925,10 +7915,7 @@ async def _stable_refresh_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                     ud_history=_sr_hist,
                     source_provider="Underdog",
                     opponent=getattr(_sr_snap, "opponent", None),
-                    ensure_real_results=(
-                        _sr_cached_results is None
-                        and isinstance(db, Database)
-                    ),
+                    ensure_real_results=False,
                     preloaded_results=_sr_cached_results,
                 )
             except Exception:
@@ -8800,6 +8787,7 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                 )
                 _fpr_hits = await _fetch_and_compute_hit_rates(
                     db, _fpr_player, _fpr_evidence_sport, _fpr_stat, _fpr_line,
+                    allow_remote=False,
                     source_provider=_fpr_provider,
                     preloaded_results=_fpr_results_by_prop.get(
                         (

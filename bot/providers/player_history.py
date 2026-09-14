@@ -315,6 +315,7 @@ class PlayerHistoryProvider:
         provider_scope = str(source_provider or "").strip().lower()
         if (
             preloaded_results is None
+            and ensure_real_results
             and
             provider_scope in {"underdog", "prizepicks"}
             and _is_database_backend(db)

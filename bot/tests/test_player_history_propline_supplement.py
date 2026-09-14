@@ -285,6 +285,7 @@ async def test_snapshot_uses_propline_gap_for_both_primary_providers(source_prov
         ]
     )
     provider = PlayerHistoryProvider(propline_client=client)
+    provider._ensure_real_results = AsyncMock()
 
     snapshot = await provider.get_snapshot(
         db,
@@ -293,7 +294,7 @@ async def test_snapshot_uses_propline_gap_for_both_primary_providers(source_prov
         "Points",
         25.5,
         source_provider=source_provider,
-        ensure_real_results=False,
+        ensure_real_results=True,
     )
 
     assert snapshot.has_real_data is False
@@ -707,6 +708,7 @@ async def test_snapshot_keeps_primary_results_and_adds_only_distinct_supplementa
         ]
     )
     provider = PlayerHistoryProvider(propline_client=client)
+    provider._ensure_real_results = AsyncMock()
 
     snapshot = await provider.get_snapshot(
         db,
@@ -715,7 +717,7 @@ async def test_snapshot_keeps_primary_results_and_adds_only_distinct_supplementa
         "Points",
         25.5,
         source_provider="PrizePicks",
-        ensure_real_results=False,
+        ensure_real_results=True,
     )
 
     assert snapshot.total_real_games == 1
