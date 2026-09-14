@@ -66,11 +66,15 @@ _NEXT_TARGET_KEY = "_player_history_next_target"
 _CURSOR_KEY = "_player_history_cursor"
 _PROPLINE_CURSOR_KEY = "_player_history_propline_cursor"
 _PRIMARY_HISTORY_PROVIDERS = frozenset({"underdog", "prizepicks"})
-_PLAYER_PROP_PROVIDERS = (
-    "Underdog",
-    "PrizePicks",
-    "DraftKings",
-    "FanDuel",
+_PLAYER_PROP_PROVIDERS = tuple(
+    provider
+    for provider, enabled in (
+        ("Underdog", True),
+        ("PrizePicks", True),
+        ("DraftKings", bool(getattr(_config, "DRAFTKINGS_ENABLED", False))),
+        ("FanDuel", bool(getattr(_config, "FANDUEL_ENABLED", False))),
+    )
+    if enabled
 )
 # PropLine's Pro allowance is shared by every authenticated endpoint and
 # client process.  The collector owns the history-target portion of that
@@ -474,10 +478,25 @@ async def player_history_collector_job(context) -> None:
             except Exception:
                 return "unmapped"
 
+        def _has_propline_market(target: tuple[str, str, str]) -> bool:
+            try:
+                from providers.propline import official_player_market_for
+
+                return bool(
+                    official_player_market_for(target[2], sport=target[1])
+                )
+            except Exception:
+                return False
+
+        # Do not spend a paid PropLine request on labels that have no
+        # documented market. The public provider may still supply history for
+        # those targets, but PropLine can only return an unmapped-market
+        # failure for them.
         propline_eligible_targets = [
             target
             for target in cycle_targets
             if _uses_propline_history(target[1])
+            and _has_propline_market(target)
         ]
         if propline_eligible_targets:
             try:
@@ -898,7 +917,7 @@ async def propline_read_only_rotation_job(context) -> None:
                 discovery_audit.reason,
             )
         elif discovery_audit.has_unmapped:
-            logger.warning(
+            logger.info(
                 "propline_read_only_rotation_job: unmapped discovery identities "
                 "sports=%s markets=%s",
                 [item.as_dict() for item in discovery_audit.unmapped_sports],
