@@ -820,7 +820,7 @@ async def player_history_collector_job(context) -> None:
                     _release_history_slot()
         no_result_targets = sum(no_result_by_sport.values())
         if no_result_targets:
-            logger.warning(
+            logger.info(
                 "player_history_collector_job: provider coverage gap "
                 "empty_results=%d by_sport=%s",
                 no_result_targets,
@@ -915,13 +915,6 @@ async def propline_read_only_rotation_job(context) -> None:
                 "status=%s reason=%s",
                 discovery_audit.status,
                 discovery_audit.reason,
-            )
-        elif discovery_audit.has_unmapped:
-            logger.info(
-                "propline_read_only_rotation_job: unmapped discovery identities "
-                "sports=%s markets=%s",
-                [item.as_dict() for item in discovery_audit.unmapped_sports],
-                [item.as_dict() for item in discovery_audit.unmapped_markets],
             )
         events_by_sport = {}
         discover_events = getattr(client, "discover_events", None)
