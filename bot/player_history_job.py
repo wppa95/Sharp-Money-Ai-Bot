@@ -872,9 +872,36 @@ async def propline_read_only_rotation_job(context) -> None:
             active_rows = list(active.values()) if hasattr(active, "values") else list(active or [])
 
         discovered_sports = await client.discover_sports()
+        events_by_sport = {}
+        discover_events = getattr(client, "discover_events", None)
+        if callable(discover_events):
+            # Event discovery is deliberately sequential: each request uses
+            # the client's persistent limiter and a restart can safely repeat
+            # the last discovery without creating an unbounded burst.
+            for sport in discovered_sports:
+                official_sport = (
+                    getattr(sport, "official_key", None)
+                    or getattr(sport, "sport_key", None)
+                    or ""
+                )
+                if not official_sport:
+                    continue
+                try:
+                    events = await discover_events(official_sport)
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning(
+                        "propline_read_only_rotation_job: event discovery "
+                        "failed sport=%s error=%s",
+                        official_sport,
+                        type(exc).__name__,
+                    )
+                    continue
+                if events:
+                    events_by_sport[official_sport] = tuple(events)
         targets = build_propline_read_only_targets(
             active_rows,
             sports=discovered_sports,
+            events_by_sport=events_by_sport,
         )
 
         async def persist(target, result):

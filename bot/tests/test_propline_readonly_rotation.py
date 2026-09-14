@@ -9,6 +9,7 @@ from types import SimpleNamespace
 from providers.player_history import propline_result_rows
 from providers.propline import (
     PropLineReadOnlyRotation,
+    PropLineEvent,
     PropLineResultEvidence,
     PropLineResultsFetchResult,
     PropLineSport,
@@ -55,6 +56,58 @@ def test_targets_use_discovered_official_aliases_only():
         for target in targets
         if target.event_id
     } == {"event_results", "event_stats", "event_markets"}
+
+
+def test_targets_include_officially_discovered_events_without_prop_event_ids():
+    targets = build_propline_read_only_targets(
+        [
+            SimpleNamespace(
+                sport="NBA",
+                player_name="A Player",
+                stat_type="Points",
+            )
+        ],
+        sports=[PropLineSport("basketball_nba", "NBA", "NBA")],
+        events_by_sport={
+            "basketball_nba": [
+                PropLineEvent(
+                    sport_key="basketball_nba",
+                    event_id="discovered-event",
+                )
+            ]
+        },
+    )
+
+    event_targets = [target for target in targets if target.event_id]
+    assert {target.family for target in event_targets} == {
+        "event_results",
+        "event_stats",
+        "event_markets",
+    }
+    assert {target.event_id for target in event_targets} == {"discovered-event"}
+
+
+def test_event_targets_reject_guessed_or_cross_sport_event_ids():
+    targets = build_propline_read_only_targets(
+        sports=[PropLineSport("basketball_nba", "NBA", "NBA")],
+        events_by_sport={
+            "NBA": [
+                {"id": "missing-sport-key"},
+                {"id": "wrong-sport", "sport_key": "football_nfl"},
+                {"id": "accepted-event", "sport_key": "basketball_nba"},
+            ]
+        },
+    )
+
+    assert {
+        (target.family, target.event_id)
+        for target in targets
+        if target.event_id
+    } == {
+        ("event_results", "accepted-event"),
+        ("event_stats", "accepted-event"),
+        ("event_markets", "accepted-event"),
+    }
 
 
 class _RotationClient:

@@ -5077,7 +5077,7 @@ def build_propline_read_only_targets(
         )
         if official and canonical and canonical not in official_by_canonical:
             official_by_canonical[canonical] = official
-            canonical_by_official[official] = canonical
+            canonical_by_official[official.lower()] = canonical
 
     targets: dict[str, PropLineReadOnlyTarget] = {}
 
@@ -5132,16 +5132,30 @@ def build_propline_read_only_targets(
     for requested_sport, events in (events_by_sport or {}).items():
         requested = _normalize_sport(requested_sport)
         official = official_by_canonical.get(requested)
-        canonical = requested
         if not official:
-            official = _clean(requested_sport)
-            canonical = canonical_by_official.get(official, "")
-        # A raw string that did not come from discovery is never accepted.
+            requested_official = _clean(requested_sport)
+            official = next(
+                (
+                    discovered
+                    for discovered in canonical_by_official
+                    if discovered == requested_official.lower()
+                ),
+                "",
+            )
+        canonical = canonical_by_official.get(official.lower(), "")
+        # Event IDs are only safe when the event also carries the official
+        # sport key returned by the same provider discovery catalog.  This
+        # rejects guessed IDs, canonical-only aliases, and cross-sport joins.
         if not official or not canonical:
             continue
         for event in events or ():
             event_id = _read_only_input(event, "event_id", "id", "game_id", "match_id")
-            if not event_id:
+            event_sport = _read_only_input(event, "sport_key", "official_sport")
+            if (
+                not event_id
+                or not event_sport
+                or event_sport.lower() != official.lower()
+            ):
                 continue
             for family in ("event_results", "event_stats", "event_markets"):
                 add(family, official, canonical, event_id=event_id)
