@@ -1860,11 +1860,18 @@ def _normalize_sport(value: Any) -> str:
 
 
 def _normalize_stat(value: Any) -> str:
+    # Underdog's v1 catalog commonly serializes display labels as snake_case
+    # (for example ``double_faults`` and ``games_won``), while the provider
+    # catalog and our sport mappings use human-readable labels.
     raw = re.sub(r"\s+", " ", _clean(value).lower())
-    compact = re.sub(r"\s*\+\s*", "+", raw)
+    display = re.sub(r"\s+", " ", raw.replace("_", " "))
+    compact = re.sub(r"\s*\+\s*", "+", display)
     return _STAT_NORMALIZATION.get(
         raw,
-        _STAT_NORMALIZATION.get(compact, compact),
+        _STAT_NORMALIZATION.get(
+            display,
+            _STAT_NORMALIZATION.get(compact, compact),
+        ),
     )
 
 
@@ -2449,7 +2456,9 @@ def official_player_market_for(
     unrelated response.
     """
     candidate = _clean(stat_type).lower()
-    raw_candidate = re.sub(r"\s+", " ", candidate)
+    raw_candidate = re.sub(
+        r"\s+", " ", candidate.replace("_", " ")
+    )
     if candidate.startswith("player_") and candidate in _OFFICIAL_MARKETS:
         return candidate
     normalized = _normalize_stat(stat_type)
@@ -2464,7 +2473,9 @@ def official_player_market_for(
             return "player_shots"
         if raw_candidate == "shots on target":
             return "player_shots_on_target"
-        if raw_candidate in {"goals + assists", "goals+assists"}:
+        if raw_candidate in {
+            "goals + assists", "goals+assists", "goals assists",
+        }:
             return "goal_or_assist"
     if sport_key == "CS" and "1+2+3" in raw_candidate:
         # Documented CS2 player props cover maps 1-2 only. Never reinterpret

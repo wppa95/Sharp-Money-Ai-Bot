@@ -469,20 +469,22 @@ class PlayerStatsProvider:
                 # be distinguished from zero-stat games, producing invalid hit rates.
                 # Enable manually: UD_ALERT_SPORTS=...,SOCCER + FOOTBALL_DATA_API_KEY.
                 # _fetch_espn_soccer() is also available for ESPN-accessible envs.
-                if (
-                    not os.environ.get("FOOTBALL_DATA_API_KEY")
-                    and _soccer_provider_instance is None
-                ):
-                    logger.debug(
-                        "Soccer optional provider disabled; using stored/PropLine history"
-                    )
-                    return []
-                return _relabel_results(
-                    await _get_soccer_provider().fetch_results(
+                soccer_results: list[RawGameResult] = []
+                if os.environ.get("FOOTBALL_DATA_API_KEY") or _soccer_provider_instance is not None:
+                    soccer_results = await _get_soccer_provider().fetch_results(
                         player_name, sport_upper, stat_type
-                    ),
-                    sport_upper,
+                    )
+                if soccer_results:
+                    return _relabel_results(soccer_results, sport_upper)
+
+                # ESPN already has a no-key soccer gamelog route.  Use it as a
+                # fallback for FIFA/soccer props instead of returning no
+                # evidence merely because the optional football-data token is
+                # absent or has no coverage for this player.
+                espn_results = await self._fetch_espn_soccer(
+                    player_name, stat_type.lower().strip().replace("_", " ")
                 )
+                return _relabel_results(espn_results, sport_upper)
             elif sport_upper in _ESPN_ROUTE:
                 sport_slug, league_slug = _ESPN_ROUTE[sport_upper]
                 return await self._fetch_espn(
@@ -948,6 +950,8 @@ def _get_stat_map(sport: str) -> Optional[dict]:
     if s == "NHL":
         return _NHL_STAT_MAP
     if s == "SOCCER":
+        return _SOCCER_STAT_MAP
+    if s == "FIFA":
         return _SOCCER_STAT_MAP
     return None
 

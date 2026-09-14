@@ -123,7 +123,7 @@ class Config:
     # value must not silently narrow the feed to a guessed subset.
     PRIZEPICKS_LEAGUES_RAW: str = os.environ.get("PRIZEPICKS_LEAGUES", "")
     PROPLINE_BOOKMAKERS_RAW: str = os.environ.get(
-        "PROPLINE_BOOKMAKERS", "prizepicks,draftkings,fanduel,underdog"
+        "PROPLINE_BOOKMAKERS", "prizepicks,underdog"
     )
     # Retained as a compatibility name for existing environment configuration.
     PRIZEPICKS_POLL_INTERVAL: int = int(os.environ.get("PRIZEPICKS_POLL_INTERVAL", "60"))
@@ -193,12 +193,12 @@ class Config:
     )
 
     # ── Player-prop source settings ────────────────────────────────────────────
-    # PropLine supplies PrizePicks, DraftKings, FanDuel, and supplemental
-    # Underdog observations. Native Underdog ingestion remains active too.
-    DRAFTKINGS_ENABLED: bool = os.environ.get("DRAFTKINGS_ENABLED", "true").lower() not in (
+    # PropLine supplies PrizePicks and supplemental Underdog observations.
+    # DraftKings/FanDuel confirmation is opt-in and disabled by default.
+    DRAFTKINGS_ENABLED: bool = os.environ.get("DRAFTKINGS_ENABLED", "false").lower() not in (
         "false", "0", "no", "off"
     )
-    FANDUEL_ENABLED: bool = os.environ.get("FANDUEL_ENABLED", "true").lower() not in (
+    FANDUEL_ENABLED: bool = os.environ.get("FANDUEL_ENABLED", "false").lower() not in (
         "false", "0", "no", "off"
     )
     UNDERDOG_ENABLED:   bool = os.environ.get("UNDERDOG_ENABLED",   "true").lower() == "true"
@@ -412,6 +412,15 @@ class Config:
     # temporarily suppressed from Telegram alerts.
     ALERT_DISABLED_SPORTS_RAW: str = os.environ.get("ALERT_DISABLED_SPORTS", "")
 
+    # Some active Underdog feeds (notably esports, tennis, and FIFA) do not
+    # include a usable scheduled_at value.  Their active projection feed still
+    # supplies the current market, while explicit live/final statuses remain
+    # blocked by the timing helper.  Keep this override narrow and configurable
+    # so it does not weaken timing checks for sports with reliable event times.
+    UD_ALLOW_UNKNOWN_PREGAME_SPORTS_RAW: str = os.environ.get(
+        "UD_ALLOW_UNKNOWN_PREGAME_SPORTS", "CS,TENNIS,FIFA"
+    )
+
     # ── Full-Pool Rescan (FPR) ────────────────────────────────────────────────
     # How many active props to score per FPR batch.  Bounded to control CPU/memory.
     FPR_BATCH_SIZE: int = int(os.environ.get("FPR_BATCH_SIZE", "10000"))
@@ -590,6 +599,19 @@ class Config:
         )
 
     @property
+    def ud_allow_unknown_pregame_sports(self) -> frozenset[str]:
+        """Sports whose active feed may lack event timing metadata.
+
+        This only affects the ``game_time is None`` case.  Known past/live
+        timestamps and explicit blocked statuses are still rejected.
+        """
+        return frozenset(
+            s.strip().upper()
+            for s in self.UD_ALLOW_UNKNOWN_PREGAME_SPORTS_RAW.split(",")
+            if s.strip()
+        )
+
+    @property
     def prizepicks_leagues(self) -> list[str]:
         """PrizePicks league names to monitor (e.g. ["NBA", "NFL"])."""
         return [lg.strip() for lg in self.PRIZEPICKS_LEAGUES_RAW.split(",") if lg.strip()]
@@ -606,6 +628,10 @@ class Config:
         for value in values:
             if value not in result:
                 result.append(value)
+        if not self.DRAFTKINGS_ENABLED:
+            result = [value for value in result if value != "draftkings"]
+        if not self.FANDUEL_ENABLED:
+            result = [value for value in result if value != "fanduel"]
         return result
 
     @property

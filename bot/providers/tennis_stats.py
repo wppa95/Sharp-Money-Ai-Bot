@@ -186,7 +186,11 @@ class TennisStatsProvider:
         Fetch recent match results for *player_name* × *stat_type*.
         Returns [] on any error — never raises.
         """
-        stat_lower = stat_type.lower().strip()
+        # The Underdog catalog uses both display labels and snake_case labels.
+        # Keep the provider's public mapping canonical so both forms share the
+        # same CSV extraction path.
+        stat_lower = stat_type.lower().strip().replace("_", " ")
+        stat_lower = " ".join(stat_lower.split())
 
         try:
             stat_spec = _TENNIS_STAT_MAP.get(stat_lower)
