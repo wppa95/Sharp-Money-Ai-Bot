@@ -35,6 +35,7 @@ from market_engine import (
     _cand_priority,
     _select_best_per_sport,
     _select_best_over_under,
+    _select_strong_directional_picks,
 )
 
 
@@ -53,7 +54,11 @@ def _make_cand(
     direction: str = "OVER",
     evidence_count: int = 5,
 ) -> dict:
-    decision = type("Decision", (), {"recommendation": direction})()
+    decision = type(
+        "Decision",
+        (),
+        {"recommendation": direction, "confidence": conf},
+    )()
     return {
         "player":               player,
         "stat_type":            stat_type,
@@ -279,3 +284,36 @@ class TestBestPerSportDelivery:
 
         assert len(selected) == 1
         assert selected[0]["player"] == "Over"
+
+
+class TestStrongDirectionalDelivery:
+    def test_allows_multiple_strong_picks_in_the_same_sport(self):
+        queue = [
+            _make_cand(player="Strong Over 1", sport="NBA", direction="OVER", conf=85),
+            _make_cand(player="Strong Over 2", sport="NBA", direction="OVER", conf=75),
+            _make_cand(player="Strong Under", sport="NBA", direction="UNDER", conf=80),
+            _make_cand(player="Weak Over", sport="NBA", direction="OVER", conf=69),
+            _make_cand(player="Weak Under", sport="NBA", direction="UNDER", conf=35),
+        ]
+
+        selected = _select_strong_directional_picks(queue)
+
+        assert [candidate["player"] for candidate in selected] == [
+            "Strong Over 1",
+            "Strong Under",
+            "Strong Over 2",
+        ]
+
+    def test_keeps_strong_picks_across_all_sports(self):
+        queue = [
+            _make_cand(player="MLB Over", sport="MLB", direction="OVER", conf=70),
+            _make_cand(player="NHL Under", sport="NHL", direction="UNDER", conf=92),
+            _make_cand(player="Tennis Weak", sport="TENNIS", direction="OVER", conf=69),
+        ]
+
+        selected = _select_strong_directional_picks(queue)
+
+        assert {candidate["player"] for candidate in selected} == {
+            "MLB Over",
+            "NHL Under",
+        }
