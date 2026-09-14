@@ -1650,6 +1650,43 @@ class PropLineDiscoveryFinding:
 
 
 @dataclass(frozen=True)
+class PropLineCatalogIdentity:
+    """One catalog identity observed during a read-only discovery audit.
+
+    ``mapped`` is audit metadata only.  It is never used to create request
+    targets or to select a scoring route.
+    """
+
+    kind: str
+    provider_key: str
+    canonical_sport: str = ""
+    canonical_market: str = ""
+    provider_label: str = ""
+    sample_count: int = 0
+    mapped: bool = False
+
+    @property
+    def status(self) -> str:
+        return "mapped" if self.mapped else "unmapped"
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "kind": self.kind,
+            "provider_key": self.provider_key,
+            "canonical_sport": self.canonical_sport,
+            "canonical_market": self.canonical_market,
+            "canonical_context": {
+                "sport": self.canonical_sport,
+                "market": self.canonical_market,
+            },
+            "provider_label": self.provider_label,
+            "sample_count": self.sample_count,
+            "mapped": self.mapped,
+            "status": self.status,
+        }
+
+
+@dataclass(frozen=True)
 class PropLineDiscoveryAudit:
     """Read-only comparison of a provider catalog with canonical mappings."""
 
@@ -1659,6 +1696,7 @@ class PropLineDiscoveryAudit:
     discovered_market_count: int = 0
     unmapped_sports: tuple[PropLineDiscoveryFinding, ...] = ()
     unmapped_markets: tuple[PropLineDiscoveryFinding, ...] = ()
+    catalog_identities: tuple[PropLineCatalogIdentity, ...] = ()
 
     @property
     def pending(self) -> bool:
@@ -1677,6 +1715,9 @@ class PropLineDiscoveryAudit:
             "discovered_market_count": self.discovered_market_count,
             "unmapped_sports": [item.as_dict() for item in self.unmapped_sports],
             "unmapped_markets": [item.as_dict() for item in self.unmapped_markets],
+            "catalog_identities": [
+                item.as_dict() for item in self.catalog_identities
+            ],
         }
 
 
@@ -2729,6 +2770,8 @@ def audit_propline_discovery(
 
     sports_seen: dict[tuple[str, str, str], int] = {}
     markets_seen: dict[tuple[str, str, str, str], int] = {}
+    catalog_sports_seen: dict[tuple[str, str, str, bool], int] = {}
+    catalog_markets_seen: dict[tuple[str, str, str, str, bool], int] = {}
     discovered_market_count = 0
     known_markets = set(_OFFICIAL_MARKETS) | {
         "anytime_goal_scorer",
@@ -2749,7 +2792,21 @@ def audit_propline_discovery(
             else _canonical_discovered_sport(provider_sport, title)
         )
         sport_count = _catalog_sample_count(record)
-        if provider_sport and provider_sport.lower() not in _OFFICIAL_TO_CANONICAL_SPORT:
+        sport_mapped = (
+            bool(provider_sport)
+            and provider_sport.lower() in _OFFICIAL_TO_CANONICAL_SPORT
+        )
+        if provider_sport:
+            catalog_key = (
+                provider_sport,
+                canonical_sport,
+                _clean(title),
+                sport_mapped,
+            )
+            catalog_sports_seen[catalog_key] = (
+                catalog_sports_seen.get(catalog_key, 0) + sport_count
+            )
+        if provider_sport and not sport_mapped:
             key = (provider_sport, canonical_sport, _clean(title))
             sports_seen[key] = sports_seen.get(key, 0) + sport_count
 
@@ -2783,7 +2840,18 @@ def audit_propline_discovery(
             )
             canonical_market = _normalize_stat(canonical_market_source)
             market_count = _catalog_sample_count(market)
-            if normalized_market not in known_markets:
+            market_mapped = normalized_market in known_markets
+            catalog_key = (
+                provider_market,
+                canonical_sport,
+                canonical_market,
+                provider_label,
+                market_mapped,
+            )
+            catalog_markets_seen[catalog_key] = (
+                catalog_markets_seen.get(catalog_key, 0) + market_count
+            )
+            if not market_mapped:
                 key = (
                     provider_market,
                     canonical_sport,
@@ -2841,7 +2909,24 @@ def audit_propline_discovery(
         )
         canonical_market = _normalize_stat(canonical_market_source)
         discovered_market_count += 1
-        if normalized_market not in known_markets:
+        market_mapped = normalized_market in known_markets
+        if provider_sport:
+            sport_mapped = provider_sport.lower() in _OFFICIAL_TO_CANONICAL_SPORT
+            catalog_key = (provider_sport, canonical_sport, "", sport_mapped)
+            catalog_sports_seen[catalog_key] = (
+                catalog_sports_seen.get(catalog_key, 0) + 1
+            )
+        catalog_key = (
+            provider_market,
+            canonical_sport,
+            canonical_market,
+            provider_label,
+            market_mapped,
+        )
+        catalog_markets_seen[catalog_key] = (
+            catalog_markets_seen.get(catalog_key, 0) + 1
+        )
+        if not market_mapped:
             market_key = (
                 provider_market,
                 canonical_sport,
@@ -2877,12 +2962,49 @@ def audit_propline_discovery(
             provider_label,
         ), count in sorted(markets_seen.items())
     )
+    catalog_identities = tuple(
+        [
+            PropLineCatalogIdentity(
+                kind="sport",
+                provider_key=provider_key,
+                canonical_sport=canonical_sport,
+                provider_label=provider_label,
+                sample_count=count,
+                mapped=mapped,
+            )
+            for (
+                provider_key,
+                canonical_sport,
+                provider_label,
+                mapped,
+            ), count in sorted(catalog_sports_seen.items())
+        ]
+        + [
+            PropLineCatalogIdentity(
+                kind="market",
+                provider_key=provider_key,
+                canonical_sport=canonical_sport,
+                canonical_market=canonical_market,
+                provider_label=provider_label,
+                sample_count=count,
+                mapped=mapped,
+            )
+            for (
+                provider_key,
+                canonical_sport,
+                canonical_market,
+                provider_label,
+                mapped,
+            ), count in sorted(catalog_markets_seen.items())
+        ]
+    )
     return PropLineDiscoveryAudit(
         status="complete",
         discovered_sport_count=len(records),
         discovered_market_count=discovered_market_count,
         unmapped_sports=unmapped_sports,
         unmapped_markets=unmapped_markets,
+        catalog_identities=catalog_identities,
     )
 
 

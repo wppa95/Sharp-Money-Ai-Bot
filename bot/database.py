@@ -877,6 +877,31 @@ class PropLineObservation(Base):
     )
 
 
+class PropLineCatalogAudit(Base):
+    """Durable state and change timestamps for observed catalog identities.
+
+    Only identities that were first observed as unmapped are retained.  A
+    later mapped observation updates that same row, making the table useful for
+    incident review without turning the full known catalog into noise.
+    """
+
+    __tablename__ = "propline_catalog_audit"
+
+    id               = Column(Integer, primary_key=True, autoincrement=True)
+    identity_key     = Column(String(512), nullable=False, unique=True, index=True)
+    kind             = Column(String(16), nullable=False, index=True)
+    provider_key     = Column(String(256), nullable=False, index=True)
+    canonical_sport  = Column(String(64), nullable=False, default="")
+    canonical_market = Column(String(128), nullable=False, default="")
+    provider_label   = Column(String(256), nullable=False, default="")
+    sample_count     = Column(Integer, nullable=False, default=0)
+    status           = Column(String(16), nullable=False, default="unmapped", index=True)
+    first_seen_at    = Column(DateTime, nullable=False, default=datetime.utcnow)
+    last_seen_at     = Column(DateTime, nullable=False, default=datetime.utcnow)
+    last_changed_at  = Column(DateTime, nullable=False, default=datetime.utcnow)
+    resolved_at      = Column(DateTime, nullable=True)
+
+
 class AlertCLVSeed(Base):
     """
     CLV seed record — captures alert odds at fire time for later CLV computation.
@@ -4075,6 +4100,189 @@ class Database:
                 .limit(limit)
             )
             return list(result.scalars().all())
+
+    async def save_propline_catalog_audit(
+        self,
+        identities: Iterable[dict],
+        *,
+        observed_at: Optional[datetime] = None,
+    ) -> dict[str, int]:
+        """Persist unmapped catalog identities and mapping transitions.
+
+        The input is the observational output of
+        ``audit_propline_discovery``.  Mapped identities that have never been
+        tracked are ignored; mapped identities with an existing unmapped row
+        resolve that row.  This keeps catalog history out of all player-prop
+        tables and scoring/delivery queries.
+        """
+        timestamp = observed_at or datetime.utcnow()
+        normalized: list[dict[str, object]] = []
+        for identity in identities or ():
+            if not isinstance(identity, dict):
+                continue
+            kind = str(identity.get("kind") or "").strip().lower()
+            provider_key = str(identity.get("provider_key") or "").strip()
+            if kind not in {"sport", "market"} or not provider_key:
+                continue
+            try:
+                sample_count = max(0, int(identity.get("sample_count") or 0))
+            except (TypeError, ValueError):
+                sample_count = 0
+            mapped = bool(
+                identity.get("mapped")
+                or str(identity.get("status") or "").strip().lower() == "mapped"
+            )
+            canonical_context = identity.get("canonical_context")
+            if not isinstance(canonical_context, dict):
+                canonical_context = {}
+            canonical_sport = str(
+                identity.get("canonical_sport")
+                or canonical_context.get("sport")
+                or ""
+            ).strip()
+            canonical_market = str(
+                identity.get("canonical_market")
+                or canonical_context.get("market")
+                or ""
+            ).strip()
+            provider_label = str(identity.get("provider_label") or "").strip()
+            identity_key = json.dumps(
+                [
+                    kind,
+                    provider_key,
+                    canonical_sport,
+                    canonical_market,
+                    provider_label,
+                ],
+                ensure_ascii=False,
+                separators=(",", ":"),
+            )
+            normalized.append(
+                {
+                    "identity_key": identity_key,
+                    "kind": kind,
+                    "provider_key": provider_key,
+                    "canonical_sport": canonical_sport,
+                    "canonical_market": canonical_market,
+                    "provider_label": provider_label,
+                    "sample_count": sample_count,
+                    "mapped": mapped,
+                }
+            )
+
+        result_counts = {
+            "observed": 0,
+            "new": 0,
+            "mapped": 0,
+            "unmapped": 0,
+            "unchanged": 0,
+        }
+        if not normalized:
+            return result_counts
+
+        async with self.session() as s:
+            for item in normalized:
+                result_counts["observed"] += 1
+                existing_result = await s.execute(
+                    select(PropLineCatalogAudit).where(
+                        PropLineCatalogAudit.identity_key == item["identity_key"]
+                    )
+                )
+                row = existing_result.scalar_one_or_none()
+                is_mapped = bool(item["mapped"])
+                if row is None:
+                    if is_mapped:
+                        # Known identities are not catalog drift.  Do not
+                        # create a row merely because they were in the feed.
+                        continue
+                    s.add(
+                        PropLineCatalogAudit(
+                            identity_key=str(item["identity_key"]),
+                            kind=str(item["kind"]),
+                            provider_key=str(item["provider_key"]),
+                            canonical_sport=str(item["canonical_sport"]),
+                            canonical_market=str(item["canonical_market"]),
+                            provider_label=str(item["provider_label"]),
+                            sample_count=int(item["sample_count"]),
+                            status="unmapped",
+                            first_seen_at=timestamp,
+                            last_seen_at=timestamp,
+                            last_changed_at=timestamp,
+                        )
+                    )
+                    result_counts["new"] += 1
+                    result_counts["unmapped"] += 1
+                    continue
+
+                row.last_seen_at = timestamp
+                row.sample_count = int(item["sample_count"])
+                next_status = "mapped" if is_mapped else "unmapped"
+                if row.status == next_status:
+                    result_counts["unchanged"] += 1
+                    continue
+                row.status = next_status
+                row.last_changed_at = timestamp
+                if is_mapped:
+                    row.resolved_at = timestamp
+                    result_counts["mapped"] += 1
+                else:
+                    # A mapping can regress; keep the original first-seen
+                    # timestamp but make the new unmapped state visible.
+                    row.resolved_at = None
+                    result_counts["unmapped"] += 1
+            await s.commit()
+        return result_counts
+
+    async def get_propline_catalog_audit_history(
+        self,
+        limit: int = 20,
+    ) -> list[dict[str, object]]:
+        """Return the latest catalog identity changes for operational reports."""
+        safe_limit = max(1, min(int(limit), 100))
+        async with self.session() as s:
+            result = await s.execute(
+                select(PropLineCatalogAudit)
+                .order_by(
+                    PropLineCatalogAudit.last_changed_at.desc(),
+                    PropLineCatalogAudit.id.desc(),
+                )
+                .limit(safe_limit)
+            )
+            rows = list(result.scalars().all())
+        return [
+            {
+                "kind": row.kind,
+                "provider_key": row.provider_key,
+                "canonical_sport": row.canonical_sport,
+                "canonical_market": row.canonical_market,
+                "canonical_context": {
+                    "sport": row.canonical_sport,
+                    "market": row.canonical_market,
+                },
+                "provider_label": row.provider_label,
+                "sample_count": int(row.sample_count or 0),
+                "status": row.status,
+                "first_seen_at": (
+                    row.first_seen_at.isoformat()
+                    if row.first_seen_at
+                    else None
+                ),
+                "last_seen_at": (
+                    row.last_seen_at.isoformat()
+                    if row.last_seen_at
+                    else None
+                ),
+                "last_changed_at": (
+                    row.last_changed_at.isoformat()
+                    if row.last_changed_at
+                    else None
+                ),
+                "resolved_at": (
+                    row.resolved_at.isoformat() if row.resolved_at else None
+                ),
+            }
+            for row in rows
+        ]
 
     async def get_propline_line_movement_history(
         self,

@@ -82,6 +82,13 @@ def test_discovery_audit_reports_new_sport_with_provider_key_and_samples():
         for finding in audit.unmapped_sports
     ] == [("basketball_nba_3x3", "NBA 3X3", 3)]
     assert audit.unmapped_markets == ()
+    identities = {
+        (identity.kind, identity.provider_key): identity
+        for identity in audit.catalog_identities
+    }
+    assert identities[("sport", "basketball_nba_3x3")].mapped is False
+    assert identities[("sport", "basketball_nba_3x3")].sample_count == 3
+    assert identities[("sport", "basketball_nba")].mapped is True
 
 
 def test_discovery_audit_reports_renamed_market_label_in_canonical_context():
@@ -124,6 +131,7 @@ def test_discovery_audit_stays_pending_when_catalog_is_unavailable():
     assert audit.reason == "discovery_incomplete"
     assert audit.unmapped_sports == ()
     assert audit.unmapped_markets == ()
+    assert audit.catalog_identities == ()
 
 
 def test_unmapped_discovered_sport_never_creates_scoring_targets():

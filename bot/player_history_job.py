@@ -7,6 +7,7 @@ import re
 import time
 from dataclasses import replace
 from types import SimpleNamespace
+from typing import Any
 
 from engine.sport_policy import canonical_sport_key, is_football_related_sport
 
@@ -935,6 +936,48 @@ async def propline_read_only_rotation_job(context) -> None:
             events_by_sport=events_by_sport,
         )
 
+        # Catalog drift is operational evidence only.  Persist it separately
+        # from player history so an unknown identity can never enter scoring or
+        # delivery through a normalized prop row.
+        discovery_audit_payload = discovery_audit.as_dict()
+        catalog_audit_summary: dict[str, int] = {}
+        catalog_audit_writer = getattr(db, "save_propline_catalog_audit", None)
+        if (
+            discovery_audit.status == "complete"
+            and asyncio.iscoroutinefunction(catalog_audit_writer)
+        ):
+            try:
+                catalog_audit_summary = await catalog_audit_writer(
+                    [
+                        identity.as_dict()
+                        for identity in discovery_audit.catalog_identities
+                    ]
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "propline_read_only_rotation_job: catalog audit persistence "
+                    "failed: %s",
+                    exc,
+                )
+
+        catalog_history: list[dict[str, Any]] = []
+        catalog_history_reader = getattr(
+            db, "get_propline_catalog_audit_history", None
+        )
+        if asyncio.iscoroutinefunction(catalog_history_reader):
+            try:
+                catalog_history = list(
+                    await catalog_history_reader(limit=20)
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "propline_read_only_rotation_job: catalog audit history "
+                    "read failed: %s",
+                    exc,
+                )
+        discovery_audit_payload["catalog_audit_summary"] = catalog_audit_summary
+        discovery_audit_payload["catalog_history"] = catalog_history
+
         async def persist(target, result):
             if target.family != "event_results":
                 return False
@@ -956,10 +999,10 @@ async def propline_read_only_rotation_job(context) -> None:
         report = await rotation.run(targets, persist=persist)
         report = replace(
             report,
-            discovery_audit=discovery_audit.as_dict(),
+            discovery_audit=discovery_audit_payload,
         )
         bot_data["propline_read_only_report"] = report.as_dict()
-        bot_data["propline_discovery_audit"] = discovery_audit.as_dict()
+        bot_data["propline_discovery_audit"] = discovery_audit_payload
         logger.info(
             "propline_read_only_rotation_job: attempted=%d completed=%d "
             "persisted=%d pending=%d skipped=%d errors=%d next_family=%s "
