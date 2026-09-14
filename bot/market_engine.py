@@ -4356,19 +4356,14 @@ def _select_best_per_sport(candidates: list[dict]) -> list[dict]:
     ]
 
 
-_STRONG_OVER_CONFIDENCE = 70.0
-_STRONG_UNDER_CONFIDENCE = 35.0
-
-
 def _select_strong_directional_picks(candidates: list[dict]) -> list[dict]:
-    """Keep every evidence-backed OVER/UNDER pick at strong direction strength.
+    """Keep every candidate that already passed direction/evidence gates.
 
-    There is deliberately no global count and no per-sport cap.  A sport may
-    have several strong OVER and/or UNDER picks.  OVER requires confidence
-    >=70% plus all six displayed history windows at >=70% OVER. UNDER requires
-    confidence <=35% plus all six windows at <=40% OVER. The middle band and
-    incomplete histories are retained for persistence and grading but never
-    sent.
+    This compatibility helper used to apply a second, stricter six-window
+    history and confidence filter after the canonical delivery gate. That
+    silently made lower-volume sports tracking-only even when they had valid
+    provider evidence. Qualification belongs at the collection point; this
+    stage only preserves directional candidates for ranking/rate limiting.
     """
     selected: list[dict] = []
     for candidate in candidates:
@@ -4380,25 +4375,6 @@ def _select_strong_directional_picks(candidates: list[dict]) -> list[dict]:
         ).strip().upper()
         if direction not in {"OVER", "UNDER"}:
             continue
-
-        raw_confidence = (
-            candidate.get("confidence")
-            if candidate.get("confidence") is not None
-            else getattr(decision, "confidence", None)
-        )
-        try:
-            confidence = float(raw_confidence)
-        except (TypeError, ValueError):
-            continue
-        if (
-            direction == "OVER" and confidence < _STRONG_OVER_CONFIDENCE
-        ) or (
-            direction == "UNDER" and confidence > _STRONG_UNDER_CONFIDENCE
-        ):
-            continue
-        if not has_strict_directional_history(decision):
-            continue
-
         selected.append(candidate)
 
     def _rank(candidate: dict) -> tuple[float, float, float, str, str]:

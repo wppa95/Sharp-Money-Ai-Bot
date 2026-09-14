@@ -38,8 +38,6 @@ from engine.delivery_gates import (
 _directional_evidence_gate = _canonical_tier_delivery_gate
 from engine.score_validation import clamp_score
 from engine.delivery_evidence import (
-    has_directional_history_fields,
-    has_strict_directional_history,
     is_historical_average_source,
     serialized_evidence_supports_delivery,
 )
@@ -670,29 +668,6 @@ def _has_strong_underdog_evidence(
             else getattr(decision, "recommendation", "") or ""
         )
     ).upper()
-    decision_is_mock = (
-        getattr(type(decision), "__module__", "") == "unittest.mock"
-    )
-    decision_has_provenance = (
-        not decision_is_mock
-        and bool(
-            (
-                decision.get("evidence_source")
-                if isinstance(decision, dict)
-                else getattr(decision, "evidence_source", None)
-            )
-        )
-    )
-    if (
-        decision_direction in {"OVER", "UNDER"}
-        and (
-            has_directional_history_fields(decision)
-            or decision_has_provenance
-        )
-        and not has_strict_directional_history(decision)
-    ):
-        return False
-
     decision_source = getattr(decision, "evidence_source", None)
     if (
         decision_direction in {"OVER", "UNDER"}
@@ -717,12 +692,12 @@ def _has_strong_underdog_evidence(
         n_supplemental = int(
             getattr(validation, "n_supplemental_games", 0) or 0
         )
-        if source_lower in {"real", "primary"} and n_real >= 1:
+        if source_lower in {"real", "primary"} and n_real >= 5:
             return True
-        if source_lower == "propline" and n_supplemental >= 1:
+        if source_lower == "propline" and n_supplemental >= 5:
             return True
         if source_lower in {"real+propline", "primary+propline"}:
-            return n_real + n_supplemental >= 1
+            return n_real + n_supplemental >= 5
     for obj in (decision, intelligence_trace):
         if isinstance(obj, dict):
             if serialized_evidence_supports_delivery(obj):

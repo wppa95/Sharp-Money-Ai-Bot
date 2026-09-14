@@ -298,7 +298,7 @@ class TestBestPerSportDelivery:
 
 
 class TestStrongDirectionalDelivery:
-    def test_allows_multiple_strong_picks_in_the_same_sport(self):
+    def test_keeps_all_directional_picks_after_canonical_gate(self):
         queue = [
             _make_cand(player="Strong Over 1", sport="NBA", direction="OVER", conf=85),
             _make_cand(player="Strong Over 2", sport="NBA", direction="OVER", conf=75),
@@ -313,9 +313,11 @@ class TestStrongDirectionalDelivery:
             "Strong Over 1",
             "Strong Under",
             "Strong Over 2",
+            "Weak Over",
+            "Weak Under",
         ]
 
-    def test_keeps_strong_picks_across_all_sports(self):
+    def test_keeps_directional_picks_across_all_sports(self):
         queue = [
             _make_cand(player="MLB Over", sport="MLB", direction="OVER", conf=70),
             _make_cand(player="NHL Under", sport="NHL", direction="UNDER", conf=8),
@@ -327,4 +329,5 @@ class TestStrongDirectionalDelivery:
         assert {candidate["player"] for candidate in selected} == {
             "MLB Over",
             "NHL Under",
+            "Tennis Weak",
         }
