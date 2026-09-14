@@ -4340,15 +4340,17 @@ def _select_best_per_sport(candidates: list[dict]) -> list[dict]:
     ]
 
 
-_STRONG_TELEGRAM_CONFIDENCE = 70.0
+_STRONG_OVER_CONFIDENCE = 70.0
+_STRONG_UNDER_CONFIDENCE = 35.0
 
 
 def _select_strong_directional_picks(candidates: list[dict]) -> list[dict]:
-    """Keep every evidence-backed OVER/UNDER pick at strong confidence.
+    """Keep every evidence-backed OVER/UNDER pick at strong direction strength.
 
     There is deliberately no global count and no per-sport cap.  A sport may
-    have several strong OVER and/or UNDER picks, while candidates below 70%
-    confidence are retained for persistence and grading but never sent.
+    have several strong OVER and/or UNDER picks.  OVER requires confidence
+    >=70%; UNDER requires confidence <=35%.  The middle band is retained for
+    persistence and grading but never sent.
     """
     selected: list[dict] = []
     for candidate in candidates:
@@ -4370,7 +4372,11 @@ def _select_strong_directional_picks(candidates: list[dict]) -> list[dict]:
             confidence = float(raw_confidence)
         except (TypeError, ValueError):
             continue
-        if confidence < _STRONG_TELEGRAM_CONFIDENCE:
+        if (
+            direction == "OVER" and confidence < _STRONG_OVER_CONFIDENCE
+        ) or (
+            direction == "UNDER" and confidence > _STRONG_UNDER_CONFIDENCE
+        ):
             continue
 
         selected.append(candidate)
@@ -4397,8 +4403,16 @@ def _select_strong_directional_picks(candidates: list[dict]) -> list[dict]:
         )
         sport = str(candidate.get("sport") or "").upper()
         player = str(candidate.get("player") or candidate.get("player_name") or "")
+        direction = str(
+            getattr(decision, "recommendation", None)
+            or candidate.get("direction")
+            or ""
+        ).strip().upper()
+        directional_strength = (
+            confidence if direction == "OVER" else 100.0 - confidence
+        )
         return (
-            -confidence,
+            -directional_strength,
             -evidence_count,
             -_cand_priority(candidate),
             sport,

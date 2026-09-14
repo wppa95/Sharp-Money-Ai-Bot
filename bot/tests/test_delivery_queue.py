@@ -291,9 +291,9 @@ class TestStrongDirectionalDelivery:
         queue = [
             _make_cand(player="Strong Over 1", sport="NBA", direction="OVER", conf=85),
             _make_cand(player="Strong Over 2", sport="NBA", direction="OVER", conf=75),
-            _make_cand(player="Strong Under", sport="NBA", direction="UNDER", conf=80),
+            _make_cand(player="Strong Under", sport="NBA", direction="UNDER", conf=20),
             _make_cand(player="Weak Over", sport="NBA", direction="OVER", conf=69),
-            _make_cand(player="Weak Under", sport="NBA", direction="UNDER", conf=35),
+            _make_cand(player="Weak Under", sport="NBA", direction="UNDER", conf=36),
         ]
 
         selected = _select_strong_directional_picks(queue)
@@ -307,7 +307,7 @@ class TestStrongDirectionalDelivery:
     def test_keeps_strong_picks_across_all_sports(self):
         queue = [
             _make_cand(player="MLB Over", sport="MLB", direction="OVER", conf=70),
-            _make_cand(player="NHL Under", sport="NHL", direction="UNDER", conf=92),
+            _make_cand(player="NHL Under", sport="NHL", direction="UNDER", conf=8),
             _make_cand(player="Tennis Weak", sport="TENNIS", direction="OVER", conf=69),
         ]
 
