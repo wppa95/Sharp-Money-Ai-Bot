@@ -5,6 +5,7 @@ import asyncio
 import logging
 import re
 import time
+from dataclasses import replace
 from types import SimpleNamespace
 
 from engine.sport_policy import canonical_sport_key, is_football_related_sport
@@ -849,6 +850,7 @@ async def propline_read_only_rotation_job(context) -> None:
         from providers.propline import (
             PropLineClient,
             PropLineReadOnlyRotation,
+            audit_propline_discovery,
             build_propline_read_only_targets,
         )
 
@@ -872,6 +874,35 @@ async def propline_read_only_rotation_job(context) -> None:
             active_rows = list(active.values()) if hasattr(active, "values") else list(active or [])
 
         discovered_sports = await client.discover_sports()
+        if getattr(client, "sports_discovery_failed", False):
+            discovery_audit = audit_propline_discovery(
+                None,
+                active_props=active_rows,
+                complete=False,
+            )
+        else:
+            audit_method = getattr(client, "audit_discovery", None)
+            if callable(audit_method):
+                discovery_audit = audit_method(active_props=active_rows)
+            else:
+                discovery_audit = audit_propline_discovery(
+                    discovered_sports,
+                    active_props=active_rows,
+                )
+        if discovery_audit.pending:
+            logger.warning(
+                "propline_read_only_rotation_job: discovery audit pending "
+                "status=%s reason=%s",
+                discovery_audit.status,
+                discovery_audit.reason,
+            )
+        elif discovery_audit.has_unmapped:
+            logger.warning(
+                "propline_read_only_rotation_job: unmapped discovery identities "
+                "sports=%s markets=%s",
+                [item.as_dict() for item in discovery_audit.unmapped_sports],
+                [item.as_dict() for item in discovery_audit.unmapped_markets],
+            )
         events_by_sport = {}
         discover_events = getattr(client, "discover_events", None)
         if callable(discover_events):
@@ -923,7 +954,12 @@ async def propline_read_only_rotation_job(context) -> None:
             max_requests_per_cycle=4,
         )
         report = await rotation.run(targets, persist=persist)
+        report = replace(
+            report,
+            discovery_audit=discovery_audit.as_dict(),
+        )
         bot_data["propline_read_only_report"] = report.as_dict()
+        bot_data["propline_discovery_audit"] = discovery_audit.as_dict()
         logger.info(
             "propline_read_only_rotation_job: attempted=%d completed=%d "
             "persisted=%d pending=%d skipped=%d errors=%d next_family=%s "

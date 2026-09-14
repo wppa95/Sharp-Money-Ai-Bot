@@ -13,6 +13,7 @@ from providers.propline import (
     PropLineResultEvidence,
     PropLineResultsFetchResult,
     PropLineSport,
+    audit_propline_discovery,
     build_propline_read_only_targets,
 )
 
@@ -56,6 +57,88 @@ def test_targets_use_discovered_official_aliases_only():
         for target in targets
         if target.event_id
     } == {"event_results", "event_stats", "event_markets"}
+
+
+def test_discovery_audit_reports_new_sport_with_provider_key_and_samples():
+    audit = audit_propline_discovery(
+        [
+            {"key": "basketball_nba", "title": "NBA", "active": True},
+            {
+                "key": "basketball_nba_3x3",
+                "title": "NBA 3x3",
+                "active": True,
+                "sample_count": 3,
+            },
+        ]
+    )
+
+    assert audit.status == "complete"
+    assert [
+        (
+            finding.provider_key,
+            finding.canonical_sport,
+            finding.sample_count,
+        )
+        for finding in audit.unmapped_sports
+    ] == [("basketball_nba_3x3", "NBA 3X3", 3)]
+    assert audit.unmapped_markets == ()
+
+
+def test_discovery_audit_reports_renamed_market_label_in_canonical_context():
+    audit = audit_propline_discovery(
+        [
+            {
+                "key": "basketball_nba",
+                "title": "NBA",
+                "markets": [
+                    {
+                        "key": "player_points_renamed",
+                        "name": "Player Points",
+                        "sample_count": 4,
+                    }
+                ],
+            }
+        ]
+    )
+
+    assert audit.status == "complete"
+    assert [
+        (
+            finding.provider_key,
+            finding.canonical_sport,
+            finding.canonical_market,
+            finding.sample_count,
+        )
+        for finding in audit.unmapped_markets
+    ] == [("player_points_renamed", "NBA", "points", 4)]
+    assert audit.unmapped_markets[0].as_dict()["canonical_context"] == {
+        "sport": "NBA",
+        "market": "points",
+    }
+
+
+def test_discovery_audit_stays_pending_when_catalog_is_unavailable():
+    audit = audit_propline_discovery(None, complete=False)
+
+    assert audit.pending is True
+    assert audit.reason == "discovery_incomplete"
+    assert audit.unmapped_sports == ()
+    assert audit.unmapped_markets == ()
+
+
+def test_unmapped_discovered_sport_never_creates_scoring_targets():
+    targets = build_propline_read_only_targets(
+        sports=[
+            PropLineSport(
+                "basketball_nba_v2",
+                "NBA",
+                "NBA renamed",
+                mapped=False,
+            )
+        ]
+    )
+
+    assert targets == []
 
 
 def test_targets_include_officially_discovered_events_without_prop_event_ids():

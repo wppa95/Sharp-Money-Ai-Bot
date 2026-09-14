@@ -1620,6 +1620,64 @@ class PropLineSport:
     official_key: str
     canonical_key: str
     title: str = ""
+    mapped: bool = True
+
+
+@dataclass(frozen=True)
+class PropLineDiscoveryFinding:
+    """One provider identity that is not covered by the canonical mappings."""
+
+    kind: str
+    provider_key: str
+    canonical_sport: str = ""
+    canonical_market: str = ""
+    provider_label: str = ""
+    sample_count: int = 0
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "kind": self.kind,
+            "provider_key": self.provider_key,
+            "canonical_sport": self.canonical_sport,
+            "canonical_market": self.canonical_market,
+            "canonical_context": {
+                "sport": self.canonical_sport,
+                "market": self.canonical_market,
+            },
+            "provider_label": self.provider_label,
+            "sample_count": self.sample_count,
+        }
+
+
+@dataclass(frozen=True)
+class PropLineDiscoveryAudit:
+    """Read-only comparison of a provider catalog with canonical mappings."""
+
+    status: str = "pending"
+    reason: str = ""
+    discovered_sport_count: int = 0
+    discovered_market_count: int = 0
+    unmapped_sports: tuple[PropLineDiscoveryFinding, ...] = ()
+    unmapped_markets: tuple[PropLineDiscoveryFinding, ...] = ()
+
+    @property
+    def pending(self) -> bool:
+        return self.status == "pending"
+
+    @property
+    def has_unmapped(self) -> bool:
+        return bool(self.unmapped_sports or self.unmapped_markets)
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "status": self.status,
+            "pending": self.pending,
+            "reason": self.reason,
+            "discovered_sport_count": self.discovered_sport_count,
+            "discovered_market_count": self.discovered_market_count,
+            "unmapped_sports": [item.as_dict() for item in self.unmapped_sports],
+            "unmapped_markets": [item.as_dict() for item in self.unmapped_markets],
+        }
 
 
 def _clean(value: Any) -> str:
@@ -2546,22 +2604,290 @@ def _official_sports_records(payload: Any) -> list[PropLineSport]:
         canonical = _canonical_discovered_sport(
             official_key, _first(item, "title", "name", "sport_name")
         )
+        mapped = official_key.lower() in _OFFICIAL_TO_CANONICAL_SPORT
         if (
             not canonical
             or official_key.lower() in seen
-            or canonical in seen_canonical
+            or (mapped and canonical in seen_canonical)
         ):
             continue
         seen.add(official_key.lower())
-        seen_canonical.add(canonical)
+        if mapped:
+            seen_canonical.add(canonical)
         records.append(
             PropLineSport(
                 official_key=official_key,
                 canonical_key=canonical,
                 title=_clean(_first(item, "title", "name", "sport_name")),
+                mapped=mapped,
             )
         )
     return records
+
+
+def _catalog_records(payload: Any) -> list[dict[str, Any]]:
+    """Flatten a discovery payload without treating unknown values as mapped."""
+    if isinstance(payload, PropLineSport):
+        return [{
+            "key": payload.official_key,
+            "title": payload.title,
+            "canonical_sport": payload.canonical_key,
+            "mapped": payload.mapped,
+        }]
+    if isinstance(payload, (list, tuple, set, frozenset)):
+        records: list[dict[str, Any]] = []
+        for item in payload:
+            records.extend(_catalog_records(item))
+        return records
+    if not isinstance(payload, dict):
+        return []
+    records = []
+    nested = None
+    for key in ("data", "sports", "results", "items"):
+        value = payload.get(key)
+        if isinstance(value, list):
+            nested = value
+            break
+        if isinstance(value, dict):
+            nested = value
+            break
+    if nested is not None:
+        for item in nested:
+            records.extend(_catalog_records(item))
+        return records
+    if any(
+        payload.get(key) not in (None, "")
+        for key in ("key", "sport_key", "sport", "league", "id", "market_key", "market")
+    ):
+        records.append(payload)
+    return records
+
+
+def _catalog_sample_count(value: Any) -> int:
+    if isinstance(value, dict):
+        for key in (
+            "sample_count",
+            "samples",
+            "count",
+            "event_count",
+            "events_count",
+            "line_count",
+            "outcome_count",
+        ):
+            try:
+                count = int(value.get(key))
+            except (TypeError, ValueError):
+                continue
+            if count >= 0:
+                return count
+    return 1
+
+
+def _catalog_market_items(record: dict[str, Any]) -> list[dict[str, Any]]:
+    markets = (
+        record.get("markets")
+        if record.get("markets") is not None
+        else record.get("available_markets", record.get("market_keys"))
+    )
+    if isinstance(markets, dict):
+        markets = [markets]
+    if isinstance(markets, (list, tuple)):
+        return [
+            item if isinstance(item, dict) else {"key": item}
+            for item in markets
+            if isinstance(item, (dict, str))
+        ]
+    if any(
+        record.get(key) not in (None, "")
+        for key in ("market_key", "market", "market_type", "stat", "stat_type")
+    ):
+        return [record]
+    return []
+
+
+def audit_propline_discovery(
+    payload: Any,
+    *,
+    active_props: Iterable[Any] = (),
+    complete: bool = True,
+) -> PropLineDiscoveryAudit:
+    """Compare official catalog identities with the canonical mapping tables.
+
+    This function is deliberately observational.  Unknown provider keys are
+    retained in the report, but no fallback sport or market key is returned
+    for callers to use in requests or scoring.
+    """
+    if not complete:
+        return PropLineDiscoveryAudit(reason="discovery_incomplete")
+    records = [
+        record
+        for record in _catalog_records(payload)
+        if record.get("active", record.get("available", True)) is not False
+    ]
+    if payload is None or not records and payload not in ([], (), {}, ""):
+        return PropLineDiscoveryAudit(reason="discovery_unavailable")
+
+    sports_seen: dict[tuple[str, str, str], int] = {}
+    markets_seen: dict[tuple[str, str, str, str], int] = {}
+    discovered_market_count = 0
+    known_markets = set(_OFFICIAL_MARKETS) | {
+        "anytime_goal_scorer",
+        "goal_or_assist",
+        "total_games",
+        "total_tiebreaks",
+        "total_sets",
+    }
+
+    for record in records:
+        provider_sport = _clean(
+            _first(record, "sport_key", "sport", "league", "key", "id")
+        )
+        title = _first(record, "title", "name", "sport_name", "canonical_sport")
+        canonical_sport = _clean(
+            record.get("canonical_sport")
+            if record.get("canonical_sport") not in (None, "")
+            else _canonical_discovered_sport(provider_sport, title)
+        )
+        sport_count = _catalog_sample_count(record)
+        if provider_sport and provider_sport.lower() not in _OFFICIAL_TO_CANONICAL_SPORT:
+            key = (provider_sport, canonical_sport, _clean(title))
+            sports_seen[key] = sports_seen.get(key, 0) + sport_count
+
+        for market in _catalog_market_items(record):
+            provider_market = _clean(
+                _first(
+                    market,
+                    "key",
+                    "market_key",
+                    "market_type",
+                    "market",
+                    "stat",
+                    "stat_type",
+                    "id",
+                )
+            )
+            if not provider_market:
+                continue
+            provider_label = _clean(
+                _first(market, "title", "name", "description", "label")
+            )
+            discovered_market_count += 1
+            normalized_market = provider_market.lower()
+            canonical_market_source = (
+                provider_label
+                or (
+                    provider_market.removeprefix("player_")
+                    if normalized_market.startswith("player_")
+                    else provider_market
+                )
+            )
+            canonical_market = _normalize_stat(canonical_market_source)
+            market_count = _catalog_sample_count(market)
+            if normalized_market not in known_markets:
+                key = (
+                    provider_market,
+                    canonical_sport,
+                    canonical_market,
+                    provider_label,
+                )
+                markets_seen[key] = markets_seen.get(key, 0) + market_count
+
+    # Active prop rows are included as observed market samples when the
+    # official catalog only advertises sports.  They are still audit input,
+    # never a source of fallback mappings.
+    for prop in active_props:
+        if isinstance(prop, dict):
+            provider_sport = _clean(
+                _first(prop, "sport_key", "sport", "league")
+            )
+            provider_market = _clean(
+                _first(prop, "market_key", "market_type", "market", "stat_type", "stat")
+            )
+            provider_label = _clean(
+                _first(prop, "market_description", "market_title", "market_name")
+            )
+        else:
+            provider_sport = _clean(
+                getattr(prop, "sport_key", "")
+                or getattr(prop, "sport", "")
+                or getattr(prop, "league", "")
+            )
+            provider_market = _clean(
+                getattr(prop, "market_key", "")
+                or getattr(prop, "market_type", "")
+                or getattr(prop, "market", "")
+                or getattr(prop, "stat_type", "")
+                or getattr(prop, "stat", "")
+            )
+            provider_label = _clean(
+                getattr(prop, "market_description", "")
+                or getattr(prop, "market_title", "")
+                or getattr(prop, "market_name", "")
+            )
+        if not provider_market:
+            continue
+        canonical_sport = _canonical_discovered_sport(provider_sport)
+        if provider_sport and provider_sport.lower() not in _OFFICIAL_TO_CANONICAL_SPORT:
+            sport_key = (provider_sport, canonical_sport, "")
+            sports_seen[sport_key] = sports_seen.get(sport_key, 0) + 1
+        normalized_market = provider_market.lower()
+        canonical_market_source = (
+            provider_label
+            or (
+                provider_market.removeprefix("player_")
+                if normalized_market.startswith("player_")
+                else provider_market
+            )
+        )
+        canonical_market = _normalize_stat(canonical_market_source)
+        discovered_market_count += 1
+        if normalized_market not in known_markets:
+            market_key = (
+                provider_market,
+                canonical_sport,
+                canonical_market,
+                provider_label,
+            )
+            markets_seen[market_key] = markets_seen.get(market_key, 0) + 1
+
+    unmapped_sports = tuple(
+        PropLineDiscoveryFinding(
+            kind="sport",
+            provider_key=provider_key,
+            canonical_sport=canonical_sport,
+            provider_label=provider_label,
+            sample_count=count,
+        )
+        for (provider_key, canonical_sport, provider_label), count
+        in sorted(sports_seen.items())
+    )
+    unmapped_markets = tuple(
+        PropLineDiscoveryFinding(
+            kind="market",
+            provider_key=provider_key,
+            canonical_sport=canonical_sport,
+            canonical_market=canonical_market,
+            provider_label=provider_label,
+            sample_count=count,
+        )
+        for (
+            provider_key,
+            canonical_sport,
+            canonical_market,
+            provider_label,
+        ), count in sorted(markets_seen.items())
+    )
+    return PropLineDiscoveryAudit(
+        status="complete",
+        discovered_sport_count=len(records),
+        discovered_market_count=discovered_market_count,
+        unmapped_sports=unmapped_sports,
+        unmapped_markets=unmapped_markets,
+    )
+
+
+# Descriptive compatibility alias for callers that use "catalog" terminology.
+audit_propline_catalog = audit_propline_discovery
 
 
 
@@ -2881,6 +3207,7 @@ class PropLineClient:
         self._cache_by_scope: dict[str, PropLineFetchResult] = {}
         self._cache_clock_by_scope: dict[str, float] = {}
         self._sports_cache: tuple[PropLineSport, ...] = ()
+        self._sports_catalog_records: tuple[dict[str, Any], ...] = ()
         self._sports_cache_clock_at: Optional[float] = None
         self._sports_discovery_failed = False
         self.request_budget = request_budget or _DEFAULT_PROPLINE_REQUEST_BUDGET
@@ -4857,17 +5184,42 @@ class PropLineClient:
                 self._sports_discovery_failed = True
                 logger.warning("PropLine sports discovery incomplete: %s", pagination_error)
                 return list(self._sports_cache)
+            self._sports_catalog_records = tuple(_catalog_records(raw_sports))
             sports = _official_sports_records(raw_sports)
             self._sports_discovery_failed = False
             self._sports_cache = tuple(sports)
             self._sports_cache_clock_at = self._clock()
             return list(sports)
 
+    @property
+    def sports_catalog_records(self) -> tuple[dict[str, Any], ...]:
+        """Raw complete catalog records retained for the read-only audit."""
+        return self._sports_catalog_records
+
+    def audit_discovery(
+        self,
+        *,
+        active_props: Iterable[Any] = (),
+    ) -> PropLineDiscoveryAudit:
+        """Audit the last complete official catalog without making a request."""
+        if self._sports_discovery_failed:
+            return PropLineDiscoveryAudit(reason="discovery_unavailable")
+        if self._sports_cache_clock_at is None:
+            return PropLineDiscoveryAudit(reason="discovery_pending")
+        return audit_propline_discovery(
+            self._sports_catalog_records,
+            active_props=active_props,
+        )
+
     def official_sport_for(self, canonical_sport: str) -> Optional[str]:
         """Resolve a canonical sport, preferring the last official discovery."""
         canonical = _normalize_sport(canonical_sport)
         for sport in self._sports_cache:
-            if sport.canonical_key == canonical:
+            if (
+                sport.mapped
+                and sport.canonical_key == canonical
+                and sport.official_key.lower() in _OFFICIAL_TO_CANONICAL_SPORT
+            ):
                 return sport.official_key
         return _CANONICAL_TO_OFFICIAL_SPORT.get(canonical)
 
@@ -5120,6 +5472,7 @@ class PropLineReadOnlyRotationReport:
     next_target: str = ""
     family_counts: dict[str, int] | None = None
     provenance: tuple[dict[str, str], ...] = ()
+    discovery_audit: dict[str, Any] | None = None
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -5133,6 +5486,7 @@ class PropLineReadOnlyRotationReport:
             "next_target": self.next_target,
             "family_counts": dict(self.family_counts or {}),
             "provenance": list(self.provenance),
+            "discovery_audit": dict(self.discovery_audit or {}),
         }
 
 
@@ -5165,7 +5519,16 @@ def build_propline_read_only_targets(
         canonical = _normalize_sport(
             _read_only_input(sport, "canonical_key", "canonical_sport", "sport")
         )
-        if official and canonical and canonical not in official_by_canonical:
+        # A discovered title may be normalized into a familiar-looking
+        # canonical value even when its provider key is new.  Do not let that
+        # heuristic identity create score/history targets.
+        if (
+            official
+            and canonical
+            and official.lower() in _OFFICIAL_TO_CANONICAL_SPORT
+            and canonical == _OFFICIAL_TO_CANONICAL_SPORT[official.lower()]
+            and canonical not in official_by_canonical
+        ):
             official_by_canonical[canonical] = official
             canonical_by_official[official.lower()] = canonical
 
@@ -5572,6 +5935,21 @@ class PropLinePrizePicksProvider(PropProviderBase):
     def is_available(self) -> bool:
         return self.client.is_configured
 
+    @staticmethod
+    def _mapped_discovered_sports(
+        sports: Iterable[PropLineSport],
+    ) -> list[PropLineSport]:
+        """Keep provider-native identities without heuristic fallback keys."""
+        return [
+            sport
+            for sport in sports
+            if (
+                getattr(sport, "mapped", True)
+                and _clean(getattr(sport, "official_key", "")).lower()
+                in _OFFICIAL_TO_CANONICAL_SPORT
+            )
+        ]
+
     async def discover_sports(self) -> Optional[list[PropLineSport]]:
         """Return active PropLine sports for the official endpoint.
 
@@ -5590,13 +5968,12 @@ class PropLinePrizePicksProvider(PropProviderBase):
             # slate so the caller can use its complete configured fallback.
             return None
         if self._sport_filter is not None:
-            discovered = [
-                sport
-                for sport in discovered
+            discovered = self._mapped_discovered_sports(
+                sport for sport in discovered
                 if sport.canonical_key in self._sport_filter
-            ]
+            )
         else:
-            discovered = list(discovered)
+            discovered = self._mapped_discovered_sports(discovered)
         return discovered
 
     async def fetch_props(self) -> list[PlayerProp]:
@@ -5614,12 +5991,12 @@ class PropLinePrizePicksProvider(PropProviderBase):
 
         discovered = await self.client.discover_sports()
         if self._sport_filter is not None:
-            discovered = [
+            discovered = self._mapped_discovered_sports(
                 sport for sport in discovered
                 if sport.canonical_key in self._sport_filter
-            ]
+            )
         else:
-            discovered = list(discovered)
+            discovered = self._mapped_discovered_sports(discovered)
 
         props: list[PlayerProp] = []
         for sport in discovered:
