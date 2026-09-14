@@ -2040,7 +2040,15 @@ async def cmd_picks(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 
 async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Inner implementation of /picks — wrapped by cmd_picks try/except."""
+    """Inner implementation of /picks — wrapped by cmd_picks try/except.
+
+    Compatibility note: persisted historical rows may still contain
+    score_tier, proxy_match_confidence, and _db_conf fields. The old
+    proxy-confidence fallback was triggered when proxy_match_confidence < 30,
+    with legacy display bands "S"=85, "A"=70, "B"=55 and tier icons for
+    "S"/"A"/"B". Current /picks does not
+    use those deprecated fields to qualify or rank a pick.
+    """
     _perf_started = time.monotonic()
     args = context.args or []
     limit = 10

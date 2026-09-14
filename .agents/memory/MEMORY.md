@@ -142,3 +142,4 @@
 - [Optional score reporting](optional-score-reporting.md) — diagnostic ranking output must tolerate missing scores without aborting the monitoring cycle.
 - [PropLine shared ingestion](propline-shared-ingestion.md) — schedule the shared wrapper and account for canonical deduplication when validating provider batch persistence.
 - [PropLine Pro quota boundary](propline-pro-quota.md) — all authenticated clients share persisted 1,020/hour and 25,000/day limits; Pro excludes webhooks and bulk odds-history.
+- [Test fixture contracts](test-fixture-contracts.md) — control current-season provider data, patch active-sport config for pacing, and include all six strict history windows.

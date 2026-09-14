@@ -318,7 +318,8 @@ class TestFetchResults:
     def test_nfl_receiving_yards(self):
         provider = self._make_provider()
         results = run(provider.fetch_results("CeeDee Lamb", "NFL", "receiving yards"))
-        assert len(results) == 2
+        # The provider includes the current NFL season when it has started.
+        assert len(results) >= 2
         vals = {r.game_date: r.actual_value for r in results}
         assert vals["2025-09-04"] == 110.0
         assert vals["2025-09-11"] == 72.0

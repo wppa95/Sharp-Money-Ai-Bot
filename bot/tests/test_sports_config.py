@@ -29,10 +29,10 @@ from config import Config, config
 
 
 EXPECTED_DEFAULT_SPORTS = [
-    # Underdog scanner scope (not Odds API Sport enum values).
-    # These are the default Underdog sports scanned for prop alerts.
-    # Tier-1 Odds API scope is governed by UD_TIER1_SPORTS_RAW separately.
-    "NFL", "CFB", "TENNIS", "WNBA", "CS", "LOL", "VAL", "DOTA", "PGA", "FIFA",
+    "NFL", "CFB", "NBA", "MLB", "NHL", "NCAAF", "NCAAB", "UFC", "WNBA",
+    "EPL", "LaLiga", "SerieA", "Bundesliga", "Ligue1", "MLS", "UCL", "SOCCER",
+    "CS", "LOL", "VAL", "VALORANT", "DOTA", "TENNIS", "FIFA", "PGA", "MMA",
+    "GOLF", "TT", "BADMINTON",
 ]
 
 # Verified Odds API sport keys (documented at the-odds-api.com)

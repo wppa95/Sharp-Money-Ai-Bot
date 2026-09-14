@@ -342,7 +342,7 @@ class TestLifecycleTransitionsAfterBridge:
         fake_hit_rates = PlayerHitRates(
             player_name="Player A", stat_type="points", current_line=7.0,
             l5=_win(5, 0.80), l10=_win(10, 0.80),
-            l20=_win(20, 0.75), l30=_win(30, 0.70),
+            l15=_win(15, 0.80), l20=_win(20, 0.75), l30=_win(30, 0.70),
             season=_win(50, 0.70), h2h=None,
             has_real_data=True, total_games=50,
         )

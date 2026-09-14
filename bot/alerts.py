@@ -928,6 +928,17 @@ async def broadcast_alert(
 
     Delivery qualification is enforced before this low-level sender.
     """
+    # Direct/legacy callers do not carry the structured decision and evidence
+    # objects used by AlertDelivery. Retired internal labels therefore make the
+    # message ineligible instead of allowing this low-level sender to bypass
+    # the actionable-pick boundary.
+    if re.search(
+        r"\b(?:WATCHLIST|NEAR[- ]?MISS|decision_pass|NO\s+DIRECTION)\b",
+        str(message or ""),
+        flags=re.IGNORECASE,
+    ):
+        return {"sent": 0, "failed": 0}
+
     message = _sanitize_user_alert_message(message)
     sent = failed = 0
     for cid in chat_ids:

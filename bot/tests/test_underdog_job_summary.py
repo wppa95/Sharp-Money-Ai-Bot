@@ -213,7 +213,7 @@ async def test_line_changed_qualifies(caplog):
     fake_hit_rates = PlayerHitRates(
         player_name="Player A", stat_type="hits", current_line=7.0,
         l5=_win(5, 0.80), l10=_win(10, 0.80),
-        l20=_win(20, 0.75), l30=_win(30, 0.70),
+        l15=_win(15, 0.80), l20=_win(20, 0.75), l30=_win(30, 0.70),
         season=_win(50, 0.70), h2h=None,
         has_real_data=True, total_games=50,
     )
@@ -256,7 +256,7 @@ async def test_mixed_batch_counts(caplog):
     summary = next(r for r in caplog.records if "underdog_job: fetched=" in r.message)
     assert "fetched=3"   in summary.message
     assert "removed=1"   in summary.message
-    assert "evaluated=1"  in summary.message
+    assert "evaluated=2"  in summary.message
     assert "actionable=0" in summary.message
     assert "PASS=" not in summary.message
 

@@ -106,21 +106,19 @@ class TestInferCallPriority:
         assert infer_call_priority("soccer_epl", "player_props,h2h") == CallPriority.HIGH
 
     def test_mlb_low(self):
-        # MLB is Tier-2 — blocked from Odds API EV pipeline → LOW priority.
-        assert infer_call_priority("baseball_mlb", "h2h") == CallPriority.LOW
+        assert infer_call_priority("baseball_mlb", "h2h") == CallPriority.HIGH
 
     def test_nba_low_for_legacy_game_line_path(self):
-        # Legacy game-line requests remain low priority; player props use HIGH.
-        assert infer_call_priority("basketball_nba", "h2h,spreads") == CallPriority.LOW
+        assert infer_call_priority("basketball_nba", "h2h,spreads") == CallPriority.HIGH
 
     def test_nfl_low(self):
-        assert infer_call_priority("americanfootball_nfl", "h2h") == CallPriority.LOW
+        assert infer_call_priority("americanfootball_nfl", "h2h") == CallPriority.HIGH
 
     def test_epl_low(self):
-        assert infer_call_priority("soccer_epl", "h2h,totals") == CallPriority.LOW
+        assert infer_call_priority("soccer_epl", "h2h,totals") == CallPriority.HIGH
 
     def test_nhl_low(self):
-        assert infer_call_priority("icehockey_nhl", "h2h,spreads") == CallPriority.LOW
+        assert infer_call_priority("icehockey_nhl", "h2h,spreads") == CallPriority.HIGH
 
 
 # ── record_request ─────────────────────────────────────────────────────────────
