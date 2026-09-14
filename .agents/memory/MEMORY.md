@@ -147,3 +147,4 @@
 - [PropLine read-only rotation](propline-readonly-rotation.md) — bounded discovery-backed endpoint rotation shares the persistent limiter and checkpoints family/target progress atomically.
 - [Test fixture contracts](test-fixture-contracts.md) — control current-season provider data, patch active-sport config for pacing, and include all six strict history windows.
 - [History-optional delivery](history-optional-delivery.md) — only esports, tennis, and soccer may send without completed player history; all sports still require direction.
+- [NFL green goblin selection](nfl-green-goblin-selection.md) — NFL delivery uses only high-floor markets and chooses the lowest qualifying line per provider/player.

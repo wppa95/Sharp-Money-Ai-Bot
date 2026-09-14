@@ -9,6 +9,8 @@ from __future__ import annotations
 from collections import defaultdict
 from typing import Iterable
 
+from engine.ud_scoring import _HIGH_FLOOR_STATS
+
 
 _PRIMARY_PROVIDERS = {"prizepicks", "underdog"}
 
@@ -27,6 +29,44 @@ def _provider(candidate: dict) -> str:
         or getattr(prop, "provider", None)
         or "Underdog"
     ).strip().lower()
+
+
+def _sport(candidate: dict) -> str:
+    prop = candidate.get("prop")
+    return str(
+        candidate.get("sport")
+        or candidate.get("league")
+        or getattr(prop, "sport", None)
+        or ""
+    ).strip().upper()
+
+
+def _stat(candidate: dict) -> str:
+    prop = candidate.get("prop")
+    return str(
+        candidate.get("stat_type")
+        or candidate.get("stat")
+        or getattr(prop, "stat_type", None)
+        or ""
+    ).strip()
+
+
+def _line(candidate: dict) -> float:
+    value = (
+        candidate.get("line_val")
+        if candidate.get("line_val") is not None
+        else candidate.get("line")
+    )
+    return _number(value)
+
+
+def _is_nfl_green_goblin(candidate: dict) -> bool:
+    """Return whether an NFL candidate uses a configured high-floor market."""
+    return (
+        _sport(candidate) == "NFL"
+        and _stat(candidate).casefold()
+        in {stat.casefold() for stat in _HIGH_FLOOR_STATS}
+    )
 
 
 def _player(candidate: dict) -> str:
@@ -122,6 +162,27 @@ def select_strongest_actionable_picks(
 
     selected: list[dict] = []
     for group in groups.values():
+        # NFL delivery is intentionally narrower than the general selector:
+        # only high-floor ("green goblin") markets are eligible, and the
+        # lowest available line wins before evidence-based tie-breakers.
+        nfl_group = [candidate for candidate in group if _sport(candidate) == "NFL"]
+        if nfl_group:
+            green_goblin_group = [
+                candidate for candidate in nfl_group
+                if _is_nfl_green_goblin(candidate)
+            ]
+            if not green_goblin_group:
+                continue
+            winner = min(
+                green_goblin_group,
+                key=lambda candidate: (
+                    _line(candidate),
+                    tuple(-value for value in _ranking_key(candidate)),
+                    _tie_key(candidate),
+                ),
+            )
+            selected.append(winner)
+            continue
         winner = min(
             group,
             key=lambda candidate: (

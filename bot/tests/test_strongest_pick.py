@@ -97,3 +97,33 @@ def test_propline_is_not_a_standalone_actionable_provider():
     supplemental = _candidate("PropLine", "Morgan Hall", "Points")
 
     assert select_strongest_actionable_picks([supplemental]) == []
+
+
+def test_nfl_keeps_only_green_goblin_and_lowest_available_line():
+    high_line = _candidate(
+        "Underdog",
+        "Jordan Lee",
+        "Passing Yards",
+        line=225.5,
+        evidence_count=20,
+    )
+    low_line = _candidate(
+        "Underdog",
+        "Jordan Lee",
+        "Passing Yards",
+        line=199.5,
+        evidence_count=5,
+    )
+    volatile = _candidate(
+        "Underdog",
+        "Jordan Lee",
+        "Interceptions",
+        line=1.5,
+        evidence_count=50,
+    )
+    for candidate in (high_line, low_line, volatile):
+        candidate["sport"] = "NFL"
+
+    selected = select_strongest_actionable_picks([high_line, volatile, low_line])
+
+    assert selected == [low_line]
