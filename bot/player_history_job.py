@@ -46,6 +46,10 @@ _PLAYER_HISTORY_FETCH_CONCURRENCY = 256
 # use the providers' own request timeouts and all selected targets are awaited;
 # target data is never intentionally dropped by this collector.
 _PLAYER_HISTORY_OPERATION_TIMEOUT_SECONDS = 5.0
+# Active-target discovery reads the shared SQLite database while full-feed
+# persistence may be draining. Give that read a bounded but realistic window;
+# provider calls retain the shorter timeout above.
+_PLAYER_HISTORY_TARGET_DISCOVERY_TIMEOUT_SECONDS = 30.0
 
 # Retained as a compatibility/configuration value for callers that import it.
 # It is deliberately not used as a selection limit: every active supported
@@ -311,12 +315,14 @@ async def player_history_collector_job(context) -> None:
                     lambda: _generic_active(
                         providers=_PLAYER_PROP_PROVIDERS
                     ),
+                    operation_timeout=_PLAYER_HISTORY_TARGET_DISCOVERY_TIMEOUT_SECONDS,
                 )
                 active_rows = active.items()
             else:
                 active = await await_in_cycle(
                     "loading active player-history targets",
                     db.get_active_underdog_snapshot_per_prop,
+                    operation_timeout=_PLAYER_HISTORY_TARGET_DISCOVERY_TIMEOUT_SECONDS,
                 )
                 active_rows = (
                     active.items()
@@ -346,7 +352,7 @@ async def player_history_collector_job(context) -> None:
                     seen.add(key)
                     targets.append(key)
         except _CadenceBoundaryReached as exc:
-            logger.warning(
+            logger.info(
                 "player_history_collector_job: cadence boundary reached during %s",
                 exc,
             )
@@ -373,6 +379,7 @@ async def player_history_collector_job(context) -> None:
                                     provider_name, since_hours=48
                                 )
                             ),
+                            operation_timeout=_PLAYER_HISTORY_TARGET_DISCOVERY_TIMEOUT_SECONDS,
                             )
                         plh.extend(
                             (_provider, row) for row in (provider_rows or [])
@@ -383,6 +390,7 @@ async def player_history_collector_job(context) -> None:
                         lambda: db.get_latest_props_for_provider(
                             "Underdog", since_hours=48
                         ),
+                        operation_timeout=_PLAYER_HISTORY_TARGET_DISCOVERY_TIMEOUT_SECONDS,
                     )
                     plh = [("Underdog", row) for row in (provider_rows or [])]
                 for _provider, s in plh:
@@ -399,7 +407,7 @@ async def player_history_collector_job(context) -> None:
                         seen.add(key)
                         targets.append(key)
             except _CadenceBoundaryReached as exc:
-                logger.warning(
+                logger.info(
                     "player_history_collector_job: cadence boundary reached during %s",
                     exc,
                 )

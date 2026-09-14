@@ -20,3 +20,9 @@ Full-book collection should use bounded provider-task batches rather than one ta
 **Why:** Thousands of concurrent task objects can increase memory sharply and make cancellation unreliable while the bot is also persisting the live feed.
 
 **How to apply:** Keep durable persistence separate from the provider deadline, report remaining and deadline-target counts, and retain unresolved opportunities for later DB-first grading.
+
+Active-target discovery needs a separate, longer bounded timeout than individual provider requests.
+
+**Why:** Full-feed SQLite writes can briefly delay the large active-target read beyond a short provider timeout, causing a false cadence warning and an empty history cycle even when the database is healthy.
+
+**How to apply:** Bound the discovery read independently, keep provider request timeouts strict, and treat a controlled cadence stop as informational while retaining warnings for actual read, request, quota, and persistence failures.
