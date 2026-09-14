@@ -178,6 +178,29 @@ def test_historical_average_evidence_source_is_read_from_decision_json():
     ) is True
 
 
+def test_historical_average_evidence_source_on_decision_object_is_deliverable():
+    validation = SimpleNamespace(
+        has_supporting_data=True,
+        data_source="proxy",
+        n_real_games=0,
+        n_supplemental_games=0,
+    )
+    decision = SimpleNamespace(
+        recommendation="UNDER",
+        evidence_source="historical_average",
+        avg_vs_line_pct=-0.12,
+    )
+
+    assert market_engine._has_delivery_evidence(
+        validation=validation,
+        decision=decision,
+    ) is True
+    assert _has_strong_underdog_evidence(
+        validation=validation,
+        decision=decision,
+    ) is True
+
+
 def test_telegram_delivery_requires_strong_over_in_every_window():
     validation = SimpleNamespace(
         has_supporting_data=True,

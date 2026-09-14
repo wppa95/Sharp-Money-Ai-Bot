@@ -659,6 +659,16 @@ def _has_strong_underdog_evidence(
     """Mirror the delivery evidence check without importing market_engine."""
     # Polling snapshots are monitoring evidence, not completed player games.
     # Only real game-result evidence can qualify a Telegram PLAY.
+    decision_source = getattr(decision, "evidence_source", None)
+    decision_direction = str(
+        getattr(decision, "recommendation", "") or ""
+    ).upper()
+    if (
+        decision_direction in {"OVER", "UNDER"}
+        and is_historical_average_source(decision_source)
+    ):
+        return True
+
     if bool(getattr(validation, "has_supporting_data", False)):
         source = getattr(validation, "data_source", None)
         # A supporting-data flag without provenance is not enough for a

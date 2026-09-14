@@ -3969,6 +3969,20 @@ def _has_delivery_evidence(
     sample or a persisted historical-average/serialized evidence payload.
     The canonical direction gate still rejects missing or invalid directions.
     """
+    # Production UDBetDecision objects carry the historical-average provenance
+    # directly on evidence_source.  Do not require callers to serialize the
+    # decision or duplicate that provenance onto validation.
+    if decision is not None and not isinstance(decision, dict):
+        decision_source = getattr(decision, "evidence_source", None)
+        decision_direction = str(
+            getattr(decision, "recommendation", "") or ""
+        ).upper()
+        if (
+            decision_direction in {"OVER", "UNDER"}
+            and is_historical_average_source(decision_source)
+        ):
+            return True
+
     if bool(getattr(validation, "has_supporting_data", False)):
         source = str(getattr(validation, "data_source", "") or "").lower().strip()
         if is_historical_average_source(source):
