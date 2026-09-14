@@ -798,10 +798,23 @@ class PropLineResultEvidence:
     dfs_odds_type: str = ""
     supplemental_source: str = "PropLine"
     response_complete: bool = True
+    commence_time: Optional[datetime] = None
 
     @property
     def is_settled(self) -> bool:
         """Only explicit won/lost/push/void labels count as settled."""
+        if self.redacted or not self.response_complete:
+            return False
+        if _clean(self.provider_status).lower() in {
+            "retired",
+            "walkover",
+            "cancelled",
+            "canceled",
+            "abandoned",
+            "postponed",
+            "suspended",
+        }:
+            return False
         return self.resolution_state in _PROPLINE_SETTLED_RESULTS
 
 
@@ -814,6 +827,8 @@ class PropLineResultsFetchResult:
     event_id: str = ""
     succeeded: bool = False
     complete: bool = False
+    redacted: bool = False
+    upgrade_url: str = ""
     error: str = ""
     failure_kind: str = ""
 
@@ -1282,10 +1297,11 @@ def build_propline_result_evidence(
     if record.get("resolved_at") not in (None, "") and resolved_at is None:
         return None
     source_resolution = _clean(record.get("resolution"))
+    redacted = bool(record.get("redacted", False))
     return PropLineResultEvidence(
         observed_at=observed,
         resolution_state=normalize_propline_result_state(
-            source_resolution,
+            None if redacted else source_resolution,
             response_complete=response_complete,
         ),
         source_resolution=source_resolution,
@@ -1307,7 +1323,8 @@ def build_propline_result_evidence(
         redacted=bool(record.get("redacted", False)),
         dfs_odds_type=_clean(record.get("dfs_odds_type")),
         supplemental_source=_clean(record.get("supplemental_source")) or "PropLine",
-        response_complete=response_complete,
+        response_complete=response_complete and not redacted,
+        commence_time=_parse_datetime(record.get("commence_time")),
     )
 
 
@@ -2426,6 +2443,7 @@ def _official_sports_records(payload: Any) -> list[PropLineSport]:
 
     records: list[PropLineSport] = []
     seen: set[str] = set()
+    seen_canonical: set[str] = set()
     for item in payload:
         if not isinstance(item, dict):
             continue
@@ -2438,9 +2456,14 @@ def _official_sports_records(payload: Any) -> list[PropLineSport]:
         canonical = _canonical_discovered_sport(
             official_key, _first(item, "title", "name", "sport_name")
         )
-        if not canonical or official_key.lower() in seen:
+        if (
+            not canonical
+            or official_key.lower() in seen
+            or canonical in seen_canonical
+        ):
             continue
         seen.add(official_key.lower())
+        seen_canonical.add(canonical)
         records.append(
             PropLineSport(
                 official_key=official_key,
@@ -2614,7 +2637,10 @@ def _official_result_records(
                         "resolution": outcome.get("resolution"),
                         "actual_value": outcome.get("actual_value"),
                         "resolved_at": outcome.get("resolved_at"),
-                        "redacted": bool(outcome.get("redacted", False)),
+                        "redacted": bool(
+                            payload.get("redacted", False)
+                            or outcome.get("redacted", False)
+                        ),
                         "dfs_odds_type": _clean(outcome.get("dfs_odds_type")),
                         "supplemental_source": "PropLine",
                     }
@@ -4580,6 +4606,11 @@ class PropLineClient:
             raw_records, complete, error = _official_result_records(
                 payload, bookmaker=bookmaker
             )
+            response_redacted = (
+                bool(payload.get("redacted", False))
+                if isinstance(payload, dict)
+                else False
+            )
             results = tuple(
                 evidence
                 for record in raw_records
@@ -4599,6 +4630,12 @@ class PropLineClient:
                     event_id=event_id,
                     succeeded=False,
                     complete=False,
+                    redacted=response_redacted,
+                    upgrade_url=(
+                        _clean(payload.get("upgrade_url"))
+                        if isinstance(payload, dict)
+                        else ""
+                    ),
                     error=error or "PropLine results response incomplete",
                     failure_kind="incomplete",
                 )
@@ -4608,6 +4645,12 @@ class PropLineClient:
                 event_id=event_id,
                 succeeded=True,
                 complete=True,
+                redacted=response_redacted,
+                upgrade_url=(
+                    _clean(payload.get("upgrade_url"))
+                    if isinstance(payload, dict)
+                    else ""
+                ),
             )
 
     async def fetch_event_scoped_props(
@@ -4927,6 +4970,455 @@ class PropLineClient:
         if not self._snapshot_state_by_scope:
             return None
         return next(reversed(self._snapshot_state_by_scope.values()))
+
+
+PROPLINE_READ_ONLY_FAMILIES = (
+    "event_results",
+    "event_stats",
+    "event_markets",
+    "player_games",
+    "player_history",
+    "player_trends",
+    "scores",
+)
+
+
+@dataclass(frozen=True)
+class PropLineReadOnlyTarget:
+    """One safe, discovery-backed read-only request input."""
+
+    family: str
+    official_sport: str
+    canonical_sport: str = ""
+    player_name: str = ""
+    market: str = ""
+    official_market: str = ""
+    event_id: str = ""
+    bookmaker: str = "prizepicks"
+
+    @property
+    def identity(self) -> str:
+        return "|".join(
+            (
+                self.family,
+                self.official_sport,
+                self.canonical_sport,
+                self.player_name,
+                self.market,
+                self.official_market,
+                self.event_id,
+                self.bookmaker,
+            )
+        )
+
+    @property
+    def event(self) -> dict[str, str]:
+        return {"id": self.event_id, "sport_key": self.official_sport}
+
+
+@dataclass(frozen=True)
+class PropLineReadOnlyRotationReport:
+    """Auditable outcome of one bounded read-only rotation slice."""
+
+    attempted: int = 0
+    completed: int = 0
+    persisted: int = 0
+    pending: int = 0
+    skipped: int = 0
+    errors: int = 0
+    next_family: str = ""
+    next_target: str = ""
+    family_counts: dict[str, int] | None = None
+    provenance: tuple[dict[str, str], ...] = ()
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "attempted": self.attempted,
+            "completed": self.completed,
+            "persisted": self.persisted,
+            "pending": self.pending,
+            "skipped": self.skipped,
+            "errors": self.errors,
+            "next_family": self.next_family,
+            "next_target": self.next_target,
+            "family_counts": dict(self.family_counts or {}),
+            "provenance": list(self.provenance),
+        }
+
+
+def _read_only_input(value: Any, *names: str) -> str:
+    if isinstance(value, dict):
+        return _clean(_first(value, *names))
+    for name in names:
+        candidate = getattr(value, name, None)
+        if candidate not in (None, ""):
+            return _clean(candidate)
+    return ""
+
+
+def build_propline_read_only_targets(
+    active_props: Iterable[Any] = (),
+    *,
+    sports: Iterable[PropLineSport] = (),
+    events_by_sport: Optional[dict[str, Iterable[Any]]] = None,
+    bookmaker: str = "prizepicks",
+) -> list[PropLineReadOnlyTarget]:
+    """Build only inputs backed by discovered official sport/event identities.
+
+    The caller may provide active props and/or discovered events.  No
+    canonical sport is converted to a guessed provider key here.
+    """
+    official_by_canonical: dict[str, str] = {}
+    canonical_by_official: dict[str, str] = {}
+    for sport in sports:
+        official = _read_only_input(sport, "official_key", "key", "sport_key")
+        canonical = _normalize_sport(
+            _read_only_input(sport, "canonical_key", "canonical_sport", "sport")
+        )
+        if official and canonical and canonical not in official_by_canonical:
+            official_by_canonical[canonical] = official
+            canonical_by_official[official] = canonical
+
+    targets: dict[str, PropLineReadOnlyTarget] = {}
+
+    def add(family: str, official: str, canonical: str, **kwargs: str) -> None:
+        if family not in PROPLINE_READ_ONLY_FAMILIES or not official:
+            return
+        target = PropLineReadOnlyTarget(
+            family=family,
+            official_sport=official,
+            canonical_sport=canonical,
+            bookmaker=_clean(bookmaker).lower() or "prizepicks",
+            **kwargs,
+        )
+        targets[target.identity] = target
+
+    # Scores are useful even when no player/event input exists, but only for
+    # sports the provider explicitly discovered.
+    for canonical, official in official_by_canonical.items():
+        add("scores", official, canonical)
+
+    for prop in active_props:
+        canonical = _normalize_sport(
+            _read_only_input(prop, "sport", "sport_key", "league")
+        )
+        official = official_by_canonical.get(canonical)
+        player = _read_only_input(prop, "player_name", "player", "name")
+        market = _normalize_stat(
+            _read_only_input(prop, "stat_type", "market", "market_key", "stat")
+        )
+        official_market = official_player_market_for(market, sport=canonical)
+        event_id = _read_only_input(
+            prop, "event_id", "event_id", "game_id", "match_id"
+        )
+        if not official:
+            continue
+        if player and market:
+            for family in ("player_games", "player_history", "player_trends"):
+                if family in {"player_history", "player_trends"} and not official_market:
+                    continue
+                add(
+                    family,
+                    official,
+                    canonical,
+                    player_name=player,
+                    market=market,
+                    official_market=official_market or "",
+                )
+        if event_id:
+            for family in ("event_results", "event_stats", "event_markets"):
+                add(family, official, canonical, event_id=event_id, market=market)
+
+    for requested_sport, events in (events_by_sport or {}).items():
+        requested = _normalize_sport(requested_sport)
+        official = official_by_canonical.get(requested)
+        canonical = requested
+        if not official:
+            official = _clean(requested_sport)
+            canonical = canonical_by_official.get(official, "")
+        # A raw string that did not come from discovery is never accepted.
+        if not official or not canonical:
+            continue
+        for event in events or ():
+            event_id = _read_only_input(event, "event_id", "id", "game_id", "match_id")
+            if not event_id:
+                continue
+            for family in ("event_results", "event_stats", "event_markets"):
+                add(family, official, canonical, event_id=event_id)
+
+    return sorted(
+        targets.values(),
+        key=lambda target: (
+            PROPLINE_READ_ONLY_FAMILIES.index(target.family),
+            target.identity,
+        ),
+    )
+
+
+class PropLineReadOnlyRotation:
+    """Bounded, persistent rotation across documented read-only endpoints."""
+
+    _STATE_KEY = "default"
+
+    def __init__(
+        self,
+        client: "PropLineClient",
+        *,
+        state_path: Optional[str] = None,
+        max_requests_per_cycle: int = 12,
+    ) -> None:
+        self.client = client
+        self.state_path = (
+            state_path
+            or os.getenv("PROPLINE_ROTATION_STATE_PATH")
+            or _DEFAULT_PROPLINE_BUDGET_LEDGER_PATH
+        )
+        self.max_requests_per_cycle = max(1, int(max_requests_per_cycle))
+        Path(self.state_path).parent.mkdir(parents=True, exist_ok=True)
+        with sqlite3.connect(self.state_path, timeout=30) as db:
+            db.execute(
+                "CREATE TABLE IF NOT EXISTS propline_readonly_rotation "
+                "(rotation_key TEXT PRIMARY KEY, family_cursor INTEGER NOT NULL, "
+                "target_cursors TEXT NOT NULL, last_target TEXT NOT NULL, "
+                "updated_at TEXT NOT NULL)"
+            )
+
+    def _load_state(self) -> tuple[int, dict[str, int], str]:
+        with sqlite3.connect(self.state_path, timeout=30) as db:
+            row = db.execute(
+                "SELECT family_cursor, target_cursors, last_target "
+                "FROM propline_readonly_rotation WHERE rotation_key = ?",
+                (self._STATE_KEY,),
+            ).fetchone()
+        if not row:
+            return 0, {}, ""
+        try:
+            cursors = {
+                str(key): max(0, int(value))
+                for key, value in json.loads(row[1] or "{}").items()
+            }
+        except (TypeError, ValueError, json.JSONDecodeError):
+            cursors = {}
+        return max(0, int(row[0])), cursors, str(row[2] or "")
+
+    def _save_state(
+        self,
+        family_cursor: int,
+        target_cursors: dict[str, int],
+        last_target: str,
+    ) -> None:
+        with sqlite3.connect(self.state_path, timeout=30) as db:
+            db.execute("BEGIN IMMEDIATE")
+            db.execute(
+                "INSERT OR REPLACE INTO propline_readonly_rotation "
+                "(rotation_key, family_cursor, target_cursors, last_target, updated_at) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (
+                    self._STATE_KEY,
+                    int(family_cursor) % len(PROPLINE_READ_ONLY_FAMILIES),
+                    json.dumps(target_cursors, sort_keys=True),
+                    last_target,
+                    datetime.utcnow().isoformat(),
+                ),
+            )
+            db.commit()
+
+    async def _fetch(self, target: PropLineReadOnlyTarget) -> Any:
+        method_name = {
+            "event_results": "fetch_event_results",
+            "event_stats": "fetch_event_stats",
+            "event_markets": "fetch_event_markets",
+            "player_games": "fetch_player_games",
+            "player_history": "fetch_player_history",
+            "player_trends": "fetch_player_trends",
+            "scores": "fetch_scores",
+        }[target.family]
+        method = getattr(self.client, method_name, None)
+        if not callable(method):
+            return None
+        if target.family == "event_results":
+            return await method(
+                target.official_sport,
+                target.event,
+                bookmaker=target.bookmaker,
+            )
+        if target.family == "event_stats":
+            return await method(
+                target.official_sport, target.event, stat_type=target.market
+            )
+        if target.family == "event_markets":
+            return await method(target.official_sport, target.event)
+        if target.family == "player_games":
+            return await method(
+                target.official_sport,
+                target.player_name,
+                limit=100,
+                stat_type=target.market,
+            )
+        if target.family == "player_history":
+            return await method(
+                target.official_sport,
+                target.player_name,
+                market=target.official_market or target.market,
+                bookmaker=target.bookmaker,
+                limit=100,
+            )
+        if target.family == "player_trends":
+            return await method(
+                target.official_sport,
+                target.player_name,
+                market=target.official_market or target.market,
+            )
+        return await method(target.official_sport, days_from=3)
+
+    @staticmethod
+    def _result_complete(result: Any) -> bool:
+        return bool(
+            result is not None
+            and getattr(result, "succeeded", False)
+            and getattr(result, "complete", False)
+            and not getattr(result, "redacted", False)
+        )
+
+    async def run(
+        self,
+        targets: Iterable[PropLineReadOnlyTarget],
+        *,
+        persist: Optional[Callable[[PropLineReadOnlyTarget, Any], Awaitable[Any]]] = None,
+        max_requests: Optional[int] = None,
+    ) -> PropLineReadOnlyRotationReport:
+        """Run one bounded slice and checkpoint after every attempted request."""
+        target_list = list(targets)
+        by_family = {
+            family: sorted(
+                {
+                    target.identity: target
+                    for target in target_list
+                    if target.family == family
+                }.values(),
+                key=lambda target: target.identity,
+            )
+            for family in PROPLINE_READ_ONLY_FAMILIES
+        }
+        family_cursor, target_cursors, _last_target = self._load_state()
+        limit = min(
+            self.max_requests_per_cycle,
+            max(1, int(max_requests or self.max_requests_per_cycle)),
+        )
+        attempted = completed = persisted = pending = skipped = errors = 0
+        family_counts: dict[str, int] = {}
+        provenance: list[dict[str, str]] = []
+        family_index = family_cursor % len(PROPLINE_READ_ONLY_FAMILIES)
+        visited: set[str] = set()
+
+        while attempted < limit and any(by_family.values()):
+            selected = None
+            for offset in range(len(PROPLINE_READ_ONLY_FAMILIES)):
+                family = PROPLINE_READ_ONLY_FAMILIES[
+                    (family_index + offset) % len(PROPLINE_READ_ONLY_FAMILIES)
+                ]
+                bucket = by_family[family]
+                if bucket:
+                    start = target_cursors.get(family, 0) % len(bucket)
+                    for step in range(len(bucket)):
+                        index = (start + step) % len(bucket)
+                        if bucket[index].identity not in visited:
+                            selected = (family, bucket[index], index)
+                            break
+                    if selected is not None:
+                        break
+            if selected is None:
+                break
+            family, target, index = selected
+            visited.add(target.identity)
+            target_cursors[family] = (index + 1) % len(by_family[family])
+            family_index = (
+                PROPLINE_READ_ONLY_FAMILIES.index(family) + 1
+            ) % len(PROPLINE_READ_ONLY_FAMILIES)
+            attempted += 1
+            family_counts[family] = family_counts.get(family, 0) + 1
+            status = "pending"
+            reason = ""
+            try:
+                result = await self._fetch(target)
+                if result is None:
+                    pending += 1
+                    reason = "unsupported_endpoint"
+                elif not self._result_complete(result):
+                    pending += 1
+                    reason = (
+                        str(getattr(result, "failure_kind", "") or "")
+                        or ("redacted" if getattr(result, "redacted", False)
+                            else "incomplete")
+                    )
+                elif (
+                    family == "event_results"
+                    and not any(
+                        getattr(evidence, "is_settled", False)
+                        for evidence in getattr(result, "results", ())
+                    )
+                ):
+                    pending += 1
+                    reason = "no_explicit_settlement"
+                else:
+                    completed += 1
+                    status = "completed"
+                    if persist is not None:
+                        persisted_value = await persist(target, result)
+                        if persisted_value is not False:
+                            persisted += 1
+                        else:
+                            reason = "read_only_report_only"
+                    else:
+                        reason = "read_only_report_only"
+            except Exception as exc:  # noqa: BLE001
+                errors += 1
+                pending += 1
+                reason = type(exc).__name__
+                logger.warning(
+                    "PropLine read-only rotation failed family=%s target=%s: %s",
+                    family,
+                    target.identity,
+                    exc,
+                )
+            self._save_state(family_index, target_cursors, target.identity)
+            provenance.append(
+                {
+                    "family": family,
+                    "target": target.identity,
+                    "status": status,
+                    "reason": reason,
+                }
+            )
+
+        next_family = PROPLINE_READ_ONLY_FAMILIES[family_index]
+        next_target = ""
+        for offset in range(len(PROPLINE_READ_ONLY_FAMILIES)):
+            family = PROPLINE_READ_ONLY_FAMILIES[
+                (family_index + offset) % len(PROPLINE_READ_ONLY_FAMILIES)
+            ]
+            bucket = by_family[family]
+            if bucket:
+                start = target_cursors.get(family, 0) % len(bucket)
+                for step in range(len(bucket)):
+                    candidate = bucket[(start + step) % len(bucket)]
+                    if candidate.identity not in visited:
+                        next_target = candidate.identity
+                        break
+                if next_target:
+                    break
+        return PropLineReadOnlyRotationReport(
+            attempted=attempted,
+            completed=completed,
+            persisted=persisted,
+            pending=pending,
+            skipped=skipped,
+            errors=errors,
+            next_family=next_family,
+            next_target=next_target,
+            family_counts=family_counts,
+            provenance=tuple(provenance),
+        )
 
 
 def _retry_after_seconds(response: Any) -> float:

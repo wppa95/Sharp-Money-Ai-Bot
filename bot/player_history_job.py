@@ -830,3 +830,85 @@ async def player_history_collector_job(context) -> None:
         )
     except Exception as exc:
         logger.exception("player_history_collector_job: %s", exc)
+
+
+async def propline_read_only_rotation_job(context) -> None:
+    """Rotate supplemental PropLine endpoints without entering alert logic.
+
+    Discovery and the endpoint calls share PropLine's persistent limiter.  The
+    checkpoint lives beside that limiter, so a restart can repeat at most the
+    last request rather than dropping a family or target.
+    """
+    bot_data = context.bot_data
+    db = bot_data.get("history_db") or bot_data.get("db")
+    if not db:
+        logger.warning("propline_read_only_rotation_job: db not ready")
+        return
+    try:
+        from providers.player_history import propline_result_rows
+        from providers.propline import (
+            PropLineClient,
+            PropLineReadOnlyRotation,
+            build_propline_read_only_targets,
+        )
+
+        client = bot_data.get("propline_read_only_client")
+        if client is None:
+            client = PropLineClient()
+            bot_data["propline_read_only_client"] = client
+        if not client.is_configured:
+            logger.info("propline_read_only_rotation_job: PropLine disabled")
+            return
+
+        active_rows = []
+        generic_active = getattr(
+            db, "get_all_active_prop_line_history_by_line", None
+        )
+        if asyncio.iscoroutinefunction(generic_active):
+            active = await generic_active(providers=_PLAYER_PROP_PROVIDERS)
+            active_rows = list(active.values()) if hasattr(active, "values") else list(active or [])
+        else:
+            active = await db.get_active_underdog_snapshot_per_prop()
+            active_rows = list(active.values()) if hasattr(active, "values") else list(active or [])
+
+        discovered_sports = await client.discover_sports()
+        targets = build_propline_read_only_targets(
+            active_rows,
+            sports=discovered_sports,
+        )
+
+        async def persist(target, result):
+            if target.family != "event_results":
+                return False
+            rows = propline_result_rows(getattr(result, "results", ()))
+            if not rows:
+                return False
+            writer = getattr(db, "upsert_player_results_bulk", None)
+            if callable(writer):
+                await writer(rows)
+            else:
+                for row in rows:
+                    await db.upsert_player_result(row)
+            return True
+
+        rotation = PropLineReadOnlyRotation(
+            client,
+            max_requests_per_cycle=4,
+        )
+        report = await rotation.run(targets, persist=persist)
+        bot_data["propline_read_only_report"] = report.as_dict()
+        logger.info(
+            "propline_read_only_rotation_job: attempted=%d completed=%d "
+            "persisted=%d pending=%d skipped=%d errors=%d next_family=%s "
+            "families=%s",
+            report.attempted,
+            report.completed,
+            report.persisted,
+            report.pending,
+            report.skipped,
+            report.errors,
+            report.next_family,
+            report.family_counts,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("propline_read_only_rotation_job: %s", exc)

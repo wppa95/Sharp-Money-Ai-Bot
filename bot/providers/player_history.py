@@ -35,6 +35,52 @@ PROPLINE_COVERAGE_MALFORMED = "malformed"
 PROPLINE_COVERAGE_NOT_NEEDED = "not_needed"
 
 
+def propline_result_rows(results) -> list:
+    """Convert only explicit, non-redacted event settlements to game rows."""
+    from providers.player_stats import RawGameResult
+
+    rows = []
+    for evidence in results or ():
+        if not bool(getattr(evidence, "is_settled", False)):
+            continue
+        event_id = str(getattr(evidence, "event_id", "") or "").strip()
+        player_name = str(getattr(evidence, "player_name", "") or "").strip()
+        sport = str(getattr(evidence, "sport", "") or "").strip().upper()
+        stat_type = str(getattr(evidence, "stat_type", "") or "").strip().lower()
+        actual_value = getattr(evidence, "actual_value", None)
+        resolved_at = (
+            getattr(evidence, "commence_time", None)
+            or getattr(evidence, "resolved_at", None)
+            or getattr(evidence, "observed_at", None)
+        )
+        if (
+            not event_id
+            or not player_name
+            or not sport
+            or not stat_type
+            or actual_value is None
+            or resolved_at is None
+        ):
+            continue
+        try:
+            value = float(actual_value)
+        except (TypeError, ValueError):
+            continue
+        rows.append(
+            RawGameResult(
+                player_name=player_name,
+                sport=sport,
+                stat_type=stat_type,
+                game_date=resolved_at.date().isoformat(),
+                actual_value=value,
+                opponent=None,
+                source="propline_event_results",
+                game_id=event_id,
+            )
+        )
+    return rows
+
+
 def _is_database_backend(db: object) -> bool:
     """Only the real database backend may trigger remote history enrichment."""
     try:

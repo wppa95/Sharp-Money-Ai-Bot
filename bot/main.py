@@ -101,7 +101,10 @@ from market_engine import (
     _shared_monitoring_cycle,
     _full_pool_rescan_job,
 )
-from player_history_job import player_history_collector_job
+from player_history_job import (
+    player_history_collector_job,
+    propline_read_only_rotation_job,
+)
 from providers import init_health_monitor
 from providers.odds_cache import init_odds_cache
 from providers.game_results import OddsApiResultsProvider
@@ -992,6 +995,19 @@ async def post_init(application: Application) -> None:
             interval=config.PLAYER_HISTORY_POLL_INTERVAL,
             first=90,
             name="player_history_collector",
+        )
+        # PropLine's read-only coverage rotates independently from the
+        # full-book player-history collector.  Four endpoint calls per
+        # five-minute cycle leave the shared 1,020/hour allowance for the
+        # existing history lane and other explicitly requested reads.
+        jq.run_repeating(
+            _coordinated_job(
+                "propline_read_only_rotation",
+                propline_read_only_rotation_job,
+            ),
+            interval=config.PLAYER_HISTORY_POLL_INTERVAL,
+            first=150,
+            name="propline_read_only_rotation",
         )
         # API budget check — every 15 minutes, only when an API budget exists.
         if config.ODDS_API_ENABLED:
