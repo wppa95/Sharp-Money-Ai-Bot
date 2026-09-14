@@ -79,7 +79,7 @@ _PLAYER_PROP_PROVIDERS = tuple(
 # PropLine's Pro allowance is shared by every authenticated endpoint and
 # client process.  The collector owns the history-target portion of that
 # allowance; the client limiter is the final admission gate for all endpoint
-# kinds.  At the default five-minute cadence this selects a quota-sized target
+# kinds.  At the default three-minute cadence this selects a quota-sized target
 # batch per cycle, rather than the old one-target throttle.
 _PROPLINE_REQUESTS_PER_HOUR = 1_020
 _PLAYER_HISTORY_PROPLINE_TARGETS_PER_CYCLE = max(
@@ -88,7 +88,7 @@ _PLAYER_HISTORY_PROPLINE_TARGETS_PER_CYCLE = max(
         _PROPLINE_REQUESTS_PER_HOUR
         * max(
             1.0,
-            float(getattr(_config, "PLAYER_HISTORY_POLL_INTERVAL", 300))
+            float(getattr(_config, "PLAYER_HISTORY_POLL_INTERVAL", 180))
             - max(
                 0.0,
                 float(
@@ -125,7 +125,7 @@ def _player_history_cadence_budget() -> float:
     """Return the fetch budget while leaving room before the next scheduler tick."""
     interval = max(
         1.0,
-        float(getattr(_config, "PLAYER_HISTORY_POLL_INTERVAL", 300)),
+        float(getattr(_config, "PLAYER_HISTORY_POLL_INTERVAL", 180)),
     )
     headroom = max(
         0.0,

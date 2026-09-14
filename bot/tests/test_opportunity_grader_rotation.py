@@ -248,7 +248,7 @@ async def test_grader_fetches_concurrently_with_a_bounded_batch():
 
     assert 1 < max_active <= main._GRADE_FETCH_CONCURRENCY
     db.get_pending_opportunities.assert_awaited_once_with(
-        cutoff_hours=0.5, after_id=0, limit=main._GRADE_BATCH_SIZE
+        cutoff_hours=0.0, after_id=0, limit=main._GRADE_BATCH_SIZE
     )
     assert health.cursor == 30
     assert health.runs == 1
@@ -277,10 +277,10 @@ async def test_grader_wraps_cursor_and_records_no_data_completion():
         await main._grade_opportunities_job(_context(db))
 
     assert db.get_pending_opportunities.await_args_list[0].kwargs == {
-        "cutoff_hours": 0.5, "after_id": 100, "limit": main._GRADE_BATCH_SIZE
+        "cutoff_hours": 0.0, "after_id": 100, "limit": main._GRADE_BATCH_SIZE
     }
     assert db.get_pending_opportunities.await_args_list[1].kwargs == {
-        "cutoff_hours": 0.5, "after_id": None, "limit": main._GRADE_BATCH_SIZE
+        "cutoff_hours": 0.0, "after_id": None, "limit": main._GRADE_BATCH_SIZE
     }
     assert health.cursor == 7
     assert health.runs == 1

@@ -1231,7 +1231,7 @@ async def _grade_opportunities_job(context) -> None:
         if not pending and _cursor:
             try:
                 pending = await db.get_pending_opportunities(
-                    cutoff_hours=0.5,
+                    cutoff_hours=0.0,
                     after_id=None,
                     limit=_GRADE_BATCH_SIZE,
                 )
@@ -1262,7 +1262,7 @@ async def _grade_opportunities_job(context) -> None:
             if not _tracked_pending and _tracked_cursor:
                 try:
                     _tracked_result = _get_pending_tracked(
-                        cutoff_hours=0.5,
+                        cutoff_hours=0.0,
                         after_id=None,
                         limit=_GRADE_BATCH_SIZE,
                     )
