@@ -51,7 +51,7 @@ def test_targets_use_discovered_official_aliases_only():
         target.family
         for target in targets
         if target.player_name
-    } == {"player_games", "player_history", "player_trends"}
+    } == set()
     assert {
         target.family
         for target in targets
@@ -261,9 +261,6 @@ def _all_family_targets():
             "event_results",
             "event_stats",
             "event_markets",
-            "player_games",
-            "player_history",
-            "player_trends",
             "scores",
         )
     ]

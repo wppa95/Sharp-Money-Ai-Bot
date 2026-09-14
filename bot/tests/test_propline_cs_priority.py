@@ -1,4 +1,4 @@
-"""Regression coverage for PropLine-first CS evidence enrichment."""
+"""Regression coverage for CS evidence enrichment boundaries."""
 
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ from providers.player_stats import RawGameResult
 
 class _DB:
     def __init__(self) -> None:
-        self.get_player_results = AsyncMock(return_value=[])
+        self.get_player_results = AsyncMock(return_value=_propline_rows())
         self.upsert_player_result = AsyncMock()
 
 
@@ -38,14 +38,10 @@ def _propline_rows() -> list[RawGameResult]:
 
 
 @pytest.mark.asyncio
-async def test_cs_uses_sufficient_propline_history_without_pandascore():
+async def test_cs_does_not_use_singular_propline_history_enrichment():
     db = _DB()
     primary_provider = type("PrimaryProvider", (), {})()
     primary_provider.fetch_results = AsyncMock(
-        side_effect=AssertionError("PandaScore-backed provider should be skipped")
-    )
-    history_provider = type("HistoryProvider", (), {})()
-    history_provider.supplement_missing_results = AsyncMock(
         return_value=_propline_rows()
     )
 
@@ -54,10 +50,6 @@ async def test_cs_uses_sufficient_propline_history_without_pandascore():
             market_engine,
             "_get_player_stats_provider",
             return_value=primary_provider,
-        ),
-        patch(
-            "providers.player_history.get_player_history_provider",
-            return_value=history_provider,
         ),
         patch.object(
             market_engine.config,
@@ -77,10 +69,8 @@ async def test_cs_uses_sufficient_propline_history_without_pandascore():
     assert result is not None
     assert result.has_real_data is True
     assert result.total_games == 5
-    assert result.data_source == "propline"
-    assert result.n_supplemental_games == 5
-    primary_provider.fetch_results.assert_not_awaited()
-    history_provider.supplement_missing_results.assert_awaited_once()
+    assert result.n_supplemental_games == 0
+    primary_provider.fetch_results.assert_awaited_once()
 
 
 def test_propline_history_is_valid_delivery_evidence():

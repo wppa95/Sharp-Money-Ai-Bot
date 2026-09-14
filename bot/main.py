@@ -1170,7 +1170,6 @@ _GRADE_FETCH_TIMEOUT_SECONDS = 20
 # collection while the 30-minute cadence drains the durable backlog.
 _GRADE_CYCLE_BUDGET_SECONDS = 50
 _GRADE_CYCLE_HEADROOM_SECONDS = 10
-_GRADE_PROPLINE_TARGETS_PER_CYCLE = 2
 
 
 async def _underdog_monitor_cycle(context) -> None:
@@ -1409,72 +1408,10 @@ async def _grade_opportunities_job(context) -> None:
                     _prov_fetch_exc,
                 )
 
-        # If the public stat provider has no row for a completed event, use
-        # PropLine's resolved history as a settlement fallback.  This is
-        # especially important for CS: PandaScore is optional when PropLine
-        # already exposes the event result.  The fallback is event-specific
-        # and read-only; it never grades an unresolved or guessed row.
-        _propline_grade_provider = None
-        # Provider is part of this cache key. Underdog and PrizePicks can use
-        # the same player/stat pair while their event/result namespaces differ.
-        _propline_grade_cache: dict[tuple[str, str, str, str], list] = {}
-        _propline_grade_attempts = 0
-        try:
-            from providers.player_history import get_player_history_provider
-            _propline_grade_provider = get_player_history_provider()
-        except Exception as _propline_init_exc:
-            logger.debug(
-                "_grade_opportunities_job: PropLine grading fallback unavailable: %s",
-                _propline_init_exc,
-            )
-
-        async def _fetch_propline_grade_results(_gopp):
-            nonlocal _propline_grade_attempts
-            if _propline_grade_provider is None:
-                return []
-            _key = (
-                str(_gopp.player_name),
-                str(_gopp.sport).upper(),
-                str(_gopp.stat_type or "").lower().strip(),
-                str(
-                    getattr(_gopp, "provider", None)
-                    or getattr(_gopp, "source_provider", None)
-                    or "Underdog"
-                ).strip(),
-            )
-            if _key not in _propline_grade_cache:
-                if (
-                    _propline_grade_attempts
-                    >= _GRADE_PROPLINE_TARGETS_PER_CYCLE
-                ):
-                    return []
-                _propline_grade_attempts += 1
-                try:
-                    _propline_grade_cache[_key] = list(
-                        await asyncio.wait_for(
-                            _propline_grade_provider.fetch_resolved_results(
-                                _gopp.player_name,
-                                _gopp.sport,
-                                _gopp.stat_type,
-                                source_provider=(
-                                    getattr(_gopp, "provider", None)
-                                    or getattr(_gopp, "source_provider", None)
-                                    or "Underdog"
-                                ),
-                            ),
-                            timeout=_GRADE_FETCH_TIMEOUT_SECONDS,
-                        )
-                    )
-                except Exception as _propline_grade_exc:
-                    logger.debug(
-                        "_grade_opportunities_job: PropLine settlement lookup "
-                        "failed for %s/%s: %s",
-                        _gopp.player_name,
-                        _gopp.stat_type,
-                        _propline_grade_exc,
-                    )
-                    _propline_grade_cache[_key] = []
-            return _propline_grade_cache[_key]
+        # Grading uses results already collected by the independent history
+        # collector. Never perform a per-opportunity PropLine settlement
+        # request here: the available PropLine history endpoints are singular,
+        # while the collector owns the bulk/full-book history budget.
 
         graded   = 0
         no_data  = 0
@@ -1568,36 +1505,6 @@ async def _grade_opportunities_job(context) -> None:
                     None,
                     **_result_lookup_kwargs,
                 )
-            if result_row is None:
-                # A date or source event identity is required to safely
-                # reconcile a PropLine result to this opportunity. Never fall
-                # back by player/stat alone.
-                if game_date or getattr(opp, "game_id", ""):
-                    for _propline_result in await _fetch_propline_grade_results(opp):
-                        await db.upsert_player_result(_propline_result)
-                    for _candidate_game_date in _game_dates:
-                        result_row = await db.get_game_result_for_grading(
-                            opp.player_name,
-                            opp.sport,
-                            opp.stat_type,
-                            _candidate_game_date,
-                            **_result_lookup_kwargs,
-                        )
-                        if result_row is not None:
-                            _matched_game_date = _candidate_game_date
-                            break
-                    if (
-                        result_row is None
-                        and not game_date
-                        and getattr(opp, "game_id", "")
-                    ):
-                        result_row = await db.get_game_result_for_grading(
-                            opp.player_name,
-                            opp.sport,
-                            opp.stat_type,
-                            None,
-                            **_result_lookup_kwargs,
-                        )
             if result_row is None:
                 no_data += 1
                 no_data_by_sport[str(getattr(opp, "sport", "UNKNOWN")).upper()] += 1

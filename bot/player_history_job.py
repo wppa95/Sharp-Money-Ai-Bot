@@ -455,90 +455,14 @@ async def player_history_collector_job(context) -> None:
         propline_coverage_by_sport_market: dict[
             str, dict[str, dict[str, int]]
         ] = {}
-        propline_cursor_advanced = False
         budget_exhausted = False
         fetch_semaphore = asyncio.Semaphore(_PLAYER_HISTORY_FETCH_CONCURRENCY)
         completed_targets: list[tuple[str, str, str]] = []
-        from providers.player_history import get_player_history_provider
-
-        configured_history_provider = bot_data.get("player_history_provider")
-        history_provider = (
-            configured_history_provider or get_player_history_provider()
-        )
-
-        def propline_market_for(
-            sport: str,
-            stat: str,
-            coverage: object = None,
-        ) -> str:
-            reported_market = str(
-                getattr(coverage, "market", "") or ""
-            ).strip()
-            if reported_market:
-                return reported_market
-            try:
-                from providers.propline import official_player_market_for
-
-                return (
-                    official_player_market_for(stat, sport=sport)
-                    or "unmapped"
-                )
-            except Exception:
-                return "unmapped"
-
-        def _has_propline_market(target: tuple[str, str, str]) -> bool:
-            try:
-                from providers.propline import official_player_market_for
-
-                return bool(
-                    official_player_market_for(target[2], sport=target[1])
-                )
-            except Exception:
-                return False
-
-        # Do not spend a paid PropLine request on labels that have no
-        # documented market. The public provider may still supply history for
-        # those targets, but PropLine can only return an unmapped-market
-        # failure for them.
-        propline_eligible_targets = [
-            target
-            for target in cycle_targets
-            if _uses_propline_history(target[1])
-            and _has_propline_market(target)
-        ]
-        if propline_eligible_targets:
-            try:
-                propline_start = (
-                    int(bot_data.get(_PROPLINE_CURSOR_KEY, 0))
-                    % len(propline_eligible_targets)
-                )
-            except (TypeError, ValueError):
-                propline_start = 0
-            propline_count = min(
-                _PLAYER_HISTORY_PROPLINE_TARGETS_PER_CYCLE,
-                len(propline_eligible_targets),
-            )
-            propline_targets = {
-                propline_eligible_targets[
-                    (propline_start + offset) % len(propline_eligible_targets)
-                ]
-                for offset in range(propline_count)
-            }
-            propline_cursor_next = (
-                propline_start + propline_count
-            ) % len(propline_eligible_targets)
-            for _player, _sport, _stat in propline_targets:
-                propline_attempts_by_sport[_sport] = (
-                    propline_attempts_by_sport.get(_sport, 0) + 1
-                )
-                market = propline_market_for(_sport, _stat)
-                sport_attempts = propline_attempts_by_sport_market.setdefault(
-                    _sport, {}
-                )
-                sport_attempts[market] = sport_attempts.get(market, 0) + 1
-        else:
-            propline_targets = set()
-
+        # PropLine's documented player-history endpoint is one-player-at-a-time.
+        # It is intentionally not part of this collector: authenticated
+        # history must not be spent as a per-target supplement.  The collector
+        # continues to batch primary-provider work and bulk-persist completed
+        # results; PropLine observations remain available through the bulk feed.
         async def fetch_target(player: str, sport: str, stat: str):
             async with fetch_semaphore:
                 try:
@@ -554,48 +478,13 @@ async def player_history_collector_job(context) -> None:
                             remaining,
                         ),
                     )
-                    if configured_history_provider is None:
-                        # Direct/unit-test callers do not have the production
-                        # shared history provider in bot_data. Do not make
-                        # them perform an unbounded supplemental network read;
-                        # the primary provider result is already valid evidence.
-                        coverage = SimpleNamespace(
-                            rows=list(raw or []),
-                            status="usable" if raw else "",
-                        )
-                    else:
-                        remaining = cycle_deadline - time.monotonic()
-                        if remaining <= 0:
-                            return "deadline", None
-                        # PropLine requests are admitted by the shared
-                        # rolling-hour limiter.  They may wait for their
-                        # quota slot; the invocation-level deadline, rather
-                        # than the five-second public-provider timeout,
-                        # bounds the complete batch.
-                        scheduled_timeout = (
-                            remaining
-                            if (player, sport, stat) in propline_targets
-                            else min(
-                                _PLAYER_HISTORY_OPERATION_TIMEOUT_SECONDS,
-                                remaining,
-                            )
-                        )
-                        coverage = await asyncio.wait_for(
-                            history_provider.fetch_scheduled_results(
-                                raw or [],
-                                player,
-                                sport,
-                                stat,
-                                source_provider=source_scope((player, sport, stat)),
-                                allow_propline=(
-                                    (player, sport, stat) in propline_targets
-                                ),
-                                force_propline=(
-                                    (player, sport, stat) in propline_targets
-                                ),
-                            ),
-                            timeout=scheduled_timeout,
-                        )
+                    # The collector's remote work is the primary provider
+                    # fetch above. Do not invoke the singular PropLine history
+                    # endpoint for targets with a short primary result set.
+                    coverage = SimpleNamespace(
+                        rows=list(raw or []),
+                        status="usable" if raw else "",
+                    )
                     return "ok", coverage
                 except asyncio.TimeoutError:
                     return "deadline", None
@@ -663,43 +552,8 @@ async def player_history_collector_job(context) -> None:
                 )
                 continue
 
-            if (player, sport, stat) in propline_targets:
-                propline_cursor_advanced = True
             coverage = fetch_value
             raw = getattr(coverage, "rows", coverage)
-            coverage_status = getattr(coverage, "status", "")
-            if (player, sport, stat) in propline_targets:
-                market = propline_market_for(sport, stat, coverage)
-                sport_markets = propline_coverage_by_sport_market.setdefault(
-                    sport, {}
-                )
-                market_coverage = sport_markets.setdefault(market, {})
-                if coverage_status in {
-                    "usable",
-                    "redacted",
-                    "unavailable",
-                    "malformed",
-                }:
-                    market_coverage[coverage_status] = (
-                        market_coverage.get(coverage_status, 0) + 1
-                    )
-            if (player, sport, stat) in propline_targets and coverage_status == (
-                "not_needed"
-            ):
-                sport_coverage = propline_coverage_by_sport.setdefault(sport, {})
-                sport_coverage["not_needed"] = (
-                    sport_coverage.get("not_needed", 0) + 1
-                )
-            if coverage_status in {
-                "usable",
-                "redacted",
-                "unavailable",
-                "malformed",
-            }:
-                sport_coverage = propline_coverage_by_sport.setdefault(sport, {})
-                sport_coverage[coverage_status] = (
-                    sport_coverage.get(coverage_status, 0) + 1
-                )
             if raw:
                 from engine.evidence_memory import put_player_results
 
@@ -735,16 +589,6 @@ async def player_history_collector_job(context) -> None:
             rows_by_sport.setdefault(sport, 0)
             no_result_by_sport.setdefault(sport, 0)
             propline_coverage_by_sport.setdefault(sport, {})
-
-        # A timed-out PropLine request must remain the next target. Advancing
-        # the cursor before the request would otherwise lose a target for a
-        # full rotation of the active book (many hours) whenever the shared
-        # endpoint is still inside its rolling interval.
-        if cycle_targets:
-            if propline_cursor_advanced:
-                bot_data[_PROPLINE_CURSOR_KEY] = propline_cursor_next
-            else:
-                bot_data[_PROPLINE_CURSOR_KEY] = propline_start
 
         async def write_batch(batch: list[object]) -> None:
             """Persist one completed result batch without the fetch deadline."""

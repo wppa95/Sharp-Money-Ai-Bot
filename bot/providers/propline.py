@@ -5551,9 +5551,6 @@ PROPLINE_READ_ONLY_FAMILIES = (
     "event_results",
     "event_stats",
     "event_markets",
-    "player_games",
-    "player_history",
-    "player_trends",
     "scores",
 )
 
@@ -5699,18 +5696,6 @@ def build_propline_read_only_targets(
         )
         if not official:
             continue
-        if player and market:
-            for family in ("player_games", "player_history", "player_trends"):
-                if family in {"player_history", "player_trends"} and not official_market:
-                    continue
-                add(
-                    family,
-                    official,
-                    canonical,
-                    player_name=player,
-                    market=market,
-                    official_market=official_market or "",
-                )
         if event_id:
             for family in ("event_results", "event_stats", "event_markets"):
                 add(family, official, canonical, event_id=event_id, market=market)

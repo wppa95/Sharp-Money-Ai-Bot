@@ -19,7 +19,6 @@ from player_history_job import (
     _uses_propline_history,
     player_history_collector_job,
 )
-from providers.player_history import PropLineHistoryCoverage
 
 
 def test_fair_cycle_targets_round_robins_all_sports():
@@ -147,7 +146,7 @@ async def test_player_history_persists_completed_result_independently():
 
 
 @pytest.mark.asyncio
-async def test_propline_cursor_retries_target_after_timeout():
+async def test_history_collector_never_calls_scheduled_propline_history():
     snapshot = SimpleNamespace(
         player_name="CS Player",
         sport="CS",
@@ -162,7 +161,7 @@ async def test_propline_cursor_retries_target_after_timeout():
     primary_provider.fetch_results = AsyncMock(return_value=[])
     scheduled_provider = MagicMock()
     scheduled_provider.fetch_scheduled_results = AsyncMock(
-        side_effect=asyncio.TimeoutError
+        side_effect=AssertionError("singular PropLine history request")
     )
     bot_data = {
         "db": db,
@@ -176,7 +175,8 @@ async def test_propline_cursor_retries_target_after_timeout():
     ):
         await player_history_collector_job(context)
 
-    assert bot_data["_player_history_propline_cursor"] == 0
+    scheduled_provider.fetch_scheduled_results.assert_not_awaited()
+    assert "_player_history_propline_cursor" not in bot_data
 
 
 @pytest.mark.asyncio
@@ -208,7 +208,7 @@ async def test_player_history_collects_prizepicks_only_active_target():
 
 
 @pytest.mark.asyncio
-async def test_player_history_reports_scheduled_propline_coverage_by_sport(caplog):
+async def test_player_history_skips_scheduled_propline_coverage(caplog):
     snapshots = {
         ("NBA Player", "points"): SimpleNamespace(
             player_name="NBA Player", sport="NBA", stat_type="points"
@@ -227,25 +227,8 @@ async def test_player_history_reports_scheduled_propline_coverage_by_sport(caplo
     primary_provider.fetch_results = AsyncMock(return_value=[])
     scheduled_provider = MagicMock()
 
-    async def scheduled_results(primary, player, sport, stat, **kwargs):
-        return SimpleNamespace(
-            rows=[
-                SimpleNamespace(
-                    player_name=player,
-                    sport=sport,
-                    stat_type=stat,
-                    game_date="2026-08-29",
-                    actual_value=1.0,
-                    opponent=None,
-                    source="propline_history",
-                    game_id=f"{sport}-game",
-                )
-            ],
-            status="usable",
-        )
-
     scheduled_provider.fetch_scheduled_results = AsyncMock(
-        side_effect=scheduled_results
+        side_effect=AssertionError("singular PropLine history request")
     )
     context = SimpleNamespace(
         bot_data={
@@ -263,16 +246,12 @@ async def test_player_history_reports_scheduled_propline_coverage_by_sport(caplo
     ):
         await player_history_collector_job(context)
 
-    assert "propline_coverage_by_sport" in caplog.text
-    assert "'NBA': {'usable': 1}" in caplog.text
-    assert "'TENNIS': {'usable': 1}" in caplog.text
-    assert "'CS': {'usable': 1}" in caplog.text
     assert primary_provider.fetch_results.await_count == 3
-    assert scheduled_provider.fetch_scheduled_results.call_count == 3
+    scheduled_provider.fetch_scheduled_results.assert_not_awaited()
 
 
 @pytest.mark.asyncio
-async def test_propline_quota_batch_covers_each_non_mlb_market_each_cycle(caplog):
+async def test_player_history_collector_does_not_schedule_propline_quota_calls(caplog):
     targets = [
         ("NHL Player", "NHL", "goals"),
         ("Tennis Player", "TENNIS", "aces"),
@@ -294,33 +273,8 @@ async def test_propline_quota_batch_covers_each_non_mlb_market_each_cycle(caplog
     primary_provider = MagicMock()
     primary_provider.fetch_results = AsyncMock(return_value=[])
     scheduled_provider = MagicMock()
-    propline_calls = []
-
-    async def scheduled_results(primary, player, sport, stat, **kwargs):
-        allowed = bool(kwargs["allow_propline"])
-        propline_calls.append((player, sport, stat, allowed))
-        if not allowed:
-            return PropLineHistoryCoverage(
-                rows=tuple(primary),
-                status="not_needed",
-            )
-        row = SimpleNamespace(
-            player_name=player,
-            sport=sport,
-            stat_type=stat,
-            game_date="2026-08-29",
-            actual_value=1.0,
-            opponent=None,
-            source="propline_history",
-            game_id=f"{sport}-completed-game",
-        )
-        return PropLineHistoryCoverage(
-            rows=(row,),
-            status="usable",
-        )
-
     scheduled_provider.fetch_scheduled_results = AsyncMock(
-        side_effect=scheduled_results
+        side_effect=AssertionError("singular PropLine history request")
     )
     context = SimpleNamespace(
         bot_data={
@@ -339,33 +293,7 @@ async def test_propline_quota_batch_covers_each_non_mlb_market_each_cycle(caplog
         for _ in targets:
             await player_history_collector_job(context)
 
-    selected = {
-        (player, sport, stat)
-        for player, sport, stat, allowed in propline_calls
-        if allowed
-    }
-    assert selected == set(targets)
-    assert all(
-        sum(
-            1
-            for player, sport, stat, allowed in propline_calls
-            if allowed and (player, sport, stat) == target
-        )
-        == len(targets)
-        for target in targets
-    )
-    persisted = [
-        row
-        for call in db.upsert_player_results_bulk.await_args_list
-        for row in call.args[0]
-    ]
-    assert {
-        (row.sport, row.stat_type, row.source)
-        for row in persisted
-    } == {
-        (sport, stat, "propline_history")
-        for _player, sport, stat in targets
-    }
+    scheduled_provider.fetch_scheduled_results.assert_not_awaited()
     assert "propline_coverage_by_sport_market" in caplog.text
 
 

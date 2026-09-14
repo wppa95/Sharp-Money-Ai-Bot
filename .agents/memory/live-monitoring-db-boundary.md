@@ -15,11 +15,11 @@ History collection is a storage/enrichment worker, not a monitoring job. It must
 
 **How to apply:** Skip the collector when monitoring is active, bound its independent work window and provider calls, and preempt any active collector before live scan, Stable Refresh, or full-pool rescan activity begins.
 
-Live scan history snapshots must remain cache/DB-only even when the cache is empty. Remote primary-provider fetches and PropLine supplementation belong exclusively to the independent history collector; a scan miss yields an evidence-free result for that cycle.
+Live scan history snapshots must remain cache/DB-only even when the cache is empty. Remote primary-provider fetches belong exclusively to the independent history collector; authenticated PropLine player-history supplementation is disabled because its documented endpoints are one-player-at-a-time. A scan miss yields an evidence-free result for that cycle.
 
-**Why:** Per-player enrichment inside new-prop, line-change, re-entry, standing, Stable Refresh, full-pool, or PrizePicks paths lets a large scan consume history quota and makes monitoring latency depend on provider response time.
+**Why:** Per-player enrichment inside new-prop, line-change, re-entry, standing, Stable Refresh, full-pool, PrizePicks, or read-only rotation paths lets monitoring consume history quota and makes latency depend on provider response time.
 
-**How to apply:** Pass `ensure_real_results=False` to scan-time snapshots and `allow_remote=False` to scan-time hit-rate computation. Keep scheduled primary and PropLine history calls inside the collector's bounded batch.
+**How to apply:** Pass `ensure_real_results=False` to scan-time snapshots and `allow_remote=False` to scan-time hit-rate computation. Keep primary-provider collection and grading evidence batched/bulk-persisted; do not schedule any singular PropLine player-history family or per-opportunity settlement lookup.
 
 Production writes emitted by a live scan must be serialized outside the scan coroutine, drained during graceful shutdown, and discarded when an event loop is replaced.
 
