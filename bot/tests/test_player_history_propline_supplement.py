@@ -405,11 +405,22 @@ def test_documented_markets_have_propline_history_keys(stat, market, sport):
     [
         ("NBA", "turnovers", "player_turnovers"),
         ("NBA", "double double", "player_double_double"),
+        ("NBA", "blocks + steals", "player_blocks_steals"),
+        ("NBA", "three pointers made", "player_threes"),
+        ("MLB", "2+ hits", "player_hits_2plus"),
+        ("MLB", "2+ home runs", "player_home_runs_2plus"),
+        ("MLB", "earned runs allowed", "player_earned_runs"),
+        ("MLB", "pitching outs", "player_pitching_outs"),
         ("NHL", "saves", "goalie_saves"),
         ("NHL", "blocked shots", "player_blocked_shots"),
+        ("NHL", "first period scorer", "player_first_period_goal"),
         ("TENNIS", "double faults", "player_double_faults"),
+        ("TENNIS", "breakpoints won", "player_break_points_won"),
         ("TENNIS", "total games", "total_games"),
         ("UFC", "significant strikes", "player_significant_strikes"),
+        ("SOCCER", "shots", "player_shots"),
+        ("SOCCER", "shots on target", "player_shots_on_target"),
+        ("SOCCER", "goals + assists", "goal_or_assist"),
         ("SOCCER", "goal or assist", "goal_or_assist"),
     ],
 )
@@ -428,6 +439,17 @@ def test_propline_does_not_treat_unsupported_esports_props_as_graded(
         else None
     )
     assert official_player_market_for(stat, sport=sport) == expected
+
+
+def test_cs_three_map_props_are_not_routed_to_two_map_markets():
+    assert (
+        official_player_market_for("Kills on Maps 1+2+3", sport="CS")
+        is None
+    )
+    assert (
+        official_player_market_for("Headshots on Maps 1+2+3", sport="CS")
+        is None
+    )
 
 
 @pytest.mark.parametrize(

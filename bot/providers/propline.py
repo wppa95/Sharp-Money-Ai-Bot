@@ -70,6 +70,8 @@ _STAT_NORMALIZATION = {
     "assists": "assists",
     "3pm": "3-pointers made",
     "3-pointers made": "3-pointers made",
+    "three pointers made": "3-pointers made",
+    "three-pointers made": "3-pointers made",
     "threes": "3-pointers made",
     "blk": "blocks",
     "blocks": "blocks",
@@ -156,6 +158,14 @@ _STAT_NORMALIZATION = {
     "tie breakers played": "tiebreakers played",
     "shots on target": "shots on target",
     "shots attempted": "shots attempted",
+    "breakpoints won": "break points won",
+    "anytime goal scorer": "anytime goal scorer",
+    "first goal scorer": "first goal scorer",
+    "first period scorer": "first period scorer",
+    "2+ hits": "2+ hits",
+    "2+ home runs": "2+ home runs",
+    "2+ rbis": "2+ rbis",
+    "3+ rbis": "3+ rbis",
     "goals + assists": "points",
     "hits + runs + rbis": "hits+runs+rbis",
     "significant strikes": "significant strikes",
@@ -2073,13 +2083,25 @@ _OFFICIAL_MARKETS = (
     "player_points_assists",
     "player_rebounds_assists",
     "player_points_rebounds_assists",
+    "player_blocks_steals",
     "player_double_double",
     "player_triple_double",
     "player_hits",
     "player_home_runs",
+    "player_home_runs_2plus",
     "player_rbis",
+    "player_rbis_2plus",
+    "player_rbis_3plus",
     "player_hits_runs_rbis",
     "player_total_bases",
+    "player_stolen_bases",
+    "player_runs",
+    "player_singles",
+    "player_doubles",
+    "player_hits_2plus",
+    "player_earned_runs",
+    "player_hits_allowed",
+    "player_pitching_outs",
     "player_strikeouts",
     "player_walks",
     "player_rushing_yards",
@@ -2090,8 +2112,10 @@ _OFFICIAL_MARKETS = (
     "player_rush_rec_yards",
     "player_shots_on_goal",
     "player_shots_on_target",
+    "player_shots",
     "player_goals",
     "player_first_goal",
+    "player_first_period_goal",
     "player_goals_2plus",
     "player_points_1plus",
     "player_points_2plus",
@@ -2148,7 +2172,11 @@ _STAT_TO_OFFICIAL_MARKET = {
     "triple double": "player_triple_double",
     "triple-double": "player_triple_double",
     "3-pointers made": "player_threes",
+    "three pointers made": "player_threes",
+    "three-pointers made": "player_threes",
     "blocks": "player_blocks",
+    "blocks+steals": "player_blocks_steals",
+    "blocks + steals": "player_blocks_steals",
     "steals": "player_steals",
     "pts+reb": "player_points_rebounds",
     "points+rebounds": "player_points_rebounds",
@@ -2161,8 +2189,22 @@ _STAT_TO_OFFICIAL_MARKET = {
     "fantasy points": "player_fantasy_points",
     "hits": "player_hits",
     "home runs": "player_home_runs",
+    "2+ home runs": "player_home_runs_2plus",
     "rbis": "player_rbis",
+    "2+ rbis": "player_rbis_2plus",
+    "3+ rbis": "player_rbis_3plus",
     "total bases": "player_total_bases",
+    "2+ hits": "player_hits_2plus",
+    "earned runs": "player_earned_runs",
+    "earned runs allowed": "player_earned_runs",
+    "hits allowed": "player_hits_allowed",
+    "outs recorded": "player_pitching_outs",
+    "pitching outs": "player_pitching_outs",
+    "stolen bases": "player_stolen_bases",
+    "runs": "player_runs",
+    "runs scored": "player_runs",
+    "singles": "player_singles",
+    "doubles": "player_doubles",
     "strikeouts": "player_strikeouts",
     "walks": "player_walks",
     "walks allowed": "player_walks",
@@ -2174,10 +2216,12 @@ _STAT_TO_OFFICIAL_MARKET = {
     "passing tds": "player_passing_tds",
     "rush+rec yards": "player_rush_rec_yards",
     "shots on goal": "player_shots_on_goal",
+    "shots": "player_shots_on_goal",
     "shots on target": "player_shots_on_target",
     "aces": "player_aces",
     "double faults": "player_double_faults",
     "break points won": "player_break_points_won",
+    "breakpoints won": "player_break_points_won",
     "total games": "total_games",
     "total tiebreaks": "total_tiebreaks",
     "total tie breaks": "total_tiebreaks",
@@ -2190,6 +2234,8 @@ _STAT_TO_OFFICIAL_MARKET = {
     "fight time minutes": "fight_time_minutes",
     "goal or assist": "goal_or_assist",
     "anytime goal scorer": "anytime_goal_scorer",
+    "first goal scorer": "player_first_goal",
+    "first period scorer": "player_first_period_goal",
     "games won": "player_games_won",
     "sets won": "player_sets_won",
     "games played": "player_games_played",
@@ -2208,11 +2254,14 @@ _SPORT_STAT_TO_OFFICIAL_MARKET = {
     "NHL": {
         "points": "player_points_1plus",
         "saves": "goalie_saves",
+        "first goal scorer": "player_first_goal",
+        "first period scorer": "player_first_period_goal",
     },
     "TENNIS": {
         "aces": "player_aces",
         "double faults": "player_double_faults",
         "break points won": "player_break_points_won",
+        "breakpoints won": "player_break_points_won",
         "games won": "player_games_won",
         "total games": "total_games",
         "total tiebreaks": "total_tiebreaks",
@@ -2229,34 +2278,58 @@ _SPORT_STAT_TO_OFFICIAL_MARKET = {
     "SOCCER": {
         "goals": "anytime_goal_scorer",
         "goal or assist": "goal_or_assist",
+        "shots": "player_shots",
+        "shots on target": "player_shots_on_target",
+        "goals + assists": "goal_or_assist",
     },
     "EPL": {
         "goals": "anytime_goal_scorer",
         "goal or assist": "goal_or_assist",
+        "shots": "player_shots",
+        "shots on target": "player_shots_on_target",
+        "goals + assists": "goal_or_assist",
     },
     "LALIGA": {
         "goals": "anytime_goal_scorer",
         "goal or assist": "goal_or_assist",
+        "shots": "player_shots",
+        "shots on target": "player_shots_on_target",
+        "goals + assists": "goal_or_assist",
     },
     "SERIEA": {
         "goals": "anytime_goal_scorer",
         "goal or assist": "goal_or_assist",
+        "shots": "player_shots",
+        "shots on target": "player_shots_on_target",
+        "goals + assists": "goal_or_assist",
     },
     "BUNDESLIGA": {
         "goals": "anytime_goal_scorer",
         "goal or assist": "goal_or_assist",
+        "shots": "player_shots",
+        "shots on target": "player_shots_on_target",
+        "goals + assists": "goal_or_assist",
     },
     "LIGUE1": {
         "goals": "anytime_goal_scorer",
         "goal or assist": "goal_or_assist",
+        "shots": "player_shots",
+        "shots on target": "player_shots_on_target",
+        "goals + assists": "goal_or_assist",
     },
     "MLS": {
         "goals": "anytime_goal_scorer",
         "goal or assist": "goal_or_assist",
+        "shots": "player_shots",
+        "shots on target": "player_shots_on_target",
+        "goals + assists": "goal_or_assist",
     },
     "FIFA": {
         "goals": "anytime_goal_scorer",
         "goal or assist": "goal_or_assist",
+        "shots": "player_shots",
+        "shots on target": "player_shots_on_target",
+        "goals + assists": "goal_or_assist",
     },
 }
 _SPORTS_WITHOUT_GRADED_PLAYER_MARKETS = frozenset(
@@ -2277,10 +2350,27 @@ def official_player_market_for(
     unrelated response.
     """
     candidate = _clean(stat_type).lower()
+    raw_candidate = re.sub(r"\s+", " ", candidate)
     if candidate.startswith("player_") and candidate in _OFFICIAL_MARKETS:
         return candidate
     normalized = _normalize_stat(stat_type)
     sport_key = _normalize_sport(sport)
+    # Resolve sport-specific labels before generic normalization collapses
+    # them into a different sport's equivalent stat.
+    if sport_key in {
+        "SOCCER", "EPL", "LALIGA", "SERIEA", "BUNDESLIGA", "LIGUE1",
+        "MLS", "FIFA",
+    }:
+        if raw_candidate == "shots":
+            return "player_shots"
+        if raw_candidate == "shots on target":
+            return "player_shots_on_target"
+        if raw_candidate in {"goals + assists", "goals+assists"}:
+            return "goal_or_assist"
+    if sport_key == "CS" and "1+2+3" in raw_candidate:
+        # Documented CS2 player props cover maps 1-2 only. Never reinterpret
+        # a three-map label as the two-map market.
+        return None
     if sport_key in _SPORTS_WITHOUT_GRADED_PLAYER_MARKETS:
         # PropLine documents game-line coverage for these esports titles, but
         # graded player props only for CS2. Never route a Dota/LoL/Valorant
