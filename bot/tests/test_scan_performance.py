@@ -795,13 +795,13 @@ async def test_concurrent_file_backed_writers_stay_within_cadence(
 # ── 1. Poll interval ──────────────────────────────────────────────────────────
 
 
-def test_poll_interval_is_bounded_to_one_or_two_minutes():
-    """Underdog cadence must remain between one and two minutes."""
+def test_poll_interval_is_bounded_to_one_and_a_half_to_two_and_a_half_minutes():
+    """Underdog cadence must remain between one and two-and-a-half minutes."""
     src = _src("config.py")
-    assert "os.environ.get(\"UNDERDOG_POLL_INTERVAL\", \"120\")" in src
-    assert "max(" in src and "min(120" in src
+    assert "os.environ.get(\"UNDERDOG_POLL_INTERVAL\", \"150\")" in src
+    assert "max(" in src and "min(150" in src
     from config import Config
-    assert 60 <= Config().UNDERDOG_POLL_INTERVAL <= 120
+    assert 60 <= Config().UNDERDOG_POLL_INTERVAL <= 150
 
 
 def test_underdog_evaluation_budget_does_not_cap_the_feed():

@@ -3,7 +3,7 @@ name: Cadence runtime overlap
 description: Observed runtime behavior when the Underdog full scan exceeds its configured scheduler interval.
 ---
 
-The configured two-minute cadence is not a guarantee of two-minute scan completion. Stateful full-feed Underdog work and opportunity grading share one execution slot. Scheduler triggers are retained and queue behind their named or shared slot; they must not be coalesced, cancelled, skipped, or overlapped.
+The configured 150-second cadence is not a guarantee of 150-second scan completion. Stateful full-feed Underdog work and opportunity grading share one execution slot. Scheduler triggers are retained and queue behind their named or shared slot; they must not be coalesced, cancelled, skipped, or overlapped.
 
 **Why:** Coalesced monitor/history triggers lost required work. Queued non-overlapping execution preserves every trigger while the scan’s dynamic grading budget prevents one cycle from monopolizing the shared slot.
 
