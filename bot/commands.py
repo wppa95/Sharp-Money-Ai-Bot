@@ -4918,7 +4918,7 @@ async def cmd_funnel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             ),
             _db.get_funnel_summary(since_hours=since_h),
             _db.get_funnel_observation_summary(since_hours=since_h),
-        ])
+        ], timeout=_COMMAND_TIMEOUT_SECONDS * _AGGREGATE_REPORT_TIMEOUT_MULTIPLIER)
         scan_summary: dict = _scan_result if isinstance(_scan_result, dict) else {}
         observation_summary: dict = (
             _observation_result if isinstance(_observation_result, dict) else {}
