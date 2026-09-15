@@ -261,8 +261,7 @@ class UDBetDecision:
             return "N/A"
         pct  = self.avg_vs_line_pct
         sign = "+" if pct >= 0 else ""
-        low  = "  ⬇️ historical low" if self.at_historical_low else ""
-        return f"{sign}{pct:.1%}{low}"
+        return f"{sign}{pct:.1%}"
 
     def evidence_source_display(self) -> str:
         """Return the evidence basis in plain language for reports/alerts."""
@@ -712,9 +711,6 @@ def _build_reason(
         parts.append(
             f"Line is {abs(avg_vs_line_pct):.0%} {direction_word} historical average"
         )
-
-    if at_low:
-        parts.append("Line at historical low")
 
     # Tier descriptor
     tier_desc = {

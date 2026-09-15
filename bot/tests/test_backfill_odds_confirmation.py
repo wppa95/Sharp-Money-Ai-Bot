@@ -363,7 +363,7 @@ class TestFormatFunctionMarketConfirmationParam:
         result = format_underdog_change_alert(
             "LeBron James", "LAL", "NBA", "points", 24.5, 25.5
         )
-        assert "PLAYER PROP" in result and "PLAYER PROP LINE" in result
+        assert "PLAYER PROP" in result and "📊 <b>LINE</b>" in result
 
     def test_change_alert_no_confirmation_block_when_none(self):
         from alerts_multiplatform import format_underdog_change_alert

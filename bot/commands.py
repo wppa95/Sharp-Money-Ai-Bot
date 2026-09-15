@@ -2565,7 +2565,7 @@ async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             f"<b>#{rank} {plh.player_name}</b>",
             "🎯 <b>PLAYER PROP PICK</b>",
             f"Market: {plh.stat_type}",
-            f"🎯 Player Prop Line: <code>{source_v:.1f}</code>  {_ll(source_v)}",
+            f"🎯 Line: <code>{source_v:.1f}</code>  {_ll(source_v)}",
             f"{gt_str}{plh.sport}",
             f"Event: <code>{_html.escape(source_id) if source_id else 'unavailable'}</code>",
             "",
@@ -2661,7 +2661,7 @@ async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         # Only show when there are ≥2 distinct lines
         if len(alt) >= 2 and provider == "Underdog":
             entry_lines.append("")
-            entry_lines.append("📊 <b>Available Player Prop Lines:</b>")
+            entry_lines.append("📊 <b>Available Lines:</b>")
             alt_labeled = "  ".join(
                 f"{_ll(v).split(' ')[0]} <code>{v:.1f}</code>" for v in alt
             )

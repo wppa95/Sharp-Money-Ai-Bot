@@ -307,15 +307,14 @@ def test_value_analysis_matches_line_value_example_shape():
         market_confirmation={"avg_odds": -131},
     )
 
-    assert "AI ANALYSIS" in msg
-    assert "This line is set at" in msg
-    assert "PrizePicks" in msg
-    assert "good value" in msg
-    assert "Diff:" in msg
-    assert "L10 (Over):</b> 70%" in msg
-    assert "H2H (Over):</b> 70%" in msg
-    assert "SZN (Over):</b> 70%" in msg
-    assert "Game:" in msg
+    assert "AI ANALYSIS" not in msg
+    assert "This line is set at" not in msg
+    assert "good value" not in msg
+    assert "Diff:" not in msg
+    assert "HISTORY" in msg
+    assert "L10" in msg
+    assert "H2H" in msg
+    assert "Game starts:" in msg
 
 
     def test_change_alert_contains_pick_for_directional():

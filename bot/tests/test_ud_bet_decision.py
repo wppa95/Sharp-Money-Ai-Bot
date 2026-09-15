@@ -492,7 +492,8 @@ class TestDisplayHelpers:
 
     def test_avg_vs_line_display_historical_low(self):
         d = UDBetDecision.make_pass("test", avg_vs_line_pct=0.10, at_historical_low=True)
-        assert "low" in d.avg_vs_line_display().lower()
+        assert d.avg_vs_line_display() == "+10.0%"
+        assert "low" not in d.avg_vs_line_display().lower()
 
 
 # ── Reason strings ────────────────────────────────────────────────────────────

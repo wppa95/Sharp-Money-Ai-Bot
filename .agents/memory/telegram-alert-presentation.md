@@ -9,6 +9,12 @@ Prop alert formatting is a presentation boundary: preserve the underlying score,
 
 **How to apply:** Use a plain `Quality: N/100` line with the existing star mapping, normalize market labels, convert short season samples to sample labels, and remove history/internal tier clauses from reasons without changing scoring or delivery logic.
 
+Player-facing player-prop picks should omit AI/value-analysis narratives, show the line as a simple value rather than “Player Prop Line,” and never describe a line as being at a historical low.
+
+**Why:** The user requested simple, clean Telegram picks focused on the sport, player, line, pick, and history; comparison prose and internal market labels obscured the actionable content.
+
+**How to apply:** Keep the underlying comparison and historical-low fields for internal scoring/evidence, but do not render their analyst explanation or historical-low wording in sent pick messages.
+
 Underdog and PrizePicks/PropLine are one user-facing Player Props product, even
 though their ingestion, provider scope, persistence, and reconciliation remain
 independent internally.

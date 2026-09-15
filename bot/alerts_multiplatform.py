@@ -439,9 +439,9 @@ def _format_available_lines_block(
 
     available_count = sum(value is not None for _, _, value in display_lines)
     lines = [
-        "\n\n📊 <b>Available Player Prop Line</b>"
+        "\n\n📊 <b>Available Line</b>"
         if available_count == 1
-        else "\n\n📊 <b>Available Player Prop Lines</b>"
+        else "\n\n📊 <b>Available Lines</b>"
     ]
     for emoji, label, value in display_lines:
         spacing = "  "
@@ -1040,14 +1040,6 @@ def format_underdog_change_alert(
         pick_emoji = "🟢" if rec == "OVER" else "🔴"
         pick_line = f"📌 <b>PICK:</b>  {pick_emoji} <b>{rec} {new_line:.1f}</b>"
 
-    _pp_value_frame = source_upper == "UNDERDOG" and pp_line is not None
-    _analysis_line = pp_line if _pp_value_frame else new_line
-    _analysis_source = "PrizePicks" if _pp_value_frame else source
-    _analysis_comparison_line = new_line if _pp_value_frame else pp_line
-    _analysis_comparison_source = (
-        source if _pp_value_frame else ("PrizePicks" if pp_line is not None else None)
-    )
-
     if removed:
         body_lines = [
             _thick,
@@ -1155,7 +1147,7 @@ def format_market_move_detected(
         f"{sport_icon} <b>{sport} — {stat_type}</b>",
         f"👤 <b>{player_name}</b>",
         "",
-        f"🎯 <b>Player Prop Line:</b>  <code>{old_line:.1f}</code>  →  <code>{new_line:.1f}</code>",
+        f"🎯 <b>LINE:</b>  <code>{old_line:.1f}</code>  →  <code>{new_line:.1f}</code>",
         f"📉 <b>Movement:</b>  <code>{change_sign}{change:.1f}</code>",
         "",
         "📊 <b>Status:</b>  Tracking — evaluating for a directional pick",
@@ -1254,44 +1246,6 @@ def format_underdog_new_prop_alert(
                 f"📌 <b>PICK:</b>  "
                 f"{'🟢' if getattr(decision, 'recommendation', '') == 'OVER' else '🔴'} "
                 f"<b>{escape(str(getattr(decision, 'recommendation', '')))} {line_value:.1f}</b>"
-            ]
-            if getattr(decision, "recommendation", "") in ("OVER", "UNDER")
-            else []
-        ),
-        *(
-            [
-                _format_value_analysis_block(
-                    player_name=player_name,
-                    sport=sport,
-                    stat_type=stat_type,
-                    line=(
-                        pp_line
-                        if source.strip().upper() == "UNDERDOG" and pp_line is not None
-                        else line_value
-                    ),
-                    source=(
-                        "PrizePicks"
-                        if source.strip().upper() == "UNDERDOG" and pp_line is not None
-                        else source
-                    ),
-                    decision=decision,
-                    validation=validation,
-                    comparison_line=(
-                        line_value
-                        if source.strip().upper() == "UNDERDOG" and pp_line is not None
-                        else pp_line
-                    ),
-                    comparison_source=(
-                        source
-                        if source.strip().upper() == "UNDERDOG" and pp_line is not None
-                        else ("PrizePicks" if pp_line is not None else None)
-                    ),
-                    game_time=game_time,
-                    team=team,
-                    opponent=opponent,
-                    market_confirmation=market_confirmation,
-                    intelligence_trace=intelligence_trace,
-                )
             ]
             if getattr(decision, "recommendation", "") in ("OVER", "UNDER")
             else []
