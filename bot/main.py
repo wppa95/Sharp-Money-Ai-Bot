@@ -1038,6 +1038,11 @@ async def post_init(application: Application) -> None:
                 first=50,
                 name="season_checker",
             )
+        _odds_api_status = (
+            "enabled (16 calls/day, 60m minimum interval)"
+            if config.ODDS_API_ENABLED
+            else "disabled"
+        )
         logger.info(
             "Jobs scheduled — Underdog every %ds with PropLine feed; "
             "full-pool every %ds; "
@@ -1046,7 +1051,7 @@ async def post_init(application: Application) -> None:
             "season_check: %s, "
             "heartbeat: every 60s "
              "[Unified Player Props cycle enabled=%s; "
-             "PropLine player-prop feed active; Odds API disabled; bookmakers=%s]",
+             "PropLine player-prop feed active; Odds API %s; bookmakers=%s]",
             config.UNDERDOG_POLL_INTERVAL,
             config.UNDERDOG_POLL_INTERVAL,
             config.OPPORTUNITY_GRADER_INTERVAL,
@@ -1057,6 +1062,7 @@ async def post_init(application: Application) -> None:
                 else "disabled"
             ),
              _propline_enabled,
+             _odds_api_status,
              ",".join(getattr(config, "propline_bookmakers", [])),
         )
     else:

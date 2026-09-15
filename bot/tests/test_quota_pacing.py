@@ -44,7 +44,7 @@ def test_v4_defaults_are_hard_daily_policy(tmp_path):
     pacer = _make_pacer(tmp_path, clock)
 
     assert pacer.daily_limit == 16
-    assert pacer.min_interval_seconds == 45 * 60
+    assert pacer.min_interval_seconds == 60 * 60
     assert pacer.reserve_request_slot() is True
     assert pacer.daily_count == 1
 
@@ -55,7 +55,7 @@ def test_16_day_hard_cap_blocks_17th_request(tmp_path):
 
     for _ in range(16):
         assert pacer.reserve_request_slot() is True
-        clock.advance(minutes=45)
+        clock.advance(hours=1)
 
     assert pacer.reserve_request_slot() is False
     assert pacer.daily_count == 16
@@ -63,12 +63,12 @@ def test_16_day_hard_cap_blocks_17th_request(tmp_path):
     assert pacer.telemetry().status == "DAILY_LIMIT"
 
 
-def test_no_request_before_45_minutes(tmp_path):
+def test_no_request_before_one_hour(tmp_path):
     clock = FakeClock(datetime(2026, 9, 1, 15, tzinfo=timezone.utc))
     pacer = _make_pacer(tmp_path, clock)
 
     assert pacer.reserve_request_slot() is True
-    clock.advance(minutes=44, seconds=59)
+    clock.advance(minutes=59, seconds=59)
 
     assert pacer.can_request() is False
     assert pacer.reserve_request_slot() is False
@@ -76,12 +76,12 @@ def test_no_request_before_45_minutes(tmp_path):
 
 
 @pytest.mark.parametrize("extra_seconds", [0, 1, 60])
-def test_request_allowed_at_or_after_45_minutes(tmp_path, extra_seconds):
+def test_request_allowed_at_or_after_one_hour(tmp_path, extra_seconds):
     clock = FakeClock(datetime(2026, 9, 1, 15, tzinfo=timezone.utc))
     pacer = _make_pacer(tmp_path, clock)
 
     assert pacer.reserve_request_slot() is True
-    clock.advance(minutes=45, seconds=extra_seconds)
+    clock.advance(hours=1, seconds=extra_seconds)
 
     assert pacer.reserve_request_slot() is True
     assert pacer.daily_count == 2
@@ -111,7 +111,7 @@ def test_restart_does_not_reset_daily_count_or_cooldown(tmp_path):
     assert restarted.can_request() is False
     assert restarted.block_reason().startswith("minimum interval")
 
-    clock.advance(minutes=45)
+    clock.advance(hours=1)
     assert restarted.reserve_request_slot() is True
     assert restarted.daily_count == 2
 
@@ -124,7 +124,7 @@ def test_daily_limit_wins_even_when_interval_has_elapsed(tmp_path):
     clock = FakeClock(datetime(2026, 9, 1, 15, tzinfo=timezone.utc))
     pacer = _make_pacer(tmp_path, clock, daily_limit=1)
     assert pacer.reserve_request_slot() is True
-    clock.advance(minutes=45)
+    clock.advance(hours=1)
 
     assert pacer.reserve_request_slot() is False
     assert pacer.daily_count == 1
@@ -139,7 +139,7 @@ def test_diagnostics_include_required_pacing_fields(tmp_path):
     assert "Last request: never" in summary
     assert "Next eligible request: now" in summary
     assert "Daily limit: 16" in summary
-    assert "Minimum interval: 45m" in summary
+    assert "Minimum interval: 60m" in summary
 
 
 def test_provider_quota_exhaustion_remains_a_safe_block(tmp_path):

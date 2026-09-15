@@ -1,7 +1,7 @@
 """Strict, restart-safe pacing for legitimate OddsAPI polling.
 
 The OddsAPI plan is limited to 16 requests per local calendar day with at
-least 45 minutes between requests.  This module owns that policy centrally;
+least one hour between requests.  This module owns that policy centrally;
 it never creates requests by itself and never changes Underdog scheduling.
 """
 
@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 
 _DEFAULT_DEADLINE = datetime(2099, 1, 1, tzinfo=timezone.utc)
 _DEFAULT_DAILY_LIMIT = 16
-_DEFAULT_MIN_INTERVAL_SECONDS = 45 * 60
+_DEFAULT_MIN_INTERVAL_SECONDS = 60 * 60
 _DEFAULT_TIMEZONE = "America/Chicago"
 _DEFAULT_STATE_PATH = os.path.join(
     os.path.dirname(__file__), "..", "data", "odds_api_pacing.json"

@@ -51,10 +51,11 @@ class Config:
 
     # ── External APIs ─────────────────────────────────────────────────────────
     ODDS_API_KEY: str = os.environ.get("ODDS_API_KEY", "")
-    # Odds API is intentionally disabled while PropLine owns all player-prop
-    # ingestion. Keep the environment name for compatibility and easy future
-    # re-enablement, but the safe default is off.
-    ODDS_API_ENABLED: bool = False
+    # Odds API is an optional supplemental source. PropLine remains the primary
+    # player-prop feed; strict quota pacing below limits Odds API usage.
+    ODDS_API_ENABLED: bool = os.environ.get("ODDS_API_ENABLED", "false").lower() not in (
+        "false", "0", "no", "off"
+    )
     # Legacy OddsAPI scope, retained for compatibility while the provider is
     # disabled. ACTIVE_SPORTS may contain provider-only identifiers.
     ODDS_API_SPORTS_RAW: str = os.environ.get(
@@ -66,7 +67,7 @@ class Config:
     ODDS_API_QUOTA_LIMIT: int = int(os.environ.get("ODDS_API_QUOTA_LIMIT", "500"))
     ODDS_API_DAILY_LIMIT: int = int(os.environ.get("ODDS_API_DAILY_LIMIT", "16"))
     ODDS_API_MIN_REQUEST_INTERVAL: float = float(
-        os.environ.get("ODDS_API_MIN_REQUEST_INTERVAL", str(45 * 60))
+        os.environ.get("ODDS_API_MIN_REQUEST_INTERVAL", str(60 * 60))
     )
     ODDS_API_PACING_TIMEZONE: str = os.environ.get(
         "ODDS_API_PACING_TIMEZONE", "America/Chicago"
