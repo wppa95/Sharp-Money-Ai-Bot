@@ -50,7 +50,8 @@ def test_v4_defaults_are_hard_daily_policy(tmp_path):
 
 
 def test_16_day_hard_cap_blocks_17th_request(tmp_path):
-    clock = FakeClock(datetime(2026, 9, 1, 15, tzinfo=timezone.utc))
+    # Keep all 16 hourly requests inside one America/Chicago calendar day.
+    clock = FakeClock(datetime(2026, 9, 1, 6, tzinfo=timezone.utc))
     pacer = _make_pacer(tmp_path, clock)
 
     for _ in range(16):
