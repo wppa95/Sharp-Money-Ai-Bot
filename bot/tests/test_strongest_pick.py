@@ -183,3 +183,52 @@ def test_restricted_sports_keep_strong_under_at_the_lowest_line():
     assert select_strongest_actionable_picks([high_under, low_under]) == [
         low_under
     ]
+
+
+def _decision_with_windows(direction: str, rates: list[float]):
+    """Build the serialized decision shape used by the live selector."""
+    windows = {}
+    for prefix, rate in zip(("l5", "l10", "l15", "l20", "l30", "season"), rates):
+        games = 10
+        over = round(games * rate)
+        windows.update({
+            f"{prefix}_games": games,
+            f"{prefix}_over": over,
+            f"{prefix}_under": games - over,
+        })
+    return SimpleNamespace(recommendation=direction, confidence=85, **windows)
+
+
+def test_strong_mode_excludes_mediocre_directional_history():
+    weak = _candidate("Underdog", "Jo Adell", "Hits", confidence=80, line=0.5)
+    weak["sport"] = "MLB"
+    weak["decision"] = _decision_with_windows(
+        "OVER", [0.8, 0.7, 0.7, 0.6, 0.6, 0.6]
+    )
+
+    assert select_strongest_actionable_picks(
+        [weak],
+        require_strong=True,
+    ) == []
+
+
+def test_strong_mode_keeps_consistent_history_and_ranks_it_first():
+    strong = _candidate("Underdog", "Sal Stewart", "Hits", confidence=85, line=0.5)
+    strong["sport"] = "MLB"
+    strong["decision"] = _decision_with_windows(
+        "OVER", [0.8, 0.7, 0.8, 0.8, 0.8, 0.8]
+    )
+    weaker_strong = _candidate(
+        "Underdog", "William Contreras", "Hits", confidence=75, line=0.5
+    )
+    weaker_strong["sport"] = "MLB"
+    weaker_strong["decision"] = _decision_with_windows(
+        "OVER", [0.7, 0.7, 0.7, 0.7, 0.7, 0.7]
+    )
+
+    selected = select_strongest_actionable_picks(
+        [weaker_strong, strong],
+        require_strong=True,
+    )
+
+    assert selected == [strong, weaker_strong]

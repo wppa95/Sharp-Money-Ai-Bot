@@ -36,6 +36,10 @@ from alerts import (
 from config import config
 from database import Database
 from engine import AnalysisEngine
+from engine.strongest_pick import (
+    is_strong_actionable_pick,
+    select_strongest_actionable_picks,
+)
 from engine.ud_bet_decision import evidence_source_label
 from models import MarketType, Sport
 
@@ -2229,7 +2233,7 @@ async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         ud_props,
         [],
         _rec_map,
-        limit,
+        _provider_overfetch,
     )
     _direction_seconds = time.monotonic() - _direction_started
 
@@ -2324,6 +2328,79 @@ async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     )
     _hit_rates = [(None, None) if isinstance(r, Exception) else r for r in _hr_raw]
     logger.info("cmd_picks: hit-rate gather complete")
+
+    # Apply the same strongest-pick eligibility and one-per-player selection
+    # used by alert delivery.  Direction alone is not enough for this surface:
+    # complete history must support the same side across every available
+    # decision window, which removes mediocre 40–60% rows from /picks.
+    _strong_candidates: list[dict] = []
+    for _idx, ((plh, comp), (_hr, _opp)) in enumerate(zip(picks, _hit_rates)):
+        _effective_rec = str(
+            getattr(plh, "bet_recommendation", None) or ""
+        ).upper()
+        _live_rec, _live_conf = _rec_map.get(
+            _ud_recommendation_identity(plh), (None, None)
+        )
+        if (
+            (getattr(plh, "provider", None) or "Underdog") == "Underdog"
+            and not _is_canonical_alert_prop(plh)
+            and _live_rec is not None
+        ):
+            _effective_rec = str(_live_rec).upper()
+        _strong_candidates.append({
+            "provider": getattr(plh, "provider", None) or "Underdog",
+            "player": getattr(plh, "player_name", ""),
+            "sport": getattr(plh, "sport", ""),
+            "stat_type": getattr(plh, "stat_type", ""),
+            "direction": _effective_rec,
+            "confidence": (
+                _live_conf
+                if _live_conf is not None
+                else getattr(plh, "bet_confidence", None)
+            ),
+            "hit_rates": _hr,
+            "evidence_available": bool(
+                _hr is not None and getattr(_hr, "has_real_data", False)
+            ),
+            "_pick_index": _idx,
+        })
+
+    _strong_candidates = [
+        _candidate
+        for _candidate in _strong_candidates
+        if is_strong_actionable_pick(_candidate)
+    ]
+    _strong_eligible_count = len(_strong_candidates)
+    _strong_candidates = select_strongest_actionable_picks(
+        _strong_candidates,
+        require_strong=True,
+    )[:limit]
+    _selected_indices = {
+        int(_candidate["_pick_index"]) for _candidate in _strong_candidates
+    }
+    picks = [
+        _item for _idx, _item in enumerate(picks) if _idx in _selected_indices
+    ]
+    _hit_rates = [
+        _rate for _idx, _rate in enumerate(_hit_rates)
+        if _idx in _selected_indices
+    ]
+    logger.info(
+        "cmd_picks: strongest filter kept %d/%d rows",
+        len(picks),
+        _strong_eligible_count,
+    )
+
+    if not picks:
+        hint = f" for {sport_filter}" if sport_filter else ""
+        await update.message.reply_text(
+            f"🎯 <b>Actionable Player Prop Picks</b>\n\n"
+            f"No strong player props available right now{hint}.\n\n"
+            f"<i>Rows are shown only when the complete directional history "
+            f"supports the same OVER or UNDER side.</i>",
+            parse_mode=ParseMode.HTML,
+        )
+        return
 
     # ── 4b. Fetch alternate lines concurrently ────────────────────────────────
     from engine.player_prop_market import _line_label as _ll

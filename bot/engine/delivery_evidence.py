@@ -130,6 +130,63 @@ def has_strict_directional_history(value: Any) -> bool:
     return True
 
 
+def has_strong_directional_history(
+    value: Any,
+    direction: Any = None,
+) -> bool:
+    """Return whether *value* contains complete, directionally strong history.
+
+    ``UDBetDecision`` stores window fields as ``l5_games``/``l5_over`` while
+    ``PlayerHitRates`` stores ``WindowStats`` objects under ``l5``.  The
+    selection layer needs to apply the same rule to both shapes, so normalize
+    them here instead of maintaining two subtly different quality gates.
+    """
+    if value is None:
+        return False
+
+    recommendation = str(
+        direction
+        or (
+            value.get("recommendation") or value.get("rec")
+            if isinstance(value, dict)
+            else getattr(value, "recommendation", "")
+        )
+        or ""
+    ).upper()
+    if recommendation not in {"OVER", "UNDER"}:
+        return False
+
+    payload: dict[str, Any] = {"recommendation": recommendation}
+    for prefix in _DIRECTIONAL_HISTORY_WINDOWS:
+        if isinstance(value, dict):
+            window = value.get(prefix)
+            if isinstance(window, dict):
+                games = window.get("games", window.get("g"))
+                over_count = window.get("over", window.get("o"))
+                under_count = window.get("under", window.get("u"))
+            else:
+                games = value.get(f"{prefix}_games")
+                over_count = value.get(f"{prefix}_over")
+                under_count = value.get(f"{prefix}_under")
+        else:
+            window = getattr(value, prefix, None)
+            if window is not None and not isinstance(window, (str, bytes)):
+                games = getattr(window, "games", None)
+                over_count = getattr(window, "over_count", None)
+                under_count = getattr(window, "under_count", None)
+            else:
+                games = getattr(value, f"{prefix}_games", None)
+                over_count = getattr(value, f"{prefix}_over", None)
+                under_count = getattr(value, f"{prefix}_under", None)
+
+        if over_count is None and isinstance(games, (int, float)):
+            if isinstance(under_count, (int, float)):
+                over_count = games - under_count
+        payload[prefix] = {"g": games, "o": over_count}
+
+    return has_strict_directional_history(payload)
+
+
 def has_directional_history_fields(value: Any) -> bool:
     """Return whether *value* carries the six-window decision shape."""
     if value is None or getattr(type(value), "__module__", "") == "unittest.mock":

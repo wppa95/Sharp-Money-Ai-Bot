@@ -54,7 +54,9 @@ from engine.player_prop_market import (
     normalize_stat as _normalize_prop_stat,
 )
 from engine.score_validation import clamp_score
-from engine.strongest_pick import select_strongest_actionable_picks
+from engine.strongest_pick import (
+    select_strongest_actionable_picks,
+)
 from engine.delivery_evidence import (
     has_strict_directional_history,
     is_history_optional_sport,
@@ -3227,7 +3229,7 @@ async def _run_prizepicks_independent_cycle(
         return
 
     actionable = _select_strong_directional_picks(
-        select_strongest_actionable_picks(actionable)
+        select_strongest_actionable_picks(actionable, require_strong=True)
     )
     delivered = 0
     delivery = AlertDelivery(db, bot, chat_ids)
@@ -6637,7 +6639,10 @@ async def underdog_job(context) -> None:
         # first access; no candidate is hard-rejected — lower-priority ones are deferred
         # and remain available in /picks and the DB.
         if _delivery_queue and chat_ids:
-            _delivery_queue[:] = select_strongest_actionable_picks(_delivery_queue)
+            _delivery_queue[:] = select_strongest_actionable_picks(
+                _delivery_queue,
+                require_strong=True,
+            )
             _apply_delivery_diversification(_delivery_queue)
             _delivery_queue[:] = _select_strong_directional_picks(_delivery_queue)
             _n_dq_deferred   = 0
@@ -9016,7 +9021,8 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
         # evaluated.  This prevents a stronger later-processed prop from
         # losing to an earlier weaker prop for the same provider/player.
         _fpr_selected = select_strongest_actionable_picks(
-            _fpr_delivery_candidates
+            _fpr_delivery_candidates,
+            require_strong=True,
         )
         _fpr_selected = _select_strong_directional_picks(_fpr_selected)
         _fpr_selected_ids = {id(candidate) for candidate in _fpr_selected}

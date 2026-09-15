@@ -10,6 +10,10 @@ from collections import defaultdict
 from typing import Iterable
 
 from engine.ud_scoring import _HIGH_FLOOR_STATS
+from engine.delivery_evidence import (
+    has_strong_directional_history,
+    is_history_optional_sport,
+)
 
 
 _PRIMARY_PROVIDERS = {"prizepicks", "underdog"}
@@ -130,6 +134,32 @@ def _validation_evidence(candidate: dict) -> tuple[int, float]:
     return int(has_evidence), sample_count
 
 
+def is_strong_actionable_pick(
+    candidate: dict,
+    *,
+    require_strong: bool = True,
+) -> bool:
+    """Return whether a candidate meets the shared strongest-pick contract.
+
+    Strict-history sports need complete directional history.  Esports, tennis,
+    and soccer retain their existing direction-plus-provider-evidence path, but
+    must still have a strong directional confidence signal when one is present.
+    """
+    direction = _direction(candidate)
+    if direction not in {"OVER", "UNDER"}:
+        return False
+    if not require_strong:
+        return True
+
+    sport = _sport(candidate)
+    history = candidate.get("hit_rates") or candidate.get("decision")
+    if is_history_optional_sport(sport):
+        evidence, _sample_count = _validation_evidence(candidate)
+        strength = _directional_strength(candidate)
+        return bool(evidence) and strength is not None and strength >= 75.0
+    return has_strong_directional_history(history, direction)
+
+
 def _ranking_key(candidate: dict) -> tuple[float, ...]:
     """Evidence-only ordering for already-qualified candidates."""
     evidence, sample_count = _validation_evidence(candidate)
@@ -176,6 +206,8 @@ def _tie_key(candidate: dict) -> tuple[str, str, float, str, str]:
 
 def select_strongest_actionable_picks(
     candidates: Iterable[dict],
+    *,
+    require_strong: bool = False,
 ) -> list[dict]:
     """Keep one strongest qualified opportunity per player/provider.
 
@@ -195,6 +227,14 @@ def select_strongest_actionable_picks(
 
     selected: list[dict] = []
     for group in groups.values():
+        if require_strong:
+            group = [
+                candidate
+                for candidate in group
+                if is_strong_actionable_pick(candidate, require_strong=True)
+            ]
+            if not group:
+                continue
         # NFL, NBA, and MLB delivery are intentionally narrower than the
         # general selector: only strong directional high-floor ("green
         # goblin") markets are eligible, and the lowest available line wins
@@ -229,13 +269,27 @@ def select_strongest_actionable_picks(
         )
         selected.append(winner)
 
-    # Selection must not depend on provider/dictionary/input order.  This also
-    # makes diagnostics and direct callers deterministic.
-    selected.sort(
-        key=lambda candidate: (
-            _provider(candidate),
-            _player(candidate),
-            _tie_key(candidate),
+    # The product path needs strongest-first ordering so the alert rate limit
+    # and /picks cap preserve the best candidates.  Keep the historical
+    # identity ordering for compatibility callers that use this helper only as
+    # a per-player deduplicator.
+    if require_strong:
+        selected.sort(
+            key=lambda candidate: (
+                -(_directional_strength(candidate) or 0.0),
+                -_validation_evidence(candidate)[1],
+                -float(bool(candidate.get("is_meaningful_change"))),
+                _provider(candidate),
+                _player(candidate),
+                _tie_key(candidate),
+            )
         )
-    )
+    else:
+        selected.sort(
+            key=lambda candidate: (
+                _provider(candidate),
+                _player(candidate),
+                _tie_key(candidate),
+            )
+        )
     return selected
