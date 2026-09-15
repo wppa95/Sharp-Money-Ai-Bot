@@ -73,13 +73,32 @@ def _direction(candidate: dict) -> str:
     ).strip().upper()
 
 
+def _directional_strength(candidate: dict) -> float | None:
+    decision = candidate.get("decision")
+    raw_confidence = (
+        candidate.get("confidence")
+        if candidate.get("confidence") is not None
+        else getattr(decision, "confidence", None)
+    )
+    try:
+        confidence = float(raw_confidence)
+    except (TypeError, ValueError):
+        return None
+    direction = _direction(candidate)
+    return confidence if direction == "OVER" else 100.0 - confidence
+
+
 def _is_low_line_green_goblin(candidate: dict) -> bool:
-    """Return whether an NFL/NBA/MLB candidate is a directional goblin pick."""
+    """Return whether an NFL/NBA/MLB candidate is a strong goblin pick."""
+    direction = _direction(candidate)
+    strength = _directional_strength(candidate)
     return (
         _sport(candidate) in _LOW_LINE_GREEN_GOBLIN_SPORTS
         and _stat(candidate).casefold()
         in _GREEN_GOBLIN_STAT_KEYS
-        and _direction(candidate) in {"OVER", "UNDER"}
+        and direction in {"OVER", "UNDER"}
+        and strength is not None
+        and strength >= 75.0
     )
 
 
@@ -177,9 +196,9 @@ def select_strongest_actionable_picks(
     selected: list[dict] = []
     for group in groups.values():
         # NFL, NBA, and MLB delivery are intentionally narrower than the
-        # general selector: only directional high-floor ("green goblin")
-        # markets are eligible, and the lowest available line wins before
-        # evidence tie-breakers.
+        # general selector: only strong directional high-floor ("green
+        # goblin") markets are eligible, and the lowest available line wins
+        # before evidence tie-breakers.
         low_line_group = [
             candidate for candidate in group
             if _sport(candidate) in _LOW_LINE_GREEN_GOBLIN_SPORTS
