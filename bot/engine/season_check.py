@@ -32,10 +32,13 @@ Typical usage
 from __future__ import annotations
 
 import logging
+import time
 from datetime import datetime, timedelta
 from typing import Optional
 
 import aiohttp
+
+from providers.quota_pacing import get_quota_pacer
 
 logger = logging.getLogger(__name__)
 
@@ -111,14 +114,31 @@ class SeasonChecker:
             logger.debug("SeasonChecker: no API key configured — skipping refresh")
             return False
 
+        # This legacy checker is no longer constructed by the bot because
+        # season metadata is outside the settlement/evidence-only scope.  Keep
+        # direct callers safe nevertheless: if the shared pacer exists, every
+        # actual request must be admitted by it.
+        pacer = get_quota_pacer()
+        if pacer is not None and not pacer.reserve_request_slot():
+            logger.info(
+                "SeasonChecker: refresh blocked by strict pacing — %s",
+                pacer.block_reason(),
+            )
+            return False
+
         url = f"{_ODDS_API_BASE}/sports"
         params = {"apiKey": self._api_key}
+        started_at = time.monotonic()
+        if pacer is not None:
+            pacer.record_request_started()
 
         try:
             timeout = aiohttp.ClientTimeout(total=15)
             async with aiohttp.ClientSession(timeout=timeout) as session:
                 async with session.get(url, params=params) as resp:
                     if resp.status != 200:
+                        if pacer is not None:
+                            pacer.record_request_failed(started_at, status=resp.status)
                         logger.warning(
                             "SeasonChecker: /v4/sports returned HTTP %d — keeping previous cache",
                             resp.status,
@@ -126,15 +146,22 @@ class SeasonChecker:
                         return False
                     data: list[dict] = await resp.json()
         except aiohttp.ClientError as exc:
+            if pacer is not None:
+                pacer.record_request_failed(started_at)
             logger.warning(
                 "SeasonChecker: network error fetching /v4/sports — keeping previous cache: %s", exc
             )
             return False
         except Exception as exc:  # noqa: BLE001
+            if pacer is not None:
+                pacer.record_request_failed(started_at)
             logger.warning(
                 "SeasonChecker: unexpected error fetching /v4/sports — keeping previous cache: %s", exc
             )
             return False
+
+        if pacer is not None:
+            pacer.record_request_finished(started_at)
 
         active_keys   = frozenset(entry["key"] for entry in data if entry.get("active", False))
         all_known_keys = frozenset(entry["key"] for entry in data)

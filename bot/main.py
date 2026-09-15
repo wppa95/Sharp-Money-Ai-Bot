@@ -106,7 +106,6 @@ from player_history_job import (
     propline_read_only_rotation_job,
 )
 from providers import init_health_monitor
-from providers.odds_cache import init_odds_cache
 from providers.game_results import OddsApiResultsProvider
 from providers.usage_tracker import init_usage_tracker, get_usage_tracker
 from providers.quota_pacing import init_quota_pacer, get_quota_pacer
@@ -748,18 +747,31 @@ async def post_init(application: Application) -> None:
 
     _engine = AnalysisEngine()
 
-    # ── Season / market-status checker ────────────────────────────────────────
-    # This checker is an Odds API client, so it must not even be constructed
-    # while the provider is disabled.
-    _season_checker = None
+    # ── Odds API pacing (settlement/evidence only) ────────────────────────────
+    # Initialise the shared pacer before any retained Odds API client can be
+    # used.  Odds API is deliberately not a live market, season, or player-prop
+    # feed in production; PropLine/Underdog own those paths.
     if config.ODDS_API_ENABLED:
-        _season_checker = SeasonChecker(
-            api_key=config.ODDS_API_KEY,
-            ttl_seconds=config.SEASON_CHECK_INTERVAL,
+        init_quota_pacer(
+            quota_limit=config.ODDS_API_QUOTA_LIMIT,
+            daily_limit=config.ODDS_API_DAILY_LIMIT,
+            min_interval_seconds=config.ODDS_API_MIN_REQUEST_INTERVAL,
+            timezone_name=config.ODDS_API_PACING_TIMEZONE,
+            state_path=config.ODDS_API_PACING_STATE_FILE,
         )
-        # Eager first load — non-fatal; checker stays fail-open on error.
-        if config.SEASON_CHECK_INTERVAL > 0:
-            await _season_checker.refresh()
+        logger.info(
+            "Odds API settlement/evidence pacing enabled "
+            "(daily limit=%d, minimum interval=%ds)",
+            config.ODDS_API_DAILY_LIMIT,
+            config.ODDS_API_MIN_REQUEST_INTERVAL,
+        )
+    else:
+        logger.info("Odds API disabled; using PropLine for all player-prop feeds")
+
+    # The season checker used /v4/sports and therefore consumed the same
+    # scarce quota as settlement evidence.  It is intentionally disabled:
+    # season metadata is not part of the retained Odds API scope.
+    _season_checker = None
 
     # ── Provider health monitor + PropLine feed ─────────────────────────────
     _health_monitor = init_health_monitor()
@@ -791,19 +803,6 @@ async def post_init(application: Application) -> None:
             logger.warning("Discord command interface failed to start (non-fatal): %s", exc)
     else:
         logger.info("Discord delivery not configured (required variables absent)")
-
-    if config.ODDS_API_ENABLED:
-        init_odds_cache(ttl_seconds=config.ODDS_API_CACHE_TTL)
-        init_quota_pacer(
-            quota_limit=config.ODDS_API_QUOTA_LIMIT,
-            daily_limit=config.ODDS_API_DAILY_LIMIT,
-            min_interval_seconds=config.ODDS_API_MIN_REQUEST_INTERVAL,
-            timezone_name=config.ODDS_API_PACING_TIMEZONE,
-            state_path=config.ODDS_API_PACING_STATE_FILE,
-        )
-        logger.info("Odds API compatibility services enabled")
-    else:
-        logger.info("Odds API disabled; using PropLine for all player-prop feeds")
 
     # ── API usage tracker + budget enforcement ────────────────────────────────
     _usage_tracker = init_usage_tracker(
@@ -852,12 +851,10 @@ async def post_init(application: Application) -> None:
     ))
 
     init_market_engine(registry)
-    # Do not expose the sportsbook engine to confirmation when Odds API is
-    # disabled. PropLine confirmation still uses the database/provider path.
-    init_odds_confirmation(
-        _engine if config.ODDS_API_ENABLED else None,
-        _db,
-    )
+    # Keep PropLine/database corroboration available, but do not expose the
+    # AnalysisEngine's Odds API market-fetch methods to the alert path.
+    # Odds API is reserved for explicitly requested settlement/evidence calls.
+    init_odds_confirmation(None, _db)
 
     # Store db reference in bot_data for market engine jobs
     application.bot_data["db"] = _db
@@ -1030,7 +1027,9 @@ async def post_init(application: Application) -> None:
         )
         # Heartbeat — every 60 s (keeps HealthTracker alive timestamp current)
         jq.run_repeating(_coordinated_job("heartbeat", _heartbeat_job), interval=60, first=30, name="heartbeat")
-        # Season / market-status refresh (requires the Odds API provider).
+        # Keep the legacy callback registered as a health-visible no-op.  The
+        # season checker itself is disabled because season metadata is outside
+        # the settlement/evidence-only Odds API scope.
         if config.ODDS_API_ENABLED and config.SEASON_CHECK_INTERVAL > 0:
             jq.run_repeating(
                 _coordinated_job("season_checker", _season_check_job),
@@ -1039,7 +1038,7 @@ async def post_init(application: Application) -> None:
                 name="season_checker",
             )
         _odds_api_status = (
-            "enabled (16 calls/day, 60m minimum interval)"
+            "settlement/evidence only (16 calls/day, 60m minimum interval)"
             if config.ODDS_API_ENABLED
             else "disabled"
         )
@@ -1057,7 +1056,7 @@ async def post_init(application: Application) -> None:
             config.OPPORTUNITY_GRADER_INTERVAL,
             config.PLAYER_HISTORY_POLL_INTERVAL,
             (
-                f"every {config.SEASON_CHECK_INTERVAL}s"
+                "disabled (settlement-only)"
                 if config.ODDS_API_ENABLED and config.SEASON_CHECK_INTERVAL > 0
                 else "disabled"
             ),

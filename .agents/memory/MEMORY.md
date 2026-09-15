@@ -83,7 +83,8 @@
 - [OddsAPI error pacing](oddsapi-error-pacing.md) — permanent 422 INVALID_MARKET responses must not back off valid shared polling.
 - [OddsAPI strict pacing](oddsapi-strict-pacing.md) — all real cache misses share a persisted local-day cap and minimum request interval.
 - [FPR scheduler starvation](fpr-scheduler-starvation.md) — when Underdog scans exceed the FPR interval, serialized deferrals can prevent live FPR execution without a post-scan handoff.
-- [Provider confirmation boundary](provider-confirmation-boundary.md) — confirmations are read-only corroboration: reuse existing OddsAPI rows/cache, never add polling, scoring, or delivery paths.
+ - [Provider confirmation boundary](provider-confirmation-boundary.md) — confirmations are read-only corroboration: reuse existing OddsAPI rows/cache, never add polling, scoring, or delivery paths.
+ - [Odds API settlement-only scope](odds-api-settlement-only.md) — retain Odds API for explicitly paced settlement/evidence requests; PropLine/Underdog own live markets and player-prop ingestion.
 - [PropLine endpoint safety](propline-endpoint.md) — require an explicit authorized API URL; never send the credential to a guessed host.
 - [Provider history adapter contract](provider-history-adapter.md) — provider-specific history adapters must preserve scorer-required lifecycle fields such as removed.
 - [PropLine cycle pacing](propline-cycle-pacing.md) — primary PrizePicks monitoring fetches one configured sport per shared cycle; do not use the all-sports fetch in production.
