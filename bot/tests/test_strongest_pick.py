@@ -101,8 +101,8 @@ def test_propline_is_not_a_standalone_actionable_provider():
     assert select_strongest_actionable_picks([supplemental]) == []
 
 
-@pytest.mark.parametrize("sport", ["NFL", "MLB"])
-def test_nfl_and_mlb_keep_only_green_goblin_and_lowest_available_line(sport):
+@pytest.mark.parametrize("sport", ["NFL", "NBA", "MLB"])
+def test_nfl_nba_and_mlb_keep_only_directional_goblin_lowest_line(sport):
     high_line = _candidate(
         "Underdog",
         "Jordan Lee",
@@ -124,9 +124,29 @@ def test_nfl_and_mlb_keep_only_green_goblin_and_lowest_available_line(sport):
         line=1.5,
         evidence_count=50,
     )
+    directionless = _candidate(
+        "Underdog",
+        "Jordan Lee",
+        "Passing Yards",
+        line=10.5,
+        evidence_count=50,
+    )
+    directionless["decision"].recommendation = ""
     for candidate in (high_line, low_line, volatile):
         candidate["sport"] = sport
+    directionless["sport"] = sport
 
-    selected = select_strongest_actionable_picks([high_line, volatile, low_line])
+    selected = select_strongest_actionable_picks(
+        [high_line, volatile, directionless, low_line]
+    )
 
     assert selected == [low_line]
+
+
+@pytest.mark.parametrize("sport", ["NFL", "NBA", "MLB"])
+def test_nfl_nba_and_mlb_reject_non_directional_goblin_candidates(sport):
+    candidate = _candidate("Underdog", "Jordan Lee", "Passing Yards", line=1.5)
+    candidate["sport"] = sport
+    candidate["decision"].recommendation = ""
+
+    assert select_strongest_actionable_picks([candidate]) == []

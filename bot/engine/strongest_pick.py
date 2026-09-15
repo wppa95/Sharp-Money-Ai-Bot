@@ -13,7 +13,7 @@ from engine.ud_scoring import _HIGH_FLOOR_STATS
 
 
 _PRIMARY_PROVIDERS = {"prizepicks", "underdog"}
-_LOW_LINE_GREEN_GOBLIN_SPORTS = {"NFL", "MLB"}
+_LOW_LINE_GREEN_GOBLIN_SPORTS = {"NFL", "NBA", "MLB"}
 _GREEN_GOBLIN_STAT_KEYS = frozenset(
     stat.casefold() for stat in _HIGH_FLOOR_STATS
 )
@@ -64,12 +64,22 @@ def _line(candidate: dict) -> float:
     return _number(value)
 
 
+def _direction(candidate: dict) -> str:
+    decision = candidate.get("decision")
+    return str(
+        getattr(decision, "recommendation", None)
+        or candidate.get("direction")
+        or ""
+    ).strip().upper()
+
+
 def _is_low_line_green_goblin(candidate: dict) -> bool:
-    """Return whether an NFL/MLB candidate uses a high-floor market."""
+    """Return whether an NFL/NBA/MLB candidate is a directional goblin pick."""
     return (
         _sport(candidate) in _LOW_LINE_GREEN_GOBLIN_SPORTS
         and _stat(candidate).casefold()
         in _GREEN_GOBLIN_STAT_KEYS
+        and _direction(candidate) in {"OVER", "UNDER"}
     )
 
 
@@ -166,9 +176,10 @@ def select_strongest_actionable_picks(
 
     selected: list[dict] = []
     for group in groups.values():
-        # NFL and MLB delivery are intentionally narrower than the general
-        # selector: only high-floor ("green goblin") markets are eligible,
-        # and the lowest available line wins before evidence tie-breakers.
+        # NFL, NBA, and MLB delivery are intentionally narrower than the
+        # general selector: only directional high-floor ("green goblin")
+        # markets are eligible, and the lowest available line wins before
+        # evidence tie-breakers.
         low_line_group = [
             candidate for candidate in group
             if _sport(candidate) in _LOW_LINE_GREEN_GOBLIN_SPORTS
