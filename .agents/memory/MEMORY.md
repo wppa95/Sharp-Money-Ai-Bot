@@ -151,3 +151,4 @@
 - [Evidence-bound AI value analysis](ai-value-analysis.md) — explain explicit line differences and directional history; never invent unavailable odds or value.
 - [Underdog event timing](underdog-event-timing.md) — join event metadata only through explicit provider IDs; unknown timing must remain delivery-blocked.
 - [Telegram funnel boundary](telegram-funnel-boundary.md) — Telegram delivery requires tracked + directional durable rows; keep `/picks` and monitoring populations independent.
+- [Sleeper test fixtures](sleeper-test-fixtures.md) — cache non-fixture current seasons as empty so date-dependent NFL lookups stay deterministic.

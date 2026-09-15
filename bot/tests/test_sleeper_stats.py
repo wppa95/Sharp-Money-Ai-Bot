@@ -10,7 +10,7 @@ from __future__ import annotations
 import asyncio
 import sys
 import os
-from datetime import date
+from datetime import date, datetime
 from typing import Optional
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -295,6 +295,13 @@ class TestFetchResults:
             # Weeks 3–18 are empty (season not played yet in this mock)
             for w in range(3, 19):
                 p._week_cache[("nfl", "regular", yr, w)] = {}
+        # The provider also checks the current NFL season once the calendar
+        # moves beyond 2025. Keep this fixture deterministic and network-free
+        # by explicitly marking the current season as an empty mock slate.
+        current_year = datetime.utcnow().year
+        if current_year != 2025:
+            for w in range(1, 19):
+                p._week_cache[("nfl", "regular", current_year, w)] = {}
         return p
 
     def test_nfl_rushing_yards_basic(self):
