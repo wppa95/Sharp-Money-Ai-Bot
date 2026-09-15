@@ -623,6 +623,171 @@ def _format_history_block(
     return "\n\n📈 <b>HISTORY</b>\n" + "\n".join(rows)
 
 
+def _format_value_analysis_block(
+    *,
+    player_name: str,
+    sport: str,
+    stat_type: str,
+    line: float,
+    source: str,
+    decision: Optional[object],
+    validation: Optional[object] = None,
+    comparison_line: Optional[float] = None,
+    comparison_source: Optional[str] = None,
+    comparison_odds: Optional[int] = None,
+    game_time: Optional[datetime] = None,
+    team: Optional[str] = None,
+    opponent: Optional[str] = None,
+    market_confirmation: Optional[dict] = None,
+    intelligence_trace: Optional[dict] = None,
+) -> str:
+    """Render an evidence-bound value explanation in the user's preferred shape.
+
+    This is deliberately a formatter, not a second scoring engine.  It compares
+    only explicitly supplied lines/odds and uses the stored hit-rate windows.
+    Missing comparison data stays unavailable instead of becoming a fabricated
+    value claim.
+    """
+    direction = str(getattr(decision, "recommendation", "") or "").upper()
+    if direction not in {"OVER", "UNDER"}:
+        return ""
+
+    primary_source = str(source or "Player Props").strip() or "Player Props"
+    line_text = f"{float(line):g}"
+    title = (
+        f"[{escape(str(sport or 'UNKNOWN'))}] "
+        f"{escape(str(player_name))} {direction} {line_text} "
+        f"{escape(str(stat_type))}"
+    )
+    lines = ["\n🤖 <b>AI ANALYSIS</b>", title]
+
+    compare = comparison_line
+    compare_label = str(comparison_source or "").strip()
+    compare_odds = comparison_odds
+    if compare_odds is None and isinstance(market_confirmation, dict):
+        raw_odds = market_confirmation.get("avg_odds")
+        try:
+            compare_odds = int(raw_odds) if raw_odds is not None else None
+        except (TypeError, ValueError):
+            compare_odds = None
+    if compare is None and isinstance(market_confirmation, dict):
+        raw_compare = market_confirmation.get("avg_line")
+        try:
+            if raw_compare is not None:
+                compare = float(raw_compare)
+        except (TypeError, ValueError):
+            compare = None
+        compare_label = compare_label or str(
+            market_confirmation.get("source")
+            or market_confirmation.get("provider")
+            or "market confirmation"
+        ).strip()
+
+    if compare is not None and compare_label:
+        try:
+            diff = abs(float(compare) - float(line))
+        except (TypeError, ValueError):
+            diff = None
+        odds_text = (
+            f" with odds of {format_odds(compare_odds)}"
+            if compare_odds is not None
+            else ""
+        )
+        lines.append(
+            f"This line is set at <b>{line_text}</b> on "
+            f"{escape(primary_source)}"
+            f"{' for a fixed payout' if primary_source.upper() == 'PRIZEPICKS' else ''}, but "
+            f"{escape(compare_label)} has it at <b>{float(compare):g}</b>"
+            f"{odds_text}."
+        )
+        favorable_gap = (
+            (direction == "OVER" and float(line) < float(compare))
+            or (direction == "UNDER" and float(line) > float(compare))
+        )
+        if favorable_gap:
+            lines.append(
+                f"Taking the {direction.lower()} on {escape(primary_source)} "
+                f"at {line_text} may be good value here, but double check "
+                "alternate lines and current stats before placing it."
+            )
+        else:
+            lines.append(
+                "The available comparison does not show a clear line-value "
+                "advantage, so verify alternate lines and current stats first."
+            )
+        if diff is not None:
+            lines.append(f"<b>Diff:</b> {diff:g}")
+    else:
+        lines.append(
+            f"This line is set at <b>{line_text}</b> on "
+            f"{escape(primary_source)}, but no independent comparison line "
+            "was available. No odds-backed value claim is being made."
+        )
+
+    if game_time is not None:
+        lines.append(
+            f"<b>Time:</b> {_format_game_time_et(game_time)}"
+        )
+    game_parts = [
+        str(value).strip()
+        for value in (team, opponent)
+        if value is not None and str(value).strip()
+    ]
+    if game_parts:
+        lines.append(f"<b>Game:</b> {escape(' vs '.join(game_parts))}")
+
+    def _direction_rate(
+        rate_name: str,
+        games_name: str,
+        over_name: str,
+    ) -> Optional[float]:
+        rate = _numeric_attr(decision, rate_name)
+        games = _numeric_attr(decision, games_name)
+        over = _numeric_attr(decision, over_name)
+        if rate is None and games and over is not None:
+            rate = over / games
+        if rate is None:
+            return None
+        # Stored rates are OVER-perspective rates.  Show the rate for the
+        # actual recommendation so UNDER is not mislabeled as support.
+        return 1.0 - rate if direction == "UNDER" else rate
+
+    history_rows = (
+        ("L10", "l10_hit_rate", "l10_games", "l10_over"),
+        ("H2H", "h2h_hit_rate", "h2h_games", "h2h_over"),
+        ("SZN", "season_hit_rate", "season_games", "season_over"),
+    )
+    for label, rate_name, games_name, over_name in history_rows:
+        rate = _direction_rate(rate_name, games_name, over_name)
+        if rate is None:
+            lines.append(f"<b>{label} ({direction.title()}):</b> N/A")
+        else:
+            lines.append(f"<b>{label} ({direction.title()}):</b> {rate:.0%}")
+
+    team_ml = None
+    for payload in (market_confirmation, intelligence_trace):
+        if isinstance(payload, dict):
+            team_ml = payload.get("team_ml") or payload.get("team_moneyline")
+            if team_ml:
+                break
+    if isinstance(team_ml, dict):
+        ml_odds = team_ml.get("odds")
+        ml_probability = team_ml.get("implied_probability")
+        if ml_odds is not None or ml_probability is not None:
+            ml_parts = []
+            if ml_odds is not None:
+                ml_parts.append(format_odds(int(ml_odds)))
+            if ml_probability is not None:
+                try:
+                    ml_parts.append(f"{float(ml_probability):.0%}")
+                except (TypeError, ValueError):
+                    pass
+            if ml_parts:
+                lines.append(f"<b>Team ML (IP):</b> {' '.join(ml_parts)}")
+
+    return "\n".join(lines)
+
+
 def _format_quality_line(
     decision: Optional[object],
     score: Optional[object],
@@ -875,6 +1040,14 @@ def format_underdog_change_alert(
         pick_emoji = "🟢" if rec == "OVER" else "🔴"
         pick_line = f"📌 <b>PICK:</b>  {pick_emoji} <b>{rec} {new_line:.1f}</b>"
 
+    _pp_value_frame = source_upper == "UNDERDOG" and pp_line is not None
+    _analysis_line = pp_line if _pp_value_frame else new_line
+    _analysis_source = "PrizePicks" if _pp_value_frame else source
+    _analysis_comparison_line = new_line if _pp_value_frame else pp_line
+    _analysis_comparison_source = (
+        source if _pp_value_frame else ("PrizePicks" if pp_line is not None else None)
+    )
+
     if removed:
         body_lines = [
             _thick,
@@ -915,6 +1088,24 @@ def format_underdog_change_alert(
             "",
             pick_line,
         ]
+        analysis_block = _format_value_analysis_block(
+            player_name=player_name,
+            sport=sport,
+            stat_type=stat_type,
+            line=new_line,
+            source=source,
+            decision=decision,
+            validation=validation,
+            comparison_line=_analysis_comparison_line,
+            comparison_source=_analysis_comparison_source,
+            game_time=game_time,
+            team=team,
+            opponent=opponent,
+            market_confirmation=market_confirmation,
+            intelligence_trace=intelligence_trace,
+        )
+        if analysis_block:
+            body_lines.append(analysis_block)
         if decision is not None:
             evidence_label, evidence_count = _evidence_display(validation, decision)
             body_lines += [
@@ -1081,6 +1272,44 @@ def format_underdog_new_prop_alert(
                 f"📌 <b>PICK:</b>  "
                 f"{'🟢' if getattr(decision, 'recommendation', '') == 'OVER' else '🔴'} "
                 f"<b>{escape(str(getattr(decision, 'recommendation', '')))} {line_value:.1f}</b>"
+            ]
+            if getattr(decision, "recommendation", "") in ("OVER", "UNDER")
+            else []
+        ),
+        *(
+            [
+                _format_value_analysis_block(
+                    player_name=player_name,
+                    sport=sport,
+                    stat_type=stat_type,
+                    line=(
+                        pp_line
+                        if source.strip().upper() == "UNDERDOG" and pp_line is not None
+                        else line_value
+                    ),
+                    source=(
+                        "PrizePicks"
+                        if source.strip().upper() == "UNDERDOG" and pp_line is not None
+                        else source
+                    ),
+                    decision=decision,
+                    validation=validation,
+                    comparison_line=(
+                        line_value
+                        if source.strip().upper() == "UNDERDOG" and pp_line is not None
+                        else pp_line
+                    ),
+                    comparison_source=(
+                        source
+                        if source.strip().upper() == "UNDERDOG" and pp_line is not None
+                        else ("PrizePicks" if pp_line is not None else None)
+                    ),
+                    game_time=game_time,
+                    team=team,
+                    opponent=opponent,
+                    market_confirmation=market_confirmation,
+                    intelligence_trace=intelligence_trace,
+                )
             ]
             if getattr(decision, "recommendation", "") in ("OVER", "UNDER")
             else []

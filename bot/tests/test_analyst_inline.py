@@ -13,6 +13,7 @@ Tests:
 
 from __future__ import annotations
 
+from datetime import datetime
 import pytest
 from unittest.mock import MagicMock
 
@@ -282,6 +283,39 @@ def test_new_prop_alert_omits_duplicate_analyst_block_for_directional():
     )
     assert "Analyst" not in msg
     assert "Quality:" not in msg
+
+
+def test_value_analysis_matches_line_value_example_shape():
+    from alerts_multiplatform import format_underdog_new_prop_alert
+
+    decision = _make_decision(rec="OVER", conf=80)
+    for window in ("l10", "h2h", "season"):
+        setattr(decision, f"{window}_hit_rate", 0.70)
+        setattr(decision, f"{window}_games", 10)
+        setattr(decision, f"{window}_over", 7)
+
+    msg = format_underdog_new_prop_alert(
+        "HaeTae",
+        "T1.A",
+        "LOL",
+        "Maps 1-3 Kills",
+        10.5,
+        game_time=datetime(2026, 9, 15, 8, 0),
+        opponent="KT.C",
+        decision=decision,
+        pp_line=10.0,
+        market_confirmation={"avg_odds": -131},
+    )
+
+    assert "AI ANALYSIS" in msg
+    assert "This line is set at" in msg
+    assert "PrizePicks" in msg
+    assert "good value" in msg
+    assert "Diff:" in msg
+    assert "L10 (Over):</b> 70%" in msg
+    assert "H2H (Over):</b> 70%" in msg
+    assert "SZN (Over):</b> 70%" in msg
+    assert "Game:" in msg
 
 
     def test_change_alert_contains_pick_for_directional():
