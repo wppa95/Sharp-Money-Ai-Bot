@@ -992,11 +992,11 @@ def format_underdog_change_alert(
 
     if removed:
         header         = "🚫 <b>PLAYER PROP REMOVED</b>"
-        movement_block = f"  🎯 <b>Last Player Prop Line:</b>  <code>{old_line:.1f}</code>"
+        movement_block = f"  🎯 <b>Last Line:</b>  <code>{old_line:.1f}</code>"
     elif standing:
         header         = "📊 <b>PLAYER PROP</b>"
         movement_block = (
-            f"📊 <b>PLAYER PROP LINE</b>\n"
+            f"📊 <b>LINE</b>\n"
             f"  {source_emoji} <code>{new_line:.1f}</code>  {_line_label(new_line)}"
         )
     else:
@@ -1005,7 +1005,7 @@ def format_underdog_change_alert(
         header         = "📊 <b>PLAYER PROP</b>"
         change_sign    = "+" if change >= 0 else ""
         movement_block = (
-            f"📊 <b>PLAYER PROP LINE</b>\n"
+            f"📊 <b>LINE</b>\n"
             f"  {source_emoji} <code>{new_line:.1f}</code>  {_line_label(new_line)}\n"
             f"  Previous:         <code>{old_line:.1f}</code>\n"
             f"  {direction_icon} Move:  <code>{change_sign}{change:.1f}</code>"
@@ -1057,7 +1057,7 @@ def format_underdog_change_alert(
             f"{sport_icon} <b>{escape(str(sport))} — {escape(str(stat_type))}</b>",
             f"👤 <b>{escape(str(player_name))}</b>",
             "",
-            f"{source_emoji} Player Prop Line: <code>{old_line:.1f}</code>",
+            f"{source_emoji} Last Line: <code>{old_line:.1f}</code>",
             f"Removal: {escape(removal_reason or 'Market no longer available')}",
             "",
             f"{EMOJI['clock']} <i>{datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}</i>",
@@ -1088,24 +1088,6 @@ def format_underdog_change_alert(
             "",
             pick_line,
         ]
-        analysis_block = _format_value_analysis_block(
-            player_name=player_name,
-            sport=sport,
-            stat_type=stat_type,
-            line=new_line,
-            source=source,
-            decision=decision,
-            validation=validation,
-            comparison_line=_analysis_comparison_line,
-            comparison_source=_analysis_comparison_source,
-            game_time=game_time,
-            team=team,
-            opponent=opponent,
-            market_confirmation=market_confirmation,
-            intelligence_trace=intelligence_trace,
-        )
-        if analysis_block:
-            body_lines.append(analysis_block)
         if decision is not None:
             evidence_label, evidence_count = _evidence_display(validation, decision)
             body_lines += [
@@ -1265,7 +1247,7 @@ def format_underdog_new_prop_alert(
         "",
         _div(),
         f"📡 <b>Source:</b>  Player Props · {escape(source)}",
-        f"  {source_emoji} <b>PLAYER PROP LINE:</b>  <code>{line_value:.1f}</code>  {_line_label(line_value)}",
+        f"  {source_emoji} <code>{line_value:.1f}</code>  {_line_label(line_value)}",
         context_line,
         *(
             [

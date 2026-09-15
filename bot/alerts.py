@@ -1037,7 +1037,7 @@ def format_pp_alert(
         f"👤 <b>{pp.player_name}</b> ({pp.team})",
         "",
         "📡 <b>Source:</b>  Player Props · PrizePicks / PropLine",
-        f"🎯 <b>Player Prop Line:</b>  {pp.line_value} ({pp.stat_type})",
+        f"🎯 <b>LINE:</b>  {pp.line_value} ({pp.stat_type})",
         f"📊 <b>Reference Line:</b>   {opp.sportsbook_line} ({opp.sportsbook}) [{line_note}]",
         f"📉 <b>SB Odds:</b>     O {over_fmt} / U {under_fmt}",
         "",
@@ -1063,7 +1063,7 @@ def format_pp_alert(
         f"─────────────────────────────",
         *_risk_section(risk_factors),
         "",
-        f"<i>Player prop line and market context are shown for research.</i>",
+        f"<i>Line and market context are shown for research.</i>",
     ]
 
     return "\n".join(parts)
@@ -1112,8 +1112,8 @@ def format_pp_reference_alert(match: "PPReferenceMatch") -> str:  # noqa: F821
         f"👤 <b>{match.player_name}</b>",
         "",
         f"─────────────────────────────",
-        f"🎯 <b>Player Prop Line:</b>    {ud_line_str}",
-        f"🎯 <b>Reference Prop Line:</b> {pp_line_str}",
+        f"🎯 <b>LINE:</b>    {ud_line_str}",
+        f"🎯 <b>REFERENCE LINE:</b> {pp_line_str}",
         f"    <i>{pp_note}</i>",
         "",
         f"📡 <b>Player Props Source:</b> {source_label}",
