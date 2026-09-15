@@ -1,0 +1,129 @@
+📊 Evidence  (vs 1.5 line)
+  L5      4/5 (80%)  avg 5.2
+  L10     8/10 (80%)  avg 3.7
+  L20     16/20 (80%)  avg 3.5
+  L30     21/30 (70%)  avg 3.0
+  Season  21/30 (70%)  avg 3.0
+
+━━━━━━━━━━━━━━━━━━
+#5 Jo Adell
+🎯 PLAYER PROP PICK
+Market: Hits
+🎯 Player Prop Line: 0.5  🟢 Low Line / Goblin Discount
+⏰ starts in 3h 7m  ·  MLB
+Event: 3c0f308e-8b2c-4f65-8b19-50fbe00bde2f
+
+🎯 Pick: OVER (More) ⬆
+🧾 Evidence basis: Settled player-game results
+
+🧠 Downstream Intelligence
+  Sharp Confidence: unavailable
+  Model Projection: unavailable
+  Current Line: 0.5
+  Model Edge / Current-Line Value: unavailable
+  Line Movement: unavailable
+  Movement Quality: unavailable
+  Evidence Completeness: unavailable
+  Historical Evidence: unavailable
+
+📊 Evidence  (vs 0.5 line)
+  L5      4/5 (80%)  avg 1.0
+  L10     7/10 (70%)  avg 0.9
+  L20     12/20 (60%)  avg 0.8
+  L30     18/30 (60%)  avg 1.0
+  Season  18/30 (60%)  avg 1.0
+
+━━━━━━━━━━━━━━━━━━
+#6 Nathaniel Lowe
+🎯 PLAYER PROP PICK
+Market: Hits
+🎯 Player Prop Line: 0.5  🟢 Low Line / Goblin Discount
+⏰ starts in 3h 7m  ·  MLB
+Event: bd4fe2df-22e6-4f96-a627-3ce938012c30
+
+🎯 Pick: UNDER (Less) ⬇
+🧾 Evidence basis: Settled player-game results
+
+🧠 Downstream Intelligence
+  Sharp Confidence: unavailable
+  Model Projection: unavailable
+  Current Line: 0.5
+  Model Edge / Current-Line Value: unavailable
+  Line Movement: unavailable
+  Movement Quality: unavailable
+  Evidence Completeness: unavailable
+  Historical Evidence: unavailable
+
+📊 Evidence  (vs 0.5 line)
+  L5      2/5 (40%)  avg 0.6
+  L10     5/10 (50%)  avg 0.6
+  L20     10/20 (50%)  avg 0.6
+  L30     16/30 (53%)  avg 0.7
+  Season  16/30 (53%)  avg 0.7
+
+━━━━━━━━━━━━━━━━━━
+#7 Sal Stewart
+🎯 PLAYER PROP PICK
+Market: Hits
+🎯 Player Prop Line: 0.5  🟢 Low Line / Goblin Discount
+⏰ starts in 3h 7m  ·  MLB
+Event: 3e2a46aa-77c5-4e87-9616-ab6acb64cff1
+
+🎯 Pick: OVER (More) ⬆
+🧾 Evidence basis: Settled player-game results
+
+🧠 Downstream Intelligence
+  Sharp Confidence: unavailable
+  Model Projection: unavailable
+  Current Line: 0.5
+  Model Edge / Current-Line Value: unavailable
+  Line Movement: unavailable
+  Movement Quality: unavailable
+  Evidence Completeness: unavailable
+  Historical Evidence: unavailable
+
+📊 Evidence  (vs 0.5 line)
+  L5      4/5 (80%)  avg 1.4
+  L10     7/10 (70%)  avg 1.1
+  L20     15/20 (75%)  avg 1.2
+  L30     24/30 (80%)  avg 1.2
+  Season  24/30 (80%)  avg 1.2
+
+━━━━━━━━━━━━━━━━━━
+#8 Travis Bazzana
+🎯 PLAYER PROP PICK
+Market: Hits
+🎯 Player Prop Line: 0.5  🟢 Low Line / Goblin Discount
+⏰ starts in 3h 7m  ·  MLB
+Event: e1da09d9-a2d6-486d-bdca-ccf3165a64a9
+
+🎯 Pick: OVER (More) ⬆
+🧾 Evidence basis: Settled player-game results
+
+🧠 Downstream Intelligence
+  Sharp Confidence: unavailable
+  Model Projection: unavailable
+  Current Line: 0.5
+  Model Edge / Current-Line Value: unavailable
+  Line Movement: unavailable
+  Movement Quality: unavailable
+  Evidence Completeness: unavailable
+  Historical Evidence: unavailable
+
+📊 Evidence  (vs 0.5 line)
+  L5      4/5 (80%)  avg 1.2
+  L10     8/10 (80%)  avg 1.3
+  L20     13/20 (65%)  avg 1.1
+  L30     17/30 (57%)  avg 0.9
+  Season  17/30 (57%)  avg 0.9
+
+━━━━━━━━━━━━━━━━━━
+#9 William Contreras
+🎯 PLAYER PROP PICK
+Market: Hits
+🎯 Player Prop Line: 0.5  🟢 Low Line / Goblin Discount
+⏰ starts in 3h 7m  ·  MLB
+Event: 3c3e445b-4370-4f7b-aabe-fa980853e52d
+
+🎯 Pick: OVER (More) ⬆
+🧾 Evidence basis: Settled player-game results
