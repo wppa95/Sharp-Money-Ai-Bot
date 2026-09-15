@@ -149,3 +149,4 @@
 - [History-optional delivery](history-optional-delivery.md) — only esports, tennis, and soccer may send without completed player history; all sports still require direction.
 - [NFL + NBA + MLB green goblin selection](nfl-green-goblin-selection.md) — NFL, NBA, and MLB delivery use only strong directional high-floor markets and choose the lowest qualifying line.
 - [Evidence-bound AI value analysis](ai-value-analysis.md) — explain explicit line differences and directional history; never invent unavailable odds or value.
+- [Underdog event timing](underdog-event-timing.md) — join event metadata only through explicit provider IDs; unknown timing must remain delivery-blocked.

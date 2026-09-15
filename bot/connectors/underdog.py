@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 import aiohttp
@@ -35,6 +35,156 @@ _HEADERS = {
     "User-Agent": "Mozilla/5.0 (compatible; SharpMoneyBot/1.0)",
     "Accept":     "application/json",
 }
+
+
+_EVENT_ID_KEYS = (
+    "event_id",
+    "game_id",
+    "match_id",
+    "fixture_id",
+    "id",
+)
+_EVENT_TIME_KEYS = (
+    "scheduled_at",
+    "scheduled_start",
+    "start_time",
+    "start_at",
+    "starts_at",
+    "commence_time",
+    "game_time",
+    "start",
+)
+_EVENT_STATUS_KEYS = (
+    "status",
+    "state",
+    "event_status",
+    "game_status",
+    "match_status",
+    "game_state",
+)
+_EVENT_REFERENCE_KEYS = (
+    "event_id",
+    "game_id",
+    "match_id",
+    "fixture_id",
+)
+
+
+def _nonempty(value) -> bool:
+    return value is not None and str(value).strip() != ""
+
+
+def _first_present(record: object, *keys: str):
+    if not isinstance(record, dict):
+        return None
+    for key in keys:
+        value = record.get(key)
+        if _nonempty(value):
+            return value
+    return None
+
+
+def _records(value) -> list[dict]:
+    """Return provider records from either list or keyed-object envelopes."""
+    if isinstance(value, list):
+        return [item for item in value if isinstance(item, dict)]
+    if not isinstance(value, dict):
+        return []
+    if any(_nonempty(value.get(key)) for key in _EVENT_ID_KEYS):
+        return [value]
+    return [item for item in value.values() if isinstance(item, dict)]
+
+
+def _parse_event_time(value) -> Optional[datetime]:
+    if isinstance(value, datetime):
+        parsed = value
+    elif isinstance(value, str) and value.strip():
+        try:
+            parsed = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+        except ValueError:
+            return None
+    else:
+        return None
+    if parsed.tzinfo is not None:
+        parsed = parsed.astimezone(timezone.utc).replace(tzinfo=None)
+    return parsed
+
+
+def _event_id(record: object) -> str:
+    # Prefer the record's own stable ID over a join-only match reference.
+    value = _first_present(
+        record, "id", "event_id", "game_id", "match_id", "fixture_id"
+    )
+    return str(value).strip() if _nonempty(value) else ""
+
+
+def _event_reference_id(record: object) -> str:
+    value = _first_present(record, *_EVENT_REFERENCE_KEYS)
+    return str(value).strip() if _nonempty(value) else ""
+
+
+def _event_status(record: object) -> str:
+    value = _first_present(record, *_EVENT_STATUS_KEYS)
+    if isinstance(value, dict):
+        value = _first_present(value, "name", "value", "status", "state")
+    return str(value).strip() if _nonempty(value) else ""
+
+
+def _event_time(record: object) -> Optional[datetime]:
+    return _parse_event_time(_first_present(record, *_EVENT_TIME_KEYS))
+
+
+def _event_label(record: object) -> str:
+    value = _first_present(
+        record, "event", "event_name", "match_name", "fixture_name", "label", "title"
+    )
+    return str(value).strip() if _nonempty(value) else ""
+
+
+def _build_event_lookup(data: dict) -> dict[str, dict]:
+    """Index explicit provider event records without guessing from teams."""
+    lookup: dict[str, dict] = {}
+    for key in ("games", "matches", "events", "fixtures"):
+        for record in _records(data.get(key, [])):
+            for raw_id in _EVENT_ID_KEYS:
+                value = record.get(raw_id)
+                if _nonempty(value):
+                    lookup[str(value).strip()] = record
+    return lookup
+
+
+def _resolve_event(
+    sources: list[object],
+    event_lookup: dict[str, dict],
+) -> tuple[str, dict]:
+    """Resolve a projection's explicit event identity and metadata."""
+    candidate_ids: list[str] = []
+    nested_sources: list[object] = []
+    for source in sources:
+        if not isinstance(source, dict):
+            continue
+        raw_id = _event_reference_id(source)
+        if raw_id and raw_id not in candidate_ids:
+            candidate_ids.append(raw_id)
+        for key in ("event", "game", "match", "fixture"):
+            nested = source.get(key)
+            if isinstance(nested, dict):
+                nested_sources.append(nested)
+                nested_id = _event_id(nested)
+                if nested_id and nested_id not in candidate_ids:
+                    candidate_ids.append(nested_id)
+
+    for candidate_id in candidate_ids:
+        metadata = event_lookup.get(candidate_id)
+        if metadata is not None:
+            canonical_id = _event_id(metadata) or candidate_id
+            return canonical_id, metadata
+    for source in nested_sources + sources:
+        if _event_time(source) is not None or _event_status(source) or _event_label(source):
+            return _event_id(source) or (candidate_ids[0] if candidate_ids else ""), (
+                source if isinstance(source, dict) else {}
+            )
+    return (candidate_ids[0] if candidate_ids else ""), {}
 
 
 def _opponent_for_player(team, home, away) -> str:
@@ -179,6 +329,7 @@ class UnderdogConnector(BaseConnector):
              ),
             external_id  = proj.external_id,
             is_pickem    = True,
+            provider_status = proj.provider_status,
              is_moneyline  = proj.is_moneyline,
              is_game_market = proj.is_game_market,
              opponent    = getattr(proj, "opponent", None) or None,
@@ -216,6 +367,7 @@ class UnderdogConnector(BaseConnector):
                     opening_odds = None,
                     external_id  = old.external_id,
                     is_pickem    = True,
+                    provider_status = old.provider_status,
                      is_moneyline  = old.is_moneyline,
                      is_game_market = old.is_game_market,
                 ))
@@ -284,10 +436,9 @@ class UnderdogConnector(BaseConnector):
           - Player-to-appearance linking goes through a top-level ``appearances``
             array; ``appearance_stat.appearance_id`` → ``appearances[].id``.
           - Players carry ``team_id`` (UUID string) instead of ``team: {alias}``.
-          - ``appearances[].match_id`` is an integer; ``games[].id`` is a UUID, so
-            the two do not cross-reference.  ``game_time`` resolves only when the
-            fixture supplies matching string ids (tests); it will be ``None`` in
-            production, which is acceptable — it is display-only.
+          - Event metadata has appeared under ``games``, ``matches``, ``events``,
+            and ``fixtures`` with several equivalent ID/time/status field names.
+            Join only on explicit provider IDs; never infer an event from teams.
         """
         projections: list[UnderdogProjection] = []
 
@@ -300,24 +451,14 @@ class UnderdogConnector(BaseConnector):
 
         # Build appearances lookup: id → appearance dict (v1 top-level array)
         appearances: dict[str, dict] = {}
-        for app in data.get("appearances", []):
+        for app in _records(data.get("appearances", [])):
             aid = app.get("id", "")
             if aid:
                 appearances[aid] = app
 
-        # Build game lookup: id → game dict
-        games: dict[str, dict] = {}
-        for game in data.get("games", []):
-            for raw_id in (
-                game.get("id"),
-                game.get("match_id"),
-                game.get("game_id"),
-            ):
-                gid = str(raw_id or "").strip()
-                if gid:
-                    games[gid] = game
+        event_lookup = _build_event_lookup(data)
 
-        for line in data.get("over_under_lines", []):
+        for line in _records(data.get("over_under_lines", [])):
             try:
                 stat_value = line.get("stat_value")
                 if stat_value is None:
@@ -330,11 +471,13 @@ class UnderdogConnector(BaseConnector):
                 appearance_id = appearance_stat.get("appearance_id", "")
                 display_stat  = appearance_stat.get("display_stat", "Unknown")
 
-                # Resolve player and game through the top-level appearances table
+                # Resolve player and event through the top-level appearances table.
                 app       = appearances.get(appearance_id, {})
                 player_id = app.get("player_id", "")
-                # match_id is an integer in production; str() normalises for lookup
-                match_id  = str(app.get("match_id", ""))
+                event_id, event_data = _resolve_event(
+                    [line, over_under, appearance_stat, app],
+                    event_lookup,
+                )
 
                 p_data      = players.get(player_id, {})
                 from engine.identity import display_player_name
@@ -346,19 +489,18 @@ class UnderdogConnector(BaseConnector):
                 team  = p_data.get("team_id", "")
                 sport = p_data.get("sport_id", "Unknown").upper()
 
-                # game_time: attempt lookup by match_id string.  In production
-                # match_id is an integer and game ids are UUIDs, so this will
-                # usually be None — that is acceptable; game_time is display-only.
-                game_time: Optional[datetime] = None
-                g_data    = games.get(match_id, {})
-                scheduled = g_data.get("scheduled_at", "")
-                if scheduled:
-                    try:
-                        game_time = datetime.fromisoformat(
-                            scheduled.replace("Z", "+00:00")
-                        ).replace(tzinfo=None)
-                    except ValueError:
-                        pass
+                game_time = _event_time(event_data)
+                provider_status = _event_status(event_data)
+                if game_time is None:
+                    for source in (line, over_under, appearance_stat, app):
+                        game_time = _event_time(source)
+                        if game_time is not None:
+                            break
+                if not provider_status:
+                    for source in (line, over_under, appearance_stat, app):
+                        provider_status = _event_status(source)
+                        if provider_status:
+                            break
 
                 projections.append(UnderdogProjection(
                     external_id = line.get("id", ""),
@@ -367,25 +509,19 @@ class UnderdogConnector(BaseConnector):
                     sport       = sport,
                     stat_type   = display_stat,
                     line_value  = float(stat_value),
-                    game_id     = match_id,
+                    game_id     = event_id,
                     game_time   = game_time,
-                    provider_status = str(
-                        line.get("status")
-                        or over_under.get("status")
-                        or g_data.get("status")
-                        or g_data.get("state")
-                        or ""
-                    ),
+                    provider_status = provider_status,
                     fetched_at  = datetime.utcnow(),
                     opponent    = _opponent_for_player(
                         team,
-                        g_data.get("home_team")
-                        or g_data.get("home_team_id")
-                        or g_data.get("home")
+                        event_data.get("home_team")
+                        or event_data.get("home_team_id")
+                        or event_data.get("home")
                         or "",
-                        g_data.get("away_team")
-                        or g_data.get("away_team_id")
-                        or g_data.get("away")
+                        event_data.get("away_team")
+                        or event_data.get("away_team_id")
+                        or event_data.get("away")
                         or "",
                     ),
                 ))

@@ -253,6 +253,46 @@ class TestUnderdogConnector:
         projs = c._parse(UNDERDOG_API_RESPONSE)
         assert projs[0].game_time is not None
 
+    @pytest.mark.parametrize("sport", ["CS", "TENNIS", "FIFA"])
+    def test_parse_non_mlb_event_metadata_from_explicit_match_join(self, sport):
+        payload = {
+            "over_under_lines": [{
+                "id": f"{sport.lower()}-prop",
+                "stat_value": 2.5,
+                "over_under": {
+                    "appearance_stat": {
+                        "appearance_id": f"{sport.lower()}-appearance",
+                    },
+                },
+            }],
+            "appearances": [{
+                "id": f"{sport.lower()}-appearance",
+                "player_id": f"{sport.lower()}-player",
+                # The provider can expose this as a numeric match ID while
+                # the event record uses a separate stable event ID.
+                "match_id": 701,
+            }],
+            "players": [{
+                "id": f"{sport.lower()}-player",
+                "first_name": "Event",
+                "last_name": "Player",
+                "sport_id": sport.lower(),
+                "team_id": "team-1",
+            }],
+            "matches": [{
+                "id": "event-stable-1",
+                "match_id": 701,
+                "start_time": "2026-09-15T20:00:00-04:00",
+                "event_status": "SCHEDULED",
+            }],
+        }
+
+        projection = UnderdogConnector()._parse(payload)[0]
+
+        assert projection.game_id == "event-stable-1"
+        assert projection.game_time == datetime(2026, 9, 16, 0, 0)
+        assert projection.provider_status == "SCHEDULED"
+
     @pytest.mark.asyncio
     async def test_fetch_returns_pickem_snapshots(self):
         c = self._make_connector()

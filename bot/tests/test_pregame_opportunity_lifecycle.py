@@ -157,6 +157,42 @@ async def test_pregame_prizepicks_prop_can_reach_delivery():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("sport", ["CS", "TENNIS", "FIFA"])
+async def test_scheduled_non_mlb_underdog_prop_can_reach_delivery(sport):
+    delivery = _delivery()
+    with (
+        patch("alert_scope_filter.check", return_value=SimpleNamespace(allowed=True)),
+        patch(
+            "alerts_multiplatform.format_underdog_change_alert",
+            return_value="<msg>",
+        ),
+        patch(
+            "alerts.broadcast_alert",
+            new_callable=AsyncMock,
+            return_value={"sent": 1, "failed": 0},
+        ),
+    ):
+        result = await delivery.deliver_underdog(
+            "UD Player",
+            "TEAM",
+            sport,
+            "Points",
+            20.5,
+            21.5,
+            game_time=_future(),
+            game_status="SCHEDULED",
+            strict_pregame=True,
+            validation=SimpleNamespace(
+                has_supporting_data=True,
+                data_source="real",
+                n_real_games=5,
+            ),
+            decision=SimpleNamespace(recommendation="OVER", confidence=80),
+        )
+    assert result.sent is True
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("status", ["STARTED", "LIVE", "FINAL"])
 async def test_started_underdog_prop_cannot_reach_telegram(status):
     delivery = _delivery()
@@ -165,6 +201,28 @@ async def test_started_underdog_prop_cannot_reach_telegram(status):
             "UD Player",
             "TEAM",
             "NBA",
+            "Points",
+            20.5,
+            21.5,
+            game_time=_future(),
+            game_status=status,
+            strict_pregame=True,
+        )
+    assert result.sent is False
+    assert result.filtered is True
+    broadcast.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("sport", ["CS", "TENNIS", "FIFA"])
+@pytest.mark.parametrize("status", ["LIVE", "FINAL", "COMPLETED", "ENDED"])
+async def test_non_mlb_started_or_completed_prop_cannot_reach_telegram(sport, status):
+    delivery = _delivery()
+    with patch("alerts.broadcast_alert", new_callable=AsyncMock) as broadcast:
+        result = await delivery.deliver_underdog(
+            "UD Player",
+            "TEAM",
+            sport,
             "Points",
             20.5,
             21.5,

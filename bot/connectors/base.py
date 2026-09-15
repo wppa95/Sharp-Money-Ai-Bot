@@ -66,6 +66,9 @@ class MarketSnapshot:
     is_game_market: bool = False
     # Optional player-prop opponent used to select H2H evidence windows.
     opponent: Optional[str] = None
+    # Provider-reported event state used by the pregame delivery boundary.
+    # Empty means the provider did not expose a state for this observation.
+    provider_status: str = ""
 
     @property
     def market_key(self) -> tuple[str, str, str, str]:
