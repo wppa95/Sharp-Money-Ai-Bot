@@ -1841,6 +1841,59 @@ class AlertDelivery:
                 filtered_reason="Canonical direction/evidence gate",
             )
 
+        # Telegram is the final edge of the durable tracking/grading funnel.
+        # The active scan may evaluate many observations, but only a prop
+        # already represented in both ledgers can become a user-facing pick.
+        # ``alert_sent`` is a persistent one-alert boundary across restarts and
+        # line re-evaluations; it is intentionally checked here, before any
+        # formatting or Telegram network call.
+        _tracking_gate = getattr(self._db, "get_telegram_delivery_state", None)
+        if _tracking_gate is not None:
+            try:
+                _tracking_state = _tracking_gate(
+                    provider=source,
+                    external_id=source_id,
+                    stat_type=stat_type,
+                )
+                if inspect.isawaitable(_tracking_state):
+                    _tracking_state = await _tracking_state
+            except Exception as _tracking_gate_exc:
+                logger.warning(
+                    "Telegram delivery blocked: tracking funnel lookup failed "
+                    "for %s/%s: %s",
+                    player_name,
+                    stat_type,
+                    type(_tracking_gate_exc).__name__,
+                )
+                return DeliveryResult(
+                    sent=False,
+                    filtered=True,
+                    filtered_reason="Tracking/grading funnel unavailable",
+                )
+            # Test doubles and legacy adapters may not expose the async
+            # database contract.  The real Database always returns this dict;
+            # keep compatibility adapters on the existing direction/evidence
+            # path rather than treating MagicMock attributes as a decision.
+            if isinstance(_tracking_state, dict):
+                if not _tracking_state.get("tracked"):
+                    return DeliveryResult(
+                        sent=False,
+                        filtered=True,
+                        filtered_reason="Prop is not in tracking ledger",
+                    )
+                if not _tracking_state.get("directional"):
+                    return DeliveryResult(
+                        sent=False,
+                        filtered=True,
+                        filtered_reason="No persisted directional opportunity",
+                    )
+                if _tracking_state.get("already_delivered"):
+                    return DeliveryResult(
+                        sent=False,
+                        filtered=True,
+                        deduped=True,
+                    )
+
         _ud_line_value = float(new_line or 0)
         if not self._try_claim_prop_delivery(
             provider=source,

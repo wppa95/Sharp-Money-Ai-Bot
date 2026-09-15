@@ -125,6 +125,19 @@ async def _log_actionable_opportunity(
     from database import PropOpportunityLog
 
     now = datetime.utcnow()
+    await db.track_prop_records(
+        [{
+            "external_id": external_id,
+            "player_name": player_name,
+            "team": "TEAM",
+            "sport": "MLB",
+            "stat_type": stat_type,
+            "line_value": 0.5,
+            "game_time": now + timedelta(hours=3),
+            "game_id": f"game-{external_id}",
+            "provider": provider,
+        }]
+    )
     async with db.session() as session:
         session.add(PropOpportunityLog(
             external_id=external_id,

@@ -2943,6 +2943,78 @@ class Database:
                 return False
             return True
 
+    async def get_telegram_delivery_state(
+        self,
+        *,
+        provider: str,
+        external_id: str,
+        stat_type: str,
+    ) -> dict[str, bool]:
+        """Return durable tracking/opportunity state for one Telegram pick.
+
+        Telegram is the delivery edge of the tracking and grading funnel. A
+        source observation must already have a neutral tracking row and a
+        directional opportunity row before it can be sent. The opportunity's
+        ``alert_sent`` flag is the durable one-alert boundary across restarts
+        and line re-evaluations.
+
+        Tracking rows retain the observed threshold in a ``:line=`` suffix so
+        moved thresholds remain independently gradeable. The source/stat
+        prefix is stable across those observations, so this check accepts the
+        current line while still requiring a tracked row.
+        """
+        provider_key = str(provider or "").strip()
+        source_id = str(external_id or "").strip()
+        market = str(stat_type or "").strip()
+        if not provider_key or not source_id or not market:
+            return {
+                "tracked": False,
+                "directional": False,
+                "already_delivered": False,
+            }
+
+        stored_external_id = _stored_opportunity_external_id(
+            source_id, provider_key
+        )
+        async with self.session() as s:
+            tracked_result = await s.execute(
+                select(PropTrackingLog.id)
+                .where(
+                    PropTrackingLog.provider == provider_key,
+                    PropTrackingLog.stat_type == market,
+                    or_(
+                        PropTrackingLog.external_id == source_id,
+                        PropTrackingLog.external_id.startswith(
+                            f"{source_id}:line="
+                        ),
+                    ),
+                )
+                .limit(1)
+            )
+            tracking_id = tracked_result.scalar_one_or_none()
+
+            opportunity = (
+                await s.execute(
+                    select(
+                        PropOpportunityLog.alert_sent,
+                        PropOpportunityLog.recommendation,
+                    )
+                    .where(
+                        PropOpportunityLog.provider == provider_key,
+                        PropOpportunityLog.external_id == stored_external_id,
+                        PropOpportunityLog.stat_type == market,
+                    )
+                    .limit(1)
+                )
+            ).first()
+
+        recommendation = str(opportunity[1] or "").upper() if opportunity else ""
+        return {
+            "tracked": tracking_id is not None,
+            "directional": recommendation in {"OVER", "UNDER"},
+            "already_delivered": bool(opportunity and opportunity[0]),
+        }
+
     async def get_telegram_reconciliation(
         self,
         since_hours: int = 72,

@@ -5185,7 +5185,8 @@ async def cmd_funnel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                 f"   ├─ Line moved:                  <b>{sc_lc:,}</b>",
                 f"   └─ Full-pool rotation:           <b>{fpr_rescored:,}</b>",
                 f"🎯 Qualified directional candidates: <b>{int(scan_summary.get('qualified', 0) or 0):,}</b>",
-                f"📤 Delivered to Telegram:          <b>{sc_delivered:,}</b>",
+                f"📤 Delivered to Telegram — current-session scan sends: "
+                f"<b>{sc_delivered:,}</b>",
             ]
             if sc_enrichment_status != "complete" or sc_enrichment_deferred:
                 lines += [
@@ -5298,7 +5299,8 @@ async def cmd_funnel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             ),
             f"🔬 Rescored: <b>{sc_rescored:,}</b>",
             f"📈 Line movers: <b>{sc_movers:,}</b>",
-            f"📤 Delivered alerts: <b>{delivered_total:,}</b>",
+            f"📤 Confirmed Telegram deliveries (last {since_h}h): "
+            f"<b>{delivered_total:,}</b>",
             f"⏳ Pending grading (tracked props): <b>{pending_total:,}</b>",
             f"🏁 Resolved tracked outcomes: <b>{resolved_total:,}</b>",
             f"   └─ HIT / MISS / PUSH: <b>{int(tracked_result_counts.get('HIT', 0) or 0):,} / "
