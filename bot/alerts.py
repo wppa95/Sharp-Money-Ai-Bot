@@ -1775,18 +1775,12 @@ class AlertDelivery:
         # but no new or re-entry prop may bypass the started-event check.
         if not removed:
             line_change = abs(new_line - old_line)
-            # Several active Underdog feeds omit scheduled_at entirely.  Do
-            # not turn that provider metadata gap into a total delivery
-            # outage for CS, Tennis, and FIFA.  Explicit live/final statuses
-            # and known timestamps are still enforced by is_game_alertable.
+            # A Telegram pick must have a known pregame state.  Some active
+            # feeds omit scheduled_at, but allowing those rows through when
+            # status is also blank/stale can send a pick after the event has
+            # started or ended.  Monitoring may retain unknown-timing rows;
+            # actionable delivery fails closed.
             _strict_pregame_required = strict_pregame
-            if (
-                _strict_pregame_required
-                and game_time is None
-                and str(sport or "").upper().strip()
-                in config.ud_allow_unknown_pregame_sports
-            ):
-                _strict_pregame_required = False
             allowed, timing_reason = is_game_alertable(
                 game_time,
                 min_minutes=0,

@@ -192,13 +192,14 @@ async def test_started_prizepicks_prop_cannot_reach_telegram(status):
 
 
 @pytest.mark.asyncio
-async def test_unknown_underdog_state_cannot_bypass_pregame_protection():
+@pytest.mark.parametrize("sport", ["NBA", "CS", "TENNIS", "FIFA"])
+async def test_unknown_underdog_state_cannot_bypass_pregame_protection(sport):
     delivery = _delivery()
     with patch("alerts.broadcast_alert", new_callable=AsyncMock) as broadcast:
         result = await delivery.deliver_underdog(
             "UD Player",
             "TEAM",
-            "NBA",
+            sport,
             "Points",
             20.5,
             21.5,

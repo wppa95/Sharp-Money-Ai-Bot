@@ -21,7 +21,7 @@ def _db():
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("sport", ["CS", "TENNIS", "FIFA"])
-async def test_supported_feed_without_schedule_can_deliver_evidence_backed_pick(sport):
+async def test_supported_feed_without_schedule_cannot_deliver_pick(sport):
     bot = MagicMock()
     bot.send_message = AsyncMock(return_value=MagicMock())
     delivery = AlertDelivery(_db(), bot, [123])
@@ -47,8 +47,10 @@ async def test_supported_feed_without_schedule_can_deliver_evidence_backed_pick(
         fetched_at=None,
     )
 
-    assert result.sent is True
-    bot.send_message.assert_awaited_once()
+    assert result.sent is False
+    assert result.filtered is True
+    assert "unknown" in result.filtered_reason.lower()
+    bot.send_message.assert_not_awaited()
 
 
 def test_snake_case_tennis_labels_use_official_markets():

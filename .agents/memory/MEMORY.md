@@ -91,7 +91,7 @@
 - [Command report resilience](command-report-resilience.md) — one locked SQLite counter must not make a Telegram health/report command fail wholesale.
 - [Workflow process verification](workflow-process-verification.md) — after restarting a managed bot workflow, verify and reconcile process count before trusting scheduler or Telegram state.
 - [Provider observation ordering](provider-observation-ordering.md) — persist raw provider observations before scoring; refresh metadata in place so failures cannot erase monitoring evidence.
-- [Pregame delivery boundary](pregame-safety-boundary.md) — strict known-pregame checks apply at production delivery/current-pick views; historical alert reports remain state-independent.
+- [Pregame delivery boundary](pregame-safety-boundary.md) — actionable Telegram delivery fails closed on unknown event timing; historical alert reports remain state-independent.
 - [Delivery dedup claims](delivery-dedup-claims.md) — pre-delivery identity claims prevent concurrent duplicates but must be released whenever no Telegram alert was delivered.
 - [Football active scope](football-active-scope.md) — exclude gridiron, rugby, and Australian-rules football upstream; preserve soccer and historical rows.
 - [Scheduler ownership](scheduler-ownership.md) — FPR owns the only scheduled full-pool rotation; Stable Refresh remains unscheduled compatibility code.

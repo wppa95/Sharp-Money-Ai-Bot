@@ -412,15 +412,6 @@ class Config:
     # temporarily suppressed from Telegram alerts.
     ALERT_DISABLED_SPORTS_RAW: str = os.environ.get("ALERT_DISABLED_SPORTS", "")
 
-    # Some active Underdog feeds (notably esports, tennis, and FIFA) do not
-    # include a usable scheduled_at value.  Their active projection feed still
-    # supplies the current market, while explicit live/final statuses remain
-    # blocked by the timing helper.  Keep this override narrow and configurable
-    # so it does not weaken timing checks for sports with reliable event times.
-    UD_ALLOW_UNKNOWN_PREGAME_SPORTS_RAW: str = os.environ.get(
-        "UD_ALLOW_UNKNOWN_PREGAME_SPORTS", "CS,TENNIS,FIFA"
-    )
-
     # ── Full-Pool Rescan (FPR) ────────────────────────────────────────────────
     # How many active props to score per FPR batch.  Bounded to control CPU/memory.
     FPR_BATCH_SIZE: int = int(os.environ.get("FPR_BATCH_SIZE", "10000"))
@@ -595,19 +586,6 @@ class Config:
         return frozenset(
             s.strip().upper()
             for s in self.ALERT_DISABLED_SPORTS_RAW.split(",")
-            if s.strip()
-        )
-
-    @property
-    def ud_allow_unknown_pregame_sports(self) -> frozenset[str]:
-        """Sports whose active feed may lack event timing metadata.
-
-        This only affects the ``game_time is None`` case.  Known past/live
-        timestamps and explicit blocked statuses are still rejected.
-        """
-        return frozenset(
-            s.strip().upper()
-            for s in self.UD_ALLOW_UNKNOWN_PREGAME_SPORTS_RAW.split(",")
             if s.strip()
         )
 
