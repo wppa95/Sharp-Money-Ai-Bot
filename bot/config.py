@@ -375,6 +375,14 @@ class Config:
     # Default is 0 (unlimited) — the scoring layer is the primary quality gate.
     # Set DAILY_UNDERDOG_LIMIT env var to a positive integer to re-enable.
     DAILY_UNDERDOG_LIMIT: int = int(os.environ.get("DAILY_UNDERDOG_LIMIT", "0"))
+    # Strict green-goblin sports receive a bounded best-pick batch on a
+    # rolling window. Monitoring and scoring continue between delivery batches.
+    STRICT_SPORT_ALERT_LIMIT: int = int(
+        os.environ.get("STRICT_SPORT_ALERT_LIMIT", "5")
+    )
+    STRICT_SPORT_ALERT_WINDOW_SECONDS: int = int(
+        os.environ.get("STRICT_SPORT_ALERT_WINDOW_SECONDS", "1200")
+    )
 
     # ── Per-tier confidence minimums ─────────────────────────────────────────
     # Alerts for each tier only fire when decision.confidence ≥ the minimum

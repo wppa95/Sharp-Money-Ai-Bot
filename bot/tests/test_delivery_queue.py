@@ -33,6 +33,7 @@ import pytest
 from market_engine import (
     _apply_delivery_diversification,
     _cand_priority,
+    _limit_strict_sport_delivery_batch,
     _select_best_per_sport,
     _select_best_over_under,
     _select_strong_directional_picks,
@@ -245,6 +246,53 @@ class TestDeliveryDiversification:
         assert result[0]["player"] == "B"
         assert result[0]["_group_rank"] == 0
         assert result[1]["_group_rank"] == 0   # each is first in its own group
+
+
+class TestStrictSportDeliveryBatch:
+    def test_limits_each_strict_sport_independently(self):
+        queue = [
+            _make_cand(player=f"MLB-{i}", sport="MLB")
+            for i in range(7)
+        ] + [
+            _make_cand(player=f"NBA-{i}", sport="NBA")
+            for i in range(6)
+        ] + [
+            _make_cand(player=f"WNBA-{i}", sport="WNBA")
+            for i in range(8)
+        ]
+
+        result = _limit_strict_sport_delivery_batch(
+            queue,
+            {},
+            limit=5,
+        )
+
+        assert sum(c["sport"] == "MLB" for c in result) == 5
+        assert sum(c["sport"] == "NBA" for c in result) == 5
+        assert sum(c["sport"] == "WNBA" for c in result) == 8
+
+    def test_existing_window_usage_leaves_only_remaining_slots(self):
+        queue = [
+            _make_cand(player=f"MLB-{i}", sport="MLB")
+            for i in range(5)
+        ] + [
+            _make_cand(player=f"NBA-{i}", sport="NBA")
+            for i in range(5)
+        ] + [
+            _make_cand(player="WNBA", sport="WNBA")
+        ]
+
+        result = _limit_strict_sport_delivery_batch(
+            queue,
+            {"MLB": 3, "NBA": 5},
+            limit=5,
+        )
+
+        assert [c["player"] for c in result] == [
+            "MLB-0",
+            "MLB-1",
+            "WNBA",
+        ]
 
 
 class TestBestDirectionalDelivery:
