@@ -183,13 +183,13 @@ def test_rotated_source_and_event_ids_are_logically_suppressed(identity_change):
     )
 
 
-def test_meaningful_line_change_is_not_suppressed():
+def test_meaningful_line_change_is_suppressed_for_production_identity():
     alerted = {}
     _record_prop_alerted(
         alerted, "Player", "MLB", "Hits", 0.5, **_identity()
     )
 
-    assert not _is_prop_deduped(
+    assert _is_prop_deduped(
         alerted, "Player", "MLB", "Hits", 1.5,
         **_dedup_kwargs(), **_identity()
     )

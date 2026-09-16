@@ -161,6 +161,66 @@ class TestSignificantLineMovement:
             store, PLAYER, SPORT, STAT, 1.6, WINDOW, MIN_CHANGE,
         )
 
+    def test_production_identity_dedupes_line_move_within_window(self):
+        """A line move must not resend the same directional production pick."""
+        store = {}
+        _record_prop_alerted(
+            store,
+            PLAYER,
+            SPORT,
+            STAT,
+            1.5,
+            now_ts=1000.0,
+            provider="Underdog",
+            source_id="old-source",
+            event_id="old-event",
+            direction="OVER",
+        )
+        assert _is_prop_deduped(
+            store,
+            PLAYER,
+            SPORT,
+            STAT,
+            2.5,
+            WINDOW,
+            MIN_CHANGE,
+            now_ts=1010.0,
+            provider="underdog",
+            source_id="new-source",
+            event_id="new-event",
+            direction="over",
+        )
+
+    def test_production_identity_normalizes_provider_and_logical_tokens(self):
+        """Feed refreshes must not bypass dedup through casing changes."""
+        store = {}
+        _record_prop_alerted(
+            store,
+            "Jordan Walker",
+            "MLB",
+            "Hits",
+            0.5,
+            now_ts=1000.0,
+            provider="Underdog",
+            source_id="source",
+            event_id="event",
+            direction="UNDER",
+        )
+        assert _is_prop_deduped(
+            store,
+            " jordan walker ",
+            "mlb",
+            "HITS",
+            0.5,
+            WINDOW,
+            MIN_CHANGE,
+            now_ts=1010.0,
+            provider="underdog",
+            source_id="rotated-source",
+            event_id="rotated-event",
+            direction="under",
+        )
+
 
 # ── _record_prop_alerted ───────────────────────────────────────────────────────
 

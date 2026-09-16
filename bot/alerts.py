@@ -1232,11 +1232,33 @@ class AlertDelivery:
         with self._prop_delivery_claim_lock:
             current = self._prop_delivery_claims.get(key)
             if current is not None:
-                claimed_at, claimed_line = current
+                claimed_at, _claimed_line = current
+                if now - claimed_at < config.UD_ALERT_DEDUP_WINDOW:
+                    return False
+
+            # Source/event IDs can rotate between provider refreshes. Do not
+            # let that turn one logical directional pick into repeated
+            # compatibility alerts while the dedup window is active.
+            logical_identity = (
+                key[0],
+                key[3],
+                key[4],
+                key[5],
+                key[6],
+            )
+            for stored_key, (claimed_at, _claimed_line) in self._prop_delivery_claims.items():
+                if len(stored_key) < 7:
+                    continue
+                stored_identity = (
+                    stored_key[0],
+                    stored_key[3],
+                    stored_key[4],
+                    stored_key[5],
+                    stored_key[6],
+                )
                 if (
-                    now - claimed_at < config.UD_ALERT_DEDUP_WINDOW
-                    and abs(float(line_value) - float(claimed_line))
-                    < config.MIN_UNDERDOG_LINE_CHANGE
+                    stored_identity == logical_identity
+                    and now - claimed_at < config.UD_ALERT_DEDUP_WINDOW
                 ):
                     return False
             self._prop_delivery_claims[key] = (now, float(line_value))

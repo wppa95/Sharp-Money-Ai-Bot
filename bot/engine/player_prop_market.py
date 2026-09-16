@@ -616,23 +616,40 @@ def _is_prop_deduped(
     # Source/event identifiers are useful audit metadata, but they can rotate
     # while the logical pick remains the same.  Once a direction is known, use
     # the stable provider × player × sport × market × direction identity as a
-    # fallback.  This prevents repeated MLB alerts after an Underdog refresh
+    # fallback.  This prevents repeated alerts after an Underdog refresh
     # without collapsing PrizePicks and Underdog into one delivery slot.
+    #
+    # Production delivery claims intentionally ignore line movement here.  A
+    # changing line is still persisted and shown in monitoring, but re-sending
+    # the same directional pick every time the feed moves is alert spam.  The
+    # legacy compact key below retains the historical line-change behavior for
+    # callers that do not provide provider identity.
     if direction:
-        logical_prefix = (player, sport, stat_type)
+        logical_prefix = tuple(
+            str(value or "").strip().casefold()
+            for value in (player, sport, stat_type)
+        )
         normalized_direction = str(direction).strip().upper()
-        normalized_provider = str(provider or "").strip()
+        normalized_provider = str(provider or "").strip().casefold()
         for stored_key, stored_value in alerted_set.items():
             if not isinstance(stored_key, tuple) or len(stored_key) < 7:
                 continue
-            if tuple(stored_key[:3]) != logical_prefix:
+            stored_prefix = tuple(
+                str(value or "").strip().casefold()
+                for value in stored_key[:3]
+            )
+            if stored_prefix != logical_prefix:
                 continue
-            if str(stored_key[3]).strip() != normalized_provider:
+            if str(stored_key[3]).strip().casefold() != normalized_provider:
                 continue
             if str(stored_key[6]).strip().upper() != normalized_direction:
                 continue
-            if _matches_recent(stored_value):
-                return True
+            try:
+                last_ts = float(stored_value[0])
+                if (ts - last_ts) < dedup_window_seconds:
+                    return True
+            except (TypeError, ValueError, IndexError):
+                continue
     return False
 
 
