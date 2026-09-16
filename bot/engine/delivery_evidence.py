@@ -23,45 +23,26 @@ _NESTED_KEYS = (
     "bet_evidence_json",
 )
 
-_HISTORY_OPTIONAL_SPORTS = frozenset({
-    # Esports identifiers used by the configured feeds.
-    "ESPORTS",
-    "CS",
-    "CS2",
-    "LOL",
-    "LEAGUE OF LEGENDS",
-    "VAL",
-    "VALORANT",
-    "DOTA",
-    "DOTA2",
-    # Tennis and soccer identifiers used by the configured feeds.
-    "TENNIS",
-    "SOCCER",
-    "FIFA",
-    "EPL",
-    "LALIGA",
-    "LA LIGA",
-    "SERIEA",
-    "SERIE A",
-    "BUNDESLIGA",
-    "LIGUE1",
-    "LIGUE 1",
-    "MLS",
-    "UCL",
-    "NWSL",
-})
+_STRICT_HISTORY_SPORTS = frozenset({"MLB", "NFL", "NBA"})
 
 
 def is_history_optional_sport(sport: Any) -> bool:
     """Return whether direction alone may qualify delivery for *sport*.
 
-    Esports, tennis, and soccer feeds may lack completed player-game history
-    at alert time. Every other sport must provide qualifying history.
+    NFL, NBA, and MLB are the strict green-goblin sports. All other sports
+    may be delivered from a directional decision before a completed
+    player-game history is available. The caller still enforces direction,
+    freshness, timing, and deduplication.
+
+    This is deliberately based on the strict set rather than a hand-maintained
+    list of aliases. The feed contains additional active sports (for example
+    CFB, WNBA, NHL, FIFA, and KBO), and omitting one from an optional-sport
+    allowlist silently turns it into tracking-only data.
     """
     normalized = " ".join(
         str(sport or "").strip().upper().replace("_", " ").replace("-", " ").split()
     )
-    return normalized in _HISTORY_OPTIONAL_SPORTS
+    return bool(normalized) and normalized not in _STRICT_HISTORY_SPORTS
 
 
 def is_historical_average_source(value: Any) -> bool:

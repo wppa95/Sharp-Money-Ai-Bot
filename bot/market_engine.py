@@ -4121,8 +4121,12 @@ def _cand_priority(c: dict) -> float:
 
 
 def _delivery_sport_priority(sport: object) -> int:
-    """Return a low-priority rank for baseball, without disabling it."""
-    return 1 if str(sport or "").strip().upper() in {"MLB", "BASEBALL"} else 0
+    """Return a low-priority rank for NFL and MLB, without disabling either."""
+    return (
+        1
+        if str(sport or "").strip().upper() in {"NFL", "MLB", "BASEBALL"}
+        else 0
+    )
 
 
 def _apply_delivery_diversification(queue: list) -> list:

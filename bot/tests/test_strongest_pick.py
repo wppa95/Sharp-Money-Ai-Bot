@@ -232,3 +232,47 @@ def test_strong_mode_keeps_consistent_history_and_ranks_it_first():
     )
 
     assert selected == [strong, weaker_strong]
+
+
+@pytest.mark.parametrize("sport", ["CFB", "WNBA", "NHL", "FIFA", "KBO"])
+def test_high_priority_non_strict_sports_do_not_need_six_window_history(sport):
+    candidate = _candidate(
+        "Underdog",
+        "Jordan Lee",
+        "Points",
+        confidence=85,
+        evidence=False,
+        evidence_count=0,
+    )
+    candidate["sport"] = sport
+    candidate["decision"] = SimpleNamespace(
+        recommendation="OVER",
+        confidence=85,
+    )
+
+    assert select_strongest_actionable_picks(
+        [candidate],
+        require_strong=True,
+    ) == [candidate]
+
+
+@pytest.mark.parametrize("sport", ["MLB", "NFL", "NBA"])
+def test_strict_history_sports_still_need_complete_history(sport):
+    candidate = _candidate(
+        "Underdog",
+        "Jordan Lee",
+        "Points",
+        confidence=85,
+        evidence=False,
+        evidence_count=0,
+    )
+    candidate["sport"] = sport
+    candidate["decision"] = SimpleNamespace(
+        recommendation="OVER",
+        confidence=85,
+    )
+
+    assert select_strongest_actionable_picks(
+        [candidate],
+        require_strong=True,
+    ) == []

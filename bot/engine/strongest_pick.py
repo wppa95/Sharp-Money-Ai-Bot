@@ -141,9 +141,10 @@ def is_strong_actionable_pick(
 ) -> bool:
     """Return whether a candidate meets the shared strongest-pick contract.
 
-    Strict-history sports need complete directional history.  Esports, tennis,
-    and soccer retain their existing direction-plus-provider-evidence path, but
-    must still have a strong directional confidence signal when one is present.
+    Strict-history sports need complete directional history. High-priority
+    non-MLB/NFL/NBA sports retain the direction-plus-confidence path used by
+    the canonical delivery gate, even when completed player-game history is
+    not available yet.
     """
     direction = _direction(candidate)
     if direction not in {"OVER", "UNDER"}:
@@ -154,9 +155,8 @@ def is_strong_actionable_pick(
     sport = _sport(candidate)
     history = candidate.get("hit_rates") or candidate.get("decision")
     if is_history_optional_sport(sport):
-        evidence, _sample_count = _validation_evidence(candidate)
         strength = _directional_strength(candidate)
-        return bool(evidence) and strength is not None and strength >= 75.0
+        return strength is not None and strength >= 75.0
     return has_strong_directional_history(history, direction)
 
 
