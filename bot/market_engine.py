@@ -4156,23 +4156,23 @@ def _apply_delivery_diversification(queue: list) -> list:
         return group
 
     ranked = _rank_group(list(queue))
-    # User-facing preference is non-baseball first. Interleave one MLB item
-    # after every three other sports so a large football/basketball feed cannot
-    # indefinitely starve legitimate MLB candidates under the delivery cap.
-    non_baseball = [
+    # User-facing preference is non-low-priority sports first. Interleave one
+    # low-priority item after every three other sports so NFL/MLB cannot
+    # indefinitely starve high-priority candidates under the delivery cap.
+    non_low_priority = [
         candidate for candidate in ranked
         if _delivery_sport_priority(candidate.get("sport")) == 0
     ]
-    baseball = [
+    low_priority = [
         candidate for candidate in ranked
         if _delivery_sport_priority(candidate.get("sport")) == 1
     ]
     result = []
-    while non_baseball or baseball:
-        result.extend(non_baseball[:3])
-        del non_baseball[:3]
-        if baseball:
-            result.append(baseball.pop(0))
+    while non_low_priority or low_priority:
+        result.extend(non_low_priority[:3])
+        del non_low_priority[:3]
+        if low_priority:
+            result.append(low_priority.pop(0))
     # Empty/unknown sport queues still retain the same ordering semantics.
     queue.clear()
     queue.extend(result)

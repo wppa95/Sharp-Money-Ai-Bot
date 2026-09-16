@@ -203,9 +203,9 @@ class TestDeliveryDiversification:
         result = _apply_delivery_diversification(q)
         assert [c["player"] for c in result] == ["B", "A", "C"]
 
-    def test_mlb_remains_eligible_after_three_non_baseball_candidates(self):
+    def test_mlb_remains_eligible_after_three_high_priority_candidates(self):
         queue = [
-            _make_cand(player=f"N{i}", sport="NFL", stat_type="Yards")
+            _make_cand(player=f"N{i}", sport="WNBA", stat_type="Points")
             for i in range(4)
         ]
         queue.append(_make_cand(player="M", sport="MLB", stat_type="Hits"))
@@ -213,6 +213,16 @@ class TestDeliveryDiversification:
         assert [candidate["player"] for candidate in result] == [
             "N0", "N1", "N2", "M", "N3",
         ]
+
+    def test_nfl_is_low_priority_after_high_priority_candidates(self):
+        queue = [
+            _make_cand(player="NFL", sport="NFL", stat_type="Yards"),
+            _make_cand(player="WNBA", sport="WNBA", stat_type="Points"),
+        ]
+
+        result = _apply_delivery_diversification(queue)
+
+        assert [candidate["player"] for candidate in result] == ["WNBA", "NFL"]
 
     def test_group_rank_attribute_set(self):
         """After diversification, _group_rank is set on each candidate."""

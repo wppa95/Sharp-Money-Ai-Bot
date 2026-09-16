@@ -291,8 +291,8 @@ def test_history_optional_sports_still_require_direction(sport):
     ) is False
 
 
-@pytest.mark.parametrize("sport", ["MLB", "NBA", "NFL", "NHL"])
-def test_non_optional_sports_require_history_even_with_direction(sport):
+@pytest.mark.parametrize("sport", ["MLB", "NBA", "NFL"])
+def test_green_goblin_sports_require_history_even_with_direction(sport):
     validation = SimpleNamespace(
         has_supporting_data=True,
         data_source="historical_average",

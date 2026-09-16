@@ -240,14 +240,14 @@ def test_high_priority_non_strict_sports_do_not_need_six_window_history(sport):
         "Underdog",
         "Jordan Lee",
         "Points",
-        confidence=85,
+        confidence=55,
         evidence=False,
         evidence_count=0,
     )
     candidate["sport"] = sport
     candidate["decision"] = SimpleNamespace(
         recommendation="OVER",
-        confidence=85,
+        confidence=55,
     )
 
     assert select_strongest_actionable_picks(

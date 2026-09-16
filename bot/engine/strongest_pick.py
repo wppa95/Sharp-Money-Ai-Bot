@@ -155,8 +155,10 @@ def is_strong_actionable_pick(
     sport = _sport(candidate)
     history = candidate.get("hit_rates") or candidate.get("decision")
     if is_history_optional_sport(sport):
-        strength = _directional_strength(candidate)
-        return strength is not None and strength >= 75.0
+        # Non-goblin sports are actionable as soon as the canonical gate has
+        # a direction. Do not turn the legacy confidence score into a second
+        # delivery gate.
+        return True
     return has_strong_directional_history(history, direction)
 
 

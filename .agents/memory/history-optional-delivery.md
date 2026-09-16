@@ -3,8 +3,8 @@ name: History-optional delivery policy
 description: Sport-specific player-history requirements for directional Telegram delivery.
 ---
 
-Only esports, tennis, and soccer may be delivered without completed player-game history; every other sport requires qualifying real or supplemental history, and every sport still requires OVER or UNDER direction.
+NFL, NBA, and MLB are the strict green-goblin sports; all other active sports may be delivered on direction alone, and every sport still requires OVER or UNDER direction.
 
-**Why:** Those three feed families can lack usable history at alert time, while sending other sports without player evidence creates unsupported user-facing picks.
+**Why:** The user explicitly prioritizes every non-goblin sport for directional alerts, while reserving lowest-line green-goblin selection for NFL, NBA, and MLB.
 
-**How to apply:** Keep the sport-aware exception in the shared delivery evidence gate and the final Telegram backstop. Do not treat historical line averages, proxy snapshots, or market movement as history for non-exempt sports.
+**How to apply:** Keep the sport-aware exception in the shared delivery evidence gate and strongest-pick selector. Strict sports still use complete directional history and lowest-line green-goblin selection; non-strict sports must not gain a confidence gate beyond direction.
