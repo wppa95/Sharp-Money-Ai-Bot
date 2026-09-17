@@ -2585,12 +2585,14 @@ async def _run_prizepicks_independent_cycle(
     _processing_locked: bool = False,
     background_processing: bool = False,
 ) -> None:
-    """Evaluate the authorized PrizePicks feed through the shared prop pipeline.
+    """Evaluate PropLine observations through the shared Underdog pipeline.
 
     This is deliberately a companion coroutine of ``underdog_job`` rather than
     another scheduled job.  It owns no scoring, result, or delivery rules:
-    those are the same functions used by Underdog.  A provider failure is
-    contained here so it can never abort the Underdog scan.
+    those are the same functions used by Underdog.  The provider identity
+    remains PrizePicks/PropLine throughout canonicalization, enrichment,
+    deduplication, persistence, and delivery bookkeeping.  A provider failure
+    is contained here so it can never abort the Underdog scan.
     """
     global _prizepicks_processing_lock
     if _fetched_props is not None and not _processing_locked:
@@ -4461,7 +4463,7 @@ async def clv_check_job(context) -> None:
 # ── Shared Underdog + PropLine monitoring cycle ────────────────────────────────
 
 def _shared_monitoring_cycle(cycle_branch):
-    """Run one Underdog evaluation cycle with PropLine evidence preloaded."""
+    """Run Underdog, then hand completed PropLine observations to its pipeline."""
 
     @wraps(cycle_branch)
     async def _run_shared_cycle(context, *args, **kwargs):
@@ -4476,10 +4478,15 @@ def _shared_monitoring_cycle(cycle_branch):
             cycle_branch(context, *args, **kwargs),
             name="shared_monitoring_underdog",
         )
-        if (
+        new_ingestion_task = (
             _propline_ingest_task is None
             or _propline_ingest_task.done()
-        ):
+        )
+        if new_ingestion_task:
+            # Only clear the previous handoff when starting a replacement
+            # ingestion task.  An active task owns the pending batch and must
+            # not lose it while the Underdog branch is evaluating.
+            _propline_pending_props.clear()
             _propline_ingest_task = asyncio.create_task(
                 propline_request_scan_job(context),
                 name="shared_monitoring_propline_ingestion",
@@ -4510,10 +4517,10 @@ def _shared_monitoring_cycle(cycle_branch):
                 "reusing its queued handoff"
             )
 
-        # PropLine owns its pacing and persistence in the background task.
-        # Do not await the full bookmaker/sport rotation here: a slow optional
-        # feed must not hold the 60-second Underdog health cycle open.
-        _propline_pending_props.clear()
+        # PropLine owns its pacing and persistence, but completed observations
+        # must be handed to the shared evaluator.  Keep a local reference
+        # because the completion callback clears the module-level task slot.
+        _ingestion_task = _propline_ingest_task
         try:
             result = await _underdog_task
         except asyncio.CancelledError:
@@ -4525,13 +4532,43 @@ def _shared_monitoring_cycle(cycle_branch):
             await asyncio.gather(_underdog_task, return_exceptions=True)
             raise
         else:
-            # Do not make a slow/independent PropLine companion extend or
-            # coalesce the next Underdog tick. Its task has its own completion
-            # callback and remains safe across the next current-book fetch.
+            ingestion_complete = False
+            if _ingestion_task is not None:
+                try:
+                    ingestion_complete = bool(await _ingestion_task)
+                except asyncio.CancelledError:
+                    raise
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning(
+                        "shared_monitoring_cycle: PropLine handoff unavailable: %s",
+                        type(exc).__name__,
+                    )
+
+            pending_props = list(_propline_pending_props.values())
+            _propline_pending_props.clear()
+            if ingestion_complete and pending_props:
+                logger.info(
+                    "shared_monitoring_cycle: handing off %d PropLine observations "
+                    "to the shared Underdog evaluator",
+                    len(pending_props),
+                )
+                await _run_prizepicks_independent_cycle(
+                    context,
+                    _fetched_props=pending_props,
+                    _fetched_sport="shared",
+                    _fetched_persisted=True,
+                    background_processing=False,
+                )
+
             health = get_health_tracker()
             if health is not None:
                 health.record_monitoring_cycle_complete()
-            logger.info("shared_monitoring_cycle: Underdog completed")
+            logger.info(
+                "shared_monitoring_cycle: Underdog completed; "
+                "PropLine handoff complete=%s observations=%d",
+                ingestion_complete,
+                len(pending_props),
+            )
             return result
         finally:
             if (

@@ -107,7 +107,7 @@ async def test_shared_cycle_does_not_create_empty_propline_opportunity_batch(mon
 
 
 @pytest.mark.asyncio
-async def test_shared_cycle_does_not_handoff_propline_props_to_delivery(monkeypatch):
+async def test_shared_cycle_handoffs_propline_props_to_shared_evaluator(monkeypatch):
     calls = []
     prop = SimpleNamespace(player_name="Paced Player")
 
@@ -124,10 +124,17 @@ async def test_shared_cycle_does_not_handoff_propline_props_to_delivery(monkeypa
     async def underdog_branch(_context):
         return None
 
+    async def propline_ingestion(_context):
+        market_engine._propline_pending_props["prop"] = prop
+        return True
+
     monkeypatch.setattr(
         market_engine,
         "_propline_pending_props",
-        {"prop": prop},
+        {},
+    )
+    monkeypatch.setattr(
+        market_engine, "propline_request_scan_job", propline_ingestion
     )
     monkeypatch.setattr(
         market_engine,
@@ -138,7 +145,10 @@ async def test_shared_cycle_does_not_handoff_propline_props_to_delivery(monkeypa
     await market_engine._shared_monitoring_cycle(underdog_branch)(SimpleNamespace())
     await asyncio.sleep(0)
 
-    assert calls == []
+    assert len(calls) == 1
+    assert calls[0][0] == [prop]
+    assert calls[0][1] == "shared"
+    assert calls[0][2] is True
 
 
 @pytest.mark.asyncio
