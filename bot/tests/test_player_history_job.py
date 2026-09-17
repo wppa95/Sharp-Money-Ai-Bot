@@ -197,6 +197,78 @@ async def test_history_collector_never_calls_scheduled_propline_history():
 
 
 @pytest.mark.asyncio
+async def test_dota_history_prefers_configured_propline_results_over_opendota(
+    caplog,
+):
+    caplog.set_level("INFO")
+    dota_row = SimpleNamespace(
+        player_name="DOTA Alias",
+        sport="DOTA",
+        stat_type="kills",
+        game_date="2026-09-15",
+        actual_value=24.0,
+        opponent=None,
+        source="propline_event_stats",
+        game_id="dota-event-1",
+    )
+    snapshot = SimpleNamespace(
+        player_name="DOTA Alias",
+        sport="DOTA",
+        stat_type="kills",
+    )
+    db = MagicMock()
+    db.get_all_active_prop_line_history_by_line = AsyncMock(
+        return_value={
+            ("PrizePicks", "DOTA Alias", "DOTA", "kills"): snapshot,
+        }
+    )
+    db.upsert_player_results_bulk = AsyncMock()
+    primary_provider = MagicMock()
+    primary_provider.fetch_results = AsyncMock(
+        side_effect=AssertionError("OpenDota must not be used when PropLine is configured")
+    )
+    scheduled_provider = MagicMock()
+    scheduled_provider._propline_client = SimpleNamespace(is_configured=True)
+
+    async def supplement(
+        _db,
+        player_name,
+        sport,
+        stat_type,
+        *,
+        min_samples,
+        source_provider,
+    ):
+        assert (player_name, sport, stat_type) == (
+            "DOTA Alias",
+            "DOTA",
+            "kills",
+        )
+        assert min_samples == 5
+        assert source_provider == "PrizePicks"
+        return [dota_row]
+
+    scheduled_provider.supplement_missing_results = supplement
+    context = SimpleNamespace(
+        bot_data={
+            "db": db,
+            "player_history_provider": scheduled_provider,
+        }
+    )
+
+    with patch(
+        "providers.player_stats.PlayerStatsProvider",
+        return_value=primary_provider,
+    ):
+        await player_history_collector_job(context)
+
+    primary_provider.fetch_results.assert_not_awaited()
+    db.upsert_player_results_bulk.assert_awaited_once_with([dota_row])
+    assert "propline_attempts_by_sport={'DOTA': 1}" in caplog.text
+    assert "propline_coverage_by_sport={'DOTA': {'kills': 1}}" in caplog.text
+
+
+@pytest.mark.asyncio
 async def test_player_history_collects_prizepicks_only_active_target():
     """PrizePicks-only rows use the same shared historical provider path."""
     pp_row = SimpleNamespace(

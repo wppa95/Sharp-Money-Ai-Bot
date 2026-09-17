@@ -954,7 +954,7 @@ _prizepicks_processing_lock: Optional[asyncio.Lock] = None
 _PRIZEPICKS_DEDUP_PREFIX = "PrizePicks::"
 _prizepicks_sport_cursor = 0
 _propline_request_cursor = 0
-_propline_pending_props: dict[tuple[str, str, str, str, str], object] = {}
+_propline_pending_props: dict[tuple, object] = {}
 _propline_request_lock: Optional[asyncio.Lock] = None
 _propline_ingest_task: Optional[asyncio.Task] = None
 _fpr_handoff_task: Optional[asyncio.Task] = None
@@ -962,7 +962,7 @@ _fpr_handoff_task: Optional[asyncio.Task] = None
 # companion branch is running.  This is supplemental evidence only; it never
 # replaces an Underdog snapshot or creates a second alert path.
 _PROPLINE_EVIDENCE_TTL_SECONDS = 20 * 60
-_propline_current_observations: dict[tuple[str, str, str, str, str], object] = {}
+_propline_current_observations: dict[tuple, object] = {}
 _propline_evidence_by_identity: dict[tuple[str, str, str, str], list[object]] = {}
 _propline_empty_sport_until: dict[str, float] = {}
 _propline_empty_feed_streak: dict[str, int] = {}
@@ -1400,7 +1400,7 @@ def _cache_propline_evidence(
         ).total_seconds() > _PROPLINE_EVIDENCE_TTL_SECONDS:
             continue
         _propline_current_observations[
-            (str(provider), player, sport, stat, event_id)
+            _propline_prop_key(prop, provider=provider)
         ] = prop
 
     cutoff = now - timedelta(seconds=_PROPLINE_EVIDENCE_TTL_SECONDS)
@@ -1431,8 +1431,17 @@ def _propline_prop_key(
     prop: object,
     *,
     provider: str = "PrizePicks",
-) -> tuple[str, str, str, str, str]:
-    """Return a stable key for the latest PropLine observation buffer."""
+) -> tuple[str, str, str, str, str, str, str, float]:
+    """Return a stable key for one PropLine observation.
+
+    Event identity alone is not sufficient: one player/stat/event can expose
+    several alternate lines, and a moving line must remain independently
+    gradeable in the handoff and evidence cache.
+    """
+    try:
+        line = float(getattr(prop, "line_value", 0.0) or 0.0)
+    except (TypeError, ValueError):
+        line = 0.0
     return (
         str(provider),
         str(getattr(prop, "player_name", "") or "").strip().lower(),
@@ -1443,6 +1452,9 @@ def _propline_prop_key(
             or getattr(prop, "game_id", "")
             or ""
         ).strip(),
+        str(getattr(prop, "external_id", "") or "").strip(),
+        str(getattr(prop, "line_variant", "") or "").strip().lower(),
+        line,
     )
 
 

@@ -531,11 +531,82 @@ async def player_history_collector_job(context) -> None:
         budget_exhausted = False
         fetch_semaphore = asyncio.Semaphore(_PLAYER_HISTORY_FETCH_CONCURRENCY)
         completed_targets: list[tuple[str, str, str]] = []
-        # PropLine's documented player-history endpoint is one-player-at-a-time.
-        # It is intentionally not part of this collector: authenticated
-        # history must not be spent as a per-target supplement.  The collector
-        # continues to batch primary-provider work and bulk-persist completed
-        # results; PropLine observations remain available through the bulk feed.
+        history_provider = bot_data.get("player_history_provider")
+
+        async def fetch_dota_propline(
+            player: str,
+            stat: str,
+            source_provider: str,
+            remaining: float,
+        ):
+            """Use PropLine's verified DOTA result path when configured.
+
+            OpenDota requires a resolvable public handle and is not the source
+            of truth for PropLine observations.  PropLine's esports event
+            stats path joins final events and player stats by explicit IDs,
+            which covers feed names such as aliases and avoids silently
+            attributing unrelated OpenDota matches.
+            """
+            supplement = getattr(
+                history_provider, "supplement_missing_results", None
+            )
+            if not asyncio.iscoroutinefunction(supplement):
+                return None
+            client = getattr(history_provider, "_propline_client", None)
+            if client is None:
+                try:
+                    from providers.propline import PropLineClient
+
+                    client = PropLineClient()
+                    history_provider._propline_client = client
+                except Exception:
+                    return None
+            if not bool(getattr(client, "is_configured", False)):
+                return None
+            market = str(stat or "").strip().lower() or "unknown"
+            propline_attempts_by_sport["DOTA"] = (
+                propline_attempts_by_sport.get("DOTA", 0) + 1
+            )
+            sport_markets = propline_attempts_by_sport_market.setdefault(
+                "DOTA", {}
+            )
+            sport_markets[market] = sport_markets.get(market, 0) + 1
+            try:
+                rows = await asyncio.wait_for(
+                    supplement(
+                        db,
+                        player,
+                        "DOTA",
+                        stat,
+                        min_samples=5,
+                        source_provider=source_provider or "Underdog",
+                    ),
+                    timeout=min(_PLAYER_HISTORY_OPERATION_TIMEOUT_SECONDS, remaining),
+                )
+            except asyncio.TimeoutError:
+                return "deadline", None
+            except Exception as exc:
+                logger.debug(
+                    "player_history_collector_job: PropLine DOTA history "
+                    "failed for %s/%s: %s",
+                    player,
+                    stat,
+                    type(exc).__name__,
+                )
+                return "error", exc
+            row_count = len(rows or ())
+            sport_coverage = propline_coverage_by_sport.setdefault("DOTA", {})
+            sport_coverage[market] = sport_coverage.get(market, 0) + row_count
+            market_coverage = propline_coverage_by_sport_market.setdefault(
+                "DOTA", {}
+            ).setdefault(market, {})
+            market_coverage["rows"] = market_coverage.get("rows", 0) + row_count
+            return "ok", SimpleNamespace(
+                rows=list(rows or ()),
+                status="usable" if rows else "empty",
+                provider="PropLine",
+            )
+
         async def fetch_target(player: str, sport: str, stat: str):
             async with fetch_semaphore:
                 try:
@@ -544,6 +615,15 @@ async def player_history_collector_job(context) -> None:
                     remaining = cycle_deadline - time.monotonic()
                     if remaining <= 0:
                         return "deadline", None
+                    if sport == "DOTA":
+                        propline_result = await fetch_dota_propline(
+                            player,
+                            stat,
+                            source_scope((player, sport, stat)),
+                            remaining,
+                        )
+                        if propline_result is not None:
+                            return propline_result
                     raw = await asyncio.wait_for(
                         provider.fetch_results(player, sport, stat),
                         timeout=min(
@@ -551,9 +631,6 @@ async def player_history_collector_job(context) -> None:
                             remaining,
                         ),
                     )
-                    # The collector's remote work is the primary provider
-                    # fetch above. Do not invoke the singular PropLine history
-                    # endpoint for targets with a short primary result set.
                     coverage = SimpleNamespace(
                         rows=list(raw or []),
                         status="usable" if raw else "",

@@ -1677,7 +1677,8 @@ async def _player_props_job(context) -> None:
         return
     logger.info(
         "_player_props_job: OddsAPI player-prop polling disabled; "
-        "PropLine owns PrizePicks/DraftKings/FanDuel/Underdog feed ingestion"
+        "PropLine observations feed the shared Underdog evaluation, "
+        "persistence, tracking, grading, and source-aware reporting path"
     )
     return
 
