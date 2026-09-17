@@ -52,3 +52,20 @@ def to_reporting_timezone(value: datetime | None) -> datetime | None:
         return None
     aware = value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value
     return aware.astimezone(reporting_timezone())
+
+
+def is_current_reporting_day(
+    value: datetime | None,
+    *,
+    now: datetime | None = None,
+) -> bool:
+    """Return whether an event falls on today's configured reporting date.
+
+    Stored event timestamps are UTC-naive in SQLite, while the user's meaning
+    of "today" follows REPORTING_TIMEZONE. Unknown event dates fail closed.
+    """
+    event_local = to_reporting_timezone(value)
+    if event_local is None:
+        return False
+    local_now = (now or reporting_now()).astimezone(reporting_timezone())
+    return event_local.date() == local_now.date()

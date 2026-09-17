@@ -518,6 +518,14 @@ class PregameWatchEngine:
             if not timing_allowed:
                 logger.debug("pregame_watch: timing blocked %s: %s", alert_key, timing_reason)
                 continue
+            from reporting import is_current_reporting_day
+            if not is_current_reporting_day(entry.game_start):
+                logger.debug(
+                    "pregame_watch: reporting-day blocked %s: event=%s",
+                    alert_key,
+                    entry.game_start,
+                )
+                continue
 
             # Alert conditions
             is_first_alert   = alert_key not in self._alerted_set

@@ -7,7 +7,7 @@ Uses mocking so no real DB, bot, or network is needed.
 from __future__ import annotations
 
 import pytest
-from datetime import datetime
+from datetime import datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -328,6 +328,28 @@ async def test_underdog_timing_filter_blocks():
 
     assert result.sent is False
     assert result.filtered is True
+
+
+@pytest.mark.asyncio
+async def test_underdog_strict_delivery_blocks_next_reporting_day():
+    """Actionable picks must not be sent for tomorrow's event slate."""
+    db = _make_db()
+    delivery = _make_delivery(db)
+
+    from alert_scope_filter import FilterResult
+    with patch("alert_scope_filter.check", return_value=FilterResult(allowed=True)):
+        result = await delivery.deliver_underdog(
+            "Tomorrow Player", "TeamA", "NBA", "Points",
+            25.5, 26.0,
+            game_time=datetime.utcnow() + timedelta(days=1),
+            decision=SimpleNamespace(recommendation="OVER"),
+            strict_pregame=True,
+        )
+
+    assert result.sent is False
+    assert result.filtered is True
+    assert "current reporting day" in result.filtered_reason
+    delivery._bot.send_message.assert_not_awaited()
 
 
 @pytest.mark.asyncio

@@ -1773,6 +1773,7 @@ class AlertDelivery:
             format_market_move_detected,
         )
         from engine.timing import is_game_alertable
+        from reporting import is_current_reporting_day
 
         if not _is_fresh_delivery_line(fetched_at):
             logger.debug(
@@ -1796,6 +1797,22 @@ class AlertDelivery:
         # 2. Game timing filter.  Removal records may arrive after the event,
         # but no new or re-entry prop may bypass the started-event check.
         if not removed:
+            if strict_pregame and not is_current_reporting_day(game_time):
+                logger.debug(
+                    "Underdog alert day-blocked: %s | %s | event=%s",
+                    player_name,
+                    stat_type,
+                    game_time,
+                )
+                return DeliveryResult(
+                    sent=False,
+                    filtered=True,
+                    filtered_reason=(
+                        "Event is not scheduled for the current reporting day"
+                        if game_time is not None
+                        else "Event date is unknown"
+                    ),
+                )
             line_change = abs(new_line - old_line)
             # A Telegram pick must have a known pregame state.  Some active
             # feeds omit scheduled_at, but allowing those rows through when

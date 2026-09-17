@@ -8,6 +8,7 @@ import pytest
 from datetime import datetime, timedelta, timezone
 
 from engine.timing import is_game_alertable, format_game_time_label
+from reporting import is_current_reporting_day
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -116,6 +117,22 @@ class TestAwareDatetime:
         aware = datetime.now(timezone.utc) - timedelta(minutes=10)
         ok, _ = is_game_alertable(aware, edge=5.0, **DEFAULT)
         assert ok is False
+
+
+class TestCurrentReportingDay:
+    def test_accepts_event_on_reporting_day(self):
+        now = datetime(2026, 9, 17, 18, 0, tzinfo=timezone.utc)
+        event = datetime(2026, 9, 18, 0, 30, tzinfo=timezone.utc)
+        # 00:30 UTC is 19:30 CDT on September 17.
+        assert is_current_reporting_day(event, now=now) is True
+
+    def test_rejects_next_reporting_day(self):
+        now = datetime(2026, 9, 17, 23, 30, tzinfo=timezone.utc)
+        event = datetime(2026, 9, 18, 12, 0, tzinfo=timezone.utc)
+        assert is_current_reporting_day(event, now=now) is False
+
+    def test_unknown_event_date_fails_closed(self):
+        assert is_current_reporting_day(None) is False
 
 
 # ── format_game_time_label ────────────────────────────────────────────────────
