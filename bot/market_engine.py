@@ -990,6 +990,45 @@ def _propline_provider_label(bookmaker: str) -> str:
     )
 
 
+def _queue_propline_history_targets(context, props: list[object]) -> int:
+    """Prioritize history collection for newly persisted PropLine players."""
+    try:
+        from engine.sport_policy import canonical_sport_key
+        from player_history_job import queue_priority_history_targets
+
+        targets: list[tuple[str, str, str]] = []
+        for prop in props or []:
+            player = str(
+                getattr(prop, "player_name", None)
+                or getattr(prop, "player", None)
+                or ""
+            ).strip()
+            sport = canonical_sport_key(
+                getattr(prop, "sport", None) or "UNKNOWN"
+            )
+            stat = str(
+                getattr(prop, "stat_type", None)
+                or getattr(prop, "market", None)
+                or ""
+            ).strip()
+            if not stat:
+                selection = str(getattr(prop, "selection", None) or "").strip()
+                line = getattr(prop, "line_value", None)
+                stat = _extract_ud_stat_type(selection, player, line)
+            if player and sport and stat and stat.lower() != "unknown":
+                targets.append((player, sport, stat))
+        return queue_priority_history_targets(
+            getattr(context, "bot_data", None),
+            targets,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "propline_request_scan: history target queue failed: %s",
+            type(exc).__name__,
+        )
+        return 0
+
+
 def _configured_propline_provider_labels() -> tuple[str, ...]:
     """Return every configured PropLine source label for shared monitoring."""
     labels: list[str] = []
@@ -1584,6 +1623,18 @@ async def propline_request_scan_job(context) -> None:
                         props,
                         provider=source_provider,
                     )
+                    queued_history_targets = _queue_propline_history_targets(
+                        context,
+                        props,
+                    )
+                    if queued_history_targets:
+                        logger.info(
+                            "propline_request_scan: queued %d new player-history "
+                            "targets provider=%s sport=%s",
+                            queued_history_targets,
+                            source_provider,
+                            sport,
+                        )
                     # The legacy independent PrizePicks evaluator consumes this
                     # handoff. Other PropLine bookmakers are persisted/tracked
                     # but must never enter a PrizePicks delivery lane.

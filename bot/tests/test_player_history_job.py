@@ -16,6 +16,7 @@ from player_history_job import (
     _API_CALL_TARGET,
     _SUPPORTED_HISTORY_SPORTS,
     _fair_cycle_targets,
+    queue_priority_history_targets,
     _uses_propline_history,
     player_history_collector_job,
 )
@@ -46,6 +47,22 @@ def test_history_target_floor_covers_current_active_book():
 
 def test_fifa_uses_existing_soccer_history_path():
     assert "FIFA" in _SUPPORTED_HISTORY_SPORTS
+
+
+def test_priority_history_targets_are_deduplicated_and_normalized():
+    bot_data = {}
+    assert queue_priority_history_targets(
+        bot_data,
+        [
+            ("  New Player ", "NBA", " Points "),
+            ("New Player", "NBA", "points"),
+            ("", "NBA", "assists"),
+            ("Unknown Sport", "UNKNOWN", "points"),
+        ],
+    ) == 1
+    assert bot_data["_player_history_priority_targets"] == {
+        ("New Player", "NBA", "points")
+    }
 
 
 def test_football_aliases_are_history_targets():
@@ -205,6 +222,35 @@ async def test_player_history_collects_prizepicks_only_active_target():
     fake_provider.fetch_results.assert_awaited_once_with(
         "PP Player", "NBA", "points"
     )
+
+
+@pytest.mark.asyncio
+async def test_priority_propline_target_is_fetched_when_active_read_misses_it():
+    db = MagicMock()
+    db.get_all_active_prop_line_history_by_line = AsyncMock(return_value={})
+    db.get_latest_props_for_provider = AsyncMock(return_value=[])
+    db.upsert_player_results_bulk = AsyncMock()
+    context = SimpleNamespace(
+        bot_data={
+            "db": db,
+            "_player_history_priority_targets": {
+                ("New PP Player", "NBA", "points")
+            },
+        }
+    )
+    fake_provider = MagicMock()
+    fake_provider.fetch_results = AsyncMock(return_value=[])
+
+    with patch(
+        "providers.player_stats.PlayerStatsProvider",
+        return_value=fake_provider,
+    ):
+        await player_history_collector_job(context)
+
+    fake_provider.fetch_results.assert_awaited_once_with(
+        "New PP Player", "NBA", "points"
+    )
+    assert "_player_history_priority_targets" not in context.bot_data
 
 
 @pytest.mark.asyncio

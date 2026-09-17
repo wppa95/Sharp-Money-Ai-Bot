@@ -80,6 +80,7 @@ _PLAYER_PROP_PROVIDERS = tuple(
     )
     if enabled
 )
+_PRIORITY_TARGETS_KEY = "_player_history_priority_targets"
 # PropLine's Pro allowance is shared by every authenticated endpoint and
 # client process.  The collector owns the history-target portion of that
 # allowance; the client limiter is the final admission gate for all endpoint
@@ -168,6 +169,47 @@ def reset_player_history_runtime_state(bot_data: dict | None = None) -> None:
         bot_data.pop(_NEXT_TARGET_KEY, None)
         bot_data.pop(_CURSOR_KEY, None)
         bot_data.pop(_PROPLINE_CURSOR_KEY, None)
+        bot_data.pop(_PRIORITY_TARGETS_KEY, None)
+
+
+def queue_priority_history_targets(
+    bot_data: dict | None,
+    targets: "list[tuple[str, str, str]] | tuple[tuple[str, str, str], ...]",
+) -> int:
+    """Queue newly observed props for the next durable history collection.
+
+    PropLine/PrizePicks observations are persisted before they are handed to
+    evaluation.  Keeping a small in-process priority queue means a newly
+    observed player is still collected when the active-universe read happened
+    just before that feed was persisted.  The queue is only a scheduling hint;
+    results are written by the normal history collector and never attributed
+    to Underdog.
+    """
+    if not isinstance(bot_data, dict):
+        return 0
+    queued = bot_data.setdefault(_PRIORITY_TARGETS_KEY, set())
+    if not isinstance(queued, set):
+        queued = set(queued or ())
+        bot_data[_PRIORITY_TARGETS_KEY] = queued
+    added = 0
+    for target in targets or ():
+        if not isinstance(target, (tuple, list)) or len(target) != 3:
+            continue
+        player, sport, stat = (
+            str(target[0] or "").strip(),
+            canonical_sport_key(target[1]),
+            str(target[2] or "").strip().lower(),
+        )
+        normalized = (player, sport, stat)
+        if (
+            player
+            and sport not in {"", "UNKNOWN"}
+            and stat
+            and normalized not in queued
+        ):
+            queued.add(normalized)
+            added += 1
+    return added
 
 
 def _rotating_target_slice(
@@ -417,6 +459,37 @@ async def player_history_collector_job(context) -> None:
                     "player_history_collector_job: prop_line_history fallback failed: %s",
                     exc,
                 )
+
+        # A PropLine feed can be persisted just after active-target discovery
+        # starts.  Merge the ingestion handoff explicitly so newly observed
+        # players still receive a history fetch in this collector invocation,
+        # even when the current-day active query did not see them yet.
+        priority_targets = tuple(
+            bot_data.get(_PRIORITY_TARGETS_KEY, ()) or ()
+        )
+        for priority_target in priority_targets:
+            if not isinstance(priority_target, (tuple, list)) or len(priority_target) != 3:
+                continue
+            key = (
+                str(priority_target[0] or "").strip(),
+                canonical_sport_key(priority_target[1]),
+                str(priority_target[2] or "").strip().lower(),
+            )
+            if (
+                not key[0]
+                or key[1] in {"", "UNKNOWN"}
+                or not key[2]
+            ):
+                continue
+            target_sources.setdefault(key, set()).add("PrizePicks")
+            if key not in seen:
+                seen.add(key)
+                targets.append(key)
+        queued_targets = bot_data.get(_PRIORITY_TARGETS_KEY)
+        if isinstance(queued_targets, set):
+            queued_targets.difference_update(priority_targets)
+            if not queued_targets:
+                bot_data.pop(_PRIORITY_TARGETS_KEY, None)
 
         logger.info(
             "player_history_collector_job: provider_targets=%d "
