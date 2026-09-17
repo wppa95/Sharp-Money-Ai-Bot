@@ -41,6 +41,7 @@ from engine.delivery_evidence import (
     is_history_optional_sport,
     serialized_evidence_supports_delivery,
 )
+from engine.sport_policy import is_football_related_sport
 from models import EVOpportunity, Recommendation, SteamAlert
 
 if TYPE_CHECKING:
@@ -646,8 +647,13 @@ def format_start_message() -> str:
 
 
 def is_telegram_suppressed_sport(sport: Optional[str]) -> bool:
-    """Compatibility hook; all supported sports may reach normal delivery."""
-    return False
+    """Return whether a sport is blocked from user-facing Telegram alerts.
+
+    Football-family markets remain valid provider observations for persistence
+    and historical diagnostics, but they are not part of the product's
+    actionable alert universe.
+    """
+    return is_football_related_sport(sport)
 
 
 def _has_strong_underdog_evidence(
@@ -1764,6 +1770,18 @@ class AlertDelivery:
                 sent=False,
                 filtered=True,
                 filtered_reason=f"Unsupported prop provider/source: {source}",
+            )
+        if is_telegram_suppressed_sport(sport):
+            logger.info(
+                "UD alert sport-blocked: sport=%s player=%s stat=%s",
+                sport,
+                player_name,
+                stat_type,
+            )
+            return DeliveryResult(
+                sent=False,
+                filtered=True,
+                filtered_reason=f"Football-related sport suppressed: {sport}",
             )
         from alert_normalizer import normalize_underdog
         from alert_scope_filter import check

@@ -383,6 +383,32 @@ async def test_underdog_removal_skips_timing_filter():
     assert len(_timing_called) == 0
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "sport",
+    ["CFB", "NCAAF", "NFL", "CFL", "RUGBY_UNION", "AFL", "college_football"],
+)
+async def test_underdog_football_family_is_never_delivered(sport):
+    """Football and related sports remain non-actionable for Telegram."""
+    db = _make_db()
+    delivery = _make_delivery(db)
+
+    result = await delivery.deliver_underdog(
+        "Football Player",
+        "TeamA",
+        sport,
+        "Points",
+        25.5,
+        26.0,
+        decision=SimpleNamespace(recommendation="OVER"),
+    )
+
+    assert result.sent is False
+    assert result.filtered is True
+    assert "football-related" in result.filtered_reason.lower()
+    delivery._bot.send_message.assert_not_awaited()
+
+
 # ── S-tier does not consume A/B cap budget ────────────────────────────────────
 
 @pytest.mark.asyncio
