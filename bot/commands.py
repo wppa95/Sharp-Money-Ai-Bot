@@ -18,7 +18,7 @@ from typing import Any, Optional
 from httpx import ReadError
 from telegram import Update
 from telegram.constants import ParseMode
-from telegram.error import Conflict
+from telegram.error import Conflict, NetworkError
 from telegram.ext import ContextTypes
 
 from alerts import (
@@ -5734,9 +5734,31 @@ async def cmd_slipstats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML)
 
 
+def _is_transient_telegram_read_error(error: object) -> bool:
+    """Recognize httpx read failures wrapped by python-telegram-bot."""
+    pending = [error]
+    seen: set[int] = set()
+    while pending:
+        current = pending.pop()
+        if current is None or id(current) in seen:
+            continue
+        seen.add(id(current))
+        if isinstance(current, ReadError):
+            return True
+        pending.extend(
+            cause
+            for cause in (
+                getattr(current, "__cause__", None),
+                getattr(current, "__context__", None),
+            )
+            if cause is not None
+        )
+    return isinstance(error, NetworkError) and "ReadError" in str(error)
+
+
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Log errors raised by handlers and notify the user if possible."""
-    if isinstance(context.error, ReadError):
+    if _is_transient_telegram_read_error(context.error):
         logger.warning(
             "Telegram HTTP read dropped; update handler remains available: %s",
             context.error,

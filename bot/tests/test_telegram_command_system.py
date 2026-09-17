@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import inspect
+import logging
 from types import SimpleNamespace
 
 import main
 import pytest
-from telegram.error import Conflict
+from httpx import ReadError
+from telegram.error import Conflict, NetworkError
 from commands import (
     cmd_grade,
     cmd_learning,
@@ -149,3 +151,17 @@ async def test_telegram_conflict_stops_duplicate_polling_instance():
     await main.error_handler(None, context)
 
     assert application.stopped is True
+
+
+@pytest.mark.asyncio
+async def test_wrapped_telegram_read_error_is_transient(caplog):
+    transport_error = ReadError("connection reset")
+    wrapped = NetworkError(str(transport_error))
+    wrapped.__cause__ = transport_error
+    context = SimpleNamespace(error=wrapped, application=None)
+
+    with caplog.at_level(logging.WARNING, logger="commands"):
+        await main.error_handler(None, context)
+
+    assert "Telegram HTTP read dropped" in caplog.text
+    assert "Update None caused error" not in caplog.text
