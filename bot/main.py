@@ -739,11 +739,12 @@ async def post_init(application: Application) -> None:
         "SQLite backpressure counters reset: %s",
         get_sqlite_backpressure_metrics(config.DATABASE_URL, reset=True),
     )
-    # The continuous evidence/history collector owns a separate connection
-    # pool so its long full-universe run cannot make command/report reads wait
-    # behind storage work.
-    _history_db = Database(config.DATABASE_URL)
-    await _history_db.init()
+    # All bot work uses one bounded engine/pool for the SQLite file. A second
+    # SQLAlchemy engine pointing at the same WAL database creates an independent
+    # aiosqlite connection pool; even with the process writer gate, that can
+    # leave a history write waiting on a connection-level SQLite lock. Reads
+    # remain concurrent through the shared pool/session budget.
+    _history_db = _db
 
     _engine = AnalysisEngine()
 
@@ -1149,7 +1150,7 @@ async def post_shutdown(application: Application) -> None:
         await shutdown_db_persistence_worker()
     except Exception as _reset_exc:
         logger.warning("Runtime session cleanup failed during shutdown: %s", _reset_exc)
-    if _history_db:
+    if _history_db and _history_db is not _db:
         await _history_db.close()
     if _db:
         await _db.close()

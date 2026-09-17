@@ -31,9 +31,9 @@ from sqlalchemy.orm import DeclarativeBase
 
 logger = logging.getLogger(__name__)
 
-_UNDERDOG_BULK_MAX_RETRIES = 2
-_UNDERDOG_BULK_RETRY_DELAYS = (0.25, 0.75)
-_UNDERDOG_CANTOPEN_RETRY_DELAYS = (0.5, 1.5)
+_UNDERDOG_BULK_MAX_RETRIES = 4
+_UNDERDOG_BULK_RETRY_DELAYS = (1.0, 3.0, 7.0, 15.0)
+_UNDERDOG_CANTOPEN_RETRY_DELAYS = (1.0, 3.0, 10.0, 30.0)
 # SQLite has one writer slot. Keep monitoring commits short enough that
 # grading/history/command work can acquire that slot between feed chunks.
 # The caller still receives one aggregate count, so chunking never changes
@@ -44,8 +44,8 @@ _TRACKING_BATCH_SIZE = 200
 _CLV_BULK_BATCH_SIZE = 100
 PLAYER_PROPS_PRODUCT = "Player Props"
 _PLAYER_PROP_PROVIDERS = ("Underdog", "PrizePicks", "DraftKings", "FanDuel")
-_DB_WRITE_MAX_RETRIES = 2
-_DB_WRITE_RETRY_DELAYS = (0.15, 0.5)
+_DB_WRITE_MAX_RETRIES = 4
+_DB_WRITE_RETRY_DELAYS = (1.0, 3.0, 7.0, 15.0)
 _PRIZEPICKS_EXTERNAL_PREFIX = "PrizePicks::"
 _TELEGRAM_DELIVERY_KEY_VERSION = "v1"
 
@@ -1319,13 +1319,13 @@ class Database:
                 if parent:
                     os.makedirs(parent, exist_ok=True)
 
-        # connect_args["timeout"]: SQLite busy timeout — wait up to 30 s before
-        # raising OperationalError("database is locked").  Default is 5 s, which
-        # is too short when the underdog_job, clv_seed_job, and clv_harvest_job
-        # fire within the same scheduler window.
+        # connect_args["timeout"]: SQLite busy timeout — wait up to two minutes
+        # before raising OperationalError("database is locked"). The monitoring
+        # ledger is large enough that a bounded 30-second wait can expire while
+        # a legitimate 200-row write is still committing.
         _connect_args: dict = {}
         if self._url.startswith("sqlite"):
-            _connect_args["timeout"] = 30
+            _connect_args["timeout"] = 120
         _engine_kwargs = {
             "echo": False,
             "connect_args": _connect_args,
@@ -1364,7 +1364,7 @@ class Database:
                 # writer holds the lock before raising "database is locked".
                 # The Python-level connect_args["timeout"] (seconds) handles aiosqlite
                 # connection-level waits; this PRAGMA covers intra-process lock contention.
-                await conn.execute(text("PRAGMA busy_timeout=30000"))
+                await conn.execute(text("PRAGMA busy_timeout=120000"))
             await conn.run_sync(Base.metadata.create_all)
         await self._migrate_pp_edge_records()
         await self._migrate_underdog_snapshots()
@@ -3806,6 +3806,16 @@ class Database:
         """Append one normalized provider snapshot without mutating history."""
         if not props:
             return 0
+        if len(props) > _PROP_HISTORY_BATCH_SIZE:
+            observed = 0
+            for start in range(0, len(props), _PROP_HISTORY_BATCH_SIZE):
+                observed += await self.save_prop_line_observations_batch(
+                    provider,
+                    props[start:start + _PROP_HISTORY_BATCH_SIZE],
+                    snapshot_id=snapshot_id,
+                )
+                await asyncio.sleep(0)
+            return observed
 
         snapshot = str(snapshot_id or "").strip() or datetime.utcnow().strftime(
             "%Y%m%dT%H%M%S.%fZ"

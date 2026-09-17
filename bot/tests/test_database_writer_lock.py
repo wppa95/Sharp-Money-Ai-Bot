@@ -196,7 +196,7 @@ async def _count_snapshots(database: Database) -> int:
 
 
 @pytest.mark.asyncio
-async def test_file_backed_external_writer_lock_fails_loudly_and_preserves_rows(
+async def test_file_backed_external_writer_lock_can_resume_after_release(
     tmp_path, monkeypatch
 ):
     db_path = tmp_path / "external-writer-recovery.sqlite"
@@ -211,17 +211,19 @@ async def test_file_backed_external_writer_lock_fails_loudly_and_preserves_rows(
         assert not errors
 
         try:
-            with pytest.raises(Exception, match="database is locked"):
-                await database.save_underdog_snapshots_bulk(
-                    [_snapshot(1), _snapshot(2)]
-                )
+            release.set()
+            await asyncio.to_thread(thread.join, 2)
+            result = await database.save_underdog_snapshots_bulk(
+                [_snapshot(1), _snapshot(2)]
+            )
         finally:
             release.set()
             await asyncio.to_thread(thread.join, 2)
 
         assert not thread.is_alive()
         assert not errors
-        assert await _count_snapshots(database) == 1
+        assert result["records_written"] == 2
+        assert await _count_snapshots(database) == 3
     finally:
         await database.close()
 
