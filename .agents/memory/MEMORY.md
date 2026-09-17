@@ -154,3 +154,4 @@
 - [Telegram funnel boundary](telegram-funnel-boundary.md) — Telegram delivery requires tracked + directional durable rows; keep `/picks` and monitoring populations independent.
 - [Sleeper test fixtures](sleeper-test-fixtures.md) — cache non-fixture current seasons as empty so date-dependent NFL lookups stay deterministic.
 - [Strong pick quality gate](strong-pick-quality-gate.md) — user-facing picks require complete directional history; direction-only rows must not reach alerts or `/picks`.
+- [Telegram transport error handling](telegram-transport-errors.md) — python-telegram-bot wraps httpx read failures in NetworkError; classify the cause as transient polling noise.
