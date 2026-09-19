@@ -7081,7 +7081,7 @@ class Database:
         self,
         cutoff_hours: float = 0.5,
         after_id: Optional[int] = None,
-        limit: int = 500,
+        limit: int = 5000,
     ) -> "list[PropTrackingLog]":
         """Return old, unresolved universal tracking rows for settlement."""
         from datetime import timedelta
@@ -7130,7 +7130,7 @@ class Database:
                 else_=30,
             )
             stmt = stmt.order_by(_sport_rank, PropTrackingLog.id)
-            result = await s.execute(stmt.limit(max(1, min(int(limit), 500))))
+            result = await s.execute(stmt.limit(max(1, min(int(limit), 5000))))
             return list(result.scalars().all())
 
     @_retry_sqlite_write
@@ -8460,7 +8460,7 @@ class Database:
         self,
         cutoff_hours: float = 0.5,
         after_id: Optional[int] = None,
-        limit: int = 500,
+        limit: int = 5000,
     ) -> "list[PropOpportunityLog]":
         """
         Return PENDING tracking rows old enough to attempt resolution.
@@ -8518,7 +8518,7 @@ class Database:
                 else_=30,
             )
             stmt = stmt.order_by(_sport_rank, PropOpportunityLog.id)
-            result = await s.execute(stmt.limit(max(1, min(int(limit), 500))))
+            result = await s.execute(stmt.limit(max(1, min(int(limit), 5000))))
             return list(result.scalars().all())
 
     @_retry_sqlite_write

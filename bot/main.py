@@ -1165,10 +1165,11 @@ async def post_shutdown(application: Application) -> None:
 
 # ── Heartbeat job ─────────────────────────────────────────────────────────────
 
-# Keep each grading pass bounded while allowing both independent settlement
-# populations to make progress.  The old 100+100 split left large backlogs
-# growing faster than the grader could drain them.
-_GRADE_BATCH_SIZE = 250
+# Read the active book in one bounded bulk page.  The old 250-row request
+# (and the database's 500-row safety cap) left large backlogs growing faster
+# than the grader could drain them.  5,000 covers the current active book
+# while keeping provider fetches and the final bulk commits bounded.
+_GRADE_BATCH_SIZE = 5000
 _GRADE_FETCH_CONCURRENCY = 12
 _GRADE_FETCH_TIMEOUT_SECONDS = 20
 # Monitoring and grading have independent owners. Keep each grading pass
