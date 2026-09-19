@@ -7175,31 +7175,43 @@ class Database:
         """Set multiple universal tracking settlements in one transaction."""
         if not updates:
             return 0
+        from sqlalchemy import bindparam as _bindparam
         from sqlalchemy import update as _sa_update
 
-        applied = 0
         async with self.session() as s:
-            for tracking_id, result, actual_value in updates:
-                response = await s.execute(
-                    _sa_update(PropTrackingLog)
-                    .where(
-                        PropTrackingLog.id == int(tracking_id),
-                        or_(
-                            PropTrackingLog.result == "PENDING",
-                            PropTrackingLog.result.is_(None),
-                            PropTrackingLog.result == "",
-                        ),
-                    )
-                    .values(
-                        result=str(result),
-                        actual_value=float(actual_value),
-                        graded_at=datetime.utcnow(),
-                        settlement_source="auto_grade",
-                    )
+            stmt = (
+                _sa_update(PropTrackingLog)
+                .where(
+                    PropTrackingLog.id == _bindparam("_tracking_id"),
+                    or_(
+                        PropTrackingLog.result == "PENDING",
+                        PropTrackingLog.result.is_(None),
+                        PropTrackingLog.result == "",
+                    ),
                 )
-                applied += int(response.rowcount or 0)
+                .values(
+                    result=_bindparam("_result"),
+                    actual_value=_bindparam("_actual_value"),
+                    graded_at=_bindparam("_graded_at"),
+                    settlement_source="auto_grade",
+                )
+                .execution_options(
+                    synchronize_session=False,
+                    dml_strategy="core_only",
+                )
+            )
+            params = [
+                {
+                    "_tracking_id": int(tracking_id),
+                    "_result": str(result),
+                    "_actual_value": float(actual_value),
+                    "_graded_at": datetime.utcnow(),
+                }
+                for tracking_id, result, actual_value in updates
+            ]
+            response = await s.execute(stmt, params)
             await s.commit()
-        return applied
+        return int(response.rowcount or 0)
 
     async def log_prop_opportunity_bulk(
         self,
@@ -8633,11 +8645,12 @@ class Database:
         if not updates:
             return 0
         from engine.identity import display_player_name
+        from sqlalchemy import bindparam as _bindparam
+        from sqlalchemy.dialects.sqlite import insert as _sqlite_insert
 
         ids = [int(item["id"]) for item in updates if item.get("id") is not None]
         if not ids:
             return 0
-        applied = 0
         async with self.session() as s:
             rows_result = await s.execute(
                 select(PropOpportunityLog).where(PropOpportunityLog.id.in_(ids))
@@ -8645,6 +8658,8 @@ class Database:
             rows_by_id = {
                 int(row.id): row for row in rows_result.scalars().all()
             }
+            evidence_rows = []
+            update_params = []
             for item in updates:
                 opp_row = rows_by_id.get(int(item["id"]))
                 if opp_row is None:
@@ -8661,61 +8676,88 @@ class Database:
                         else datetime.utcnow().strftime("%Y-%m-%d")
                     )
                     evidence_game_id = str(opp_row.game_id or "")
-                    evidence_result = await s.execute(
-                        select(PlayerGameResult).where(
-                            PlayerGameResult.player_name
-                            == display_player_name(opp_row.player_name),
-                            PlayerGameResult.sport
-                            == (opp_row.sport or "").upper().strip(),
-                            PlayerGameResult.stat_type
-                            == (opp_row.stat_type or "").lower().strip(),
-                            PlayerGameResult.game_date == evidence_date,
-                            PlayerGameResult.game_id == evidence_game_id,
-                        )
+                    evidence_rows.append(
+                        {
+                            "player_name": display_player_name(opp_row.player_name),
+                            "sport": (opp_row.sport or "").upper().strip(),
+                            "stat_type": (opp_row.stat_type or "").lower().strip(),
+                            "game_date": evidence_date,
+                            "opponent": opp_row.team or None,
+                            "actual_value": actual_value,
+                            "source": "graded_prop",
+                            "game_id": evidence_game_id,
+                            "fetched_at": datetime.utcnow(),
+                        }
                     )
-                    if evidence_result.scalar_one_or_none() is None:
-                        s.add(
-                            PlayerGameResult(
-                                player_name=display_player_name(opp_row.player_name),
-                                sport=(opp_row.sport or "").upper().strip(),
-                                stat_type=(opp_row.stat_type or "").lower().strip(),
-                                game_date=evidence_date,
-                                opponent=opp_row.team or None,
-                                actual_value=actual_value,
-                                source="graded_prop",
-                                game_id=evidence_game_id,
-                            )
-                        )
 
-                values = {
-                    "result": outcome,
-                    "actual_value": actual_value,
-                    "graded_at": datetime.utcnow(),
-                }
+                _graded_at = datetime.utcnow()
                 _ai_grade = _analyst_grade(
                     opp_row.analyst_prediction,
                     outcome,
                 )
-                if _ai_grade is not None:
-                    values["analyst_grade"] = _ai_grade
-                    values["analyst_graded_at"] = datetime.utcnow()
-                if item.get("error_type") is not None:
-                    values["error_type"] = item["error_type"]
-                if item.get("void_reason") is not None:
-                    values["void_reason"] = str(item["void_reason"])[:64]
-                response = await s.execute(
+                update_params.append(
+                    {
+                        "_opportunity_id": int(opp_row.id),
+                        "_result": outcome,
+                        "_actual_value": actual_value,
+                        "_graded_at": _graded_at,
+                        "_analyst_grade": _ai_grade,
+                        "_analyst_graded_at": (
+                            _graded_at if _ai_grade is not None else None
+                        ),
+                        "_error_type": item.get("error_type"),
+                        "_void_reason": (
+                            str(item["void_reason"])[:64]
+                            if item.get("void_reason") is not None
+                            else None
+                        ),
+                    }
+                )
+
+            if evidence_rows:
+                await s.execute(
+                    _sqlite_insert(PlayerGameResult)
+                    .values(evidence_rows)
+                    .on_conflict_do_nothing(
+                        index_elements=[
+                            "player_name",
+                            "sport",
+                            "stat_type",
+                            "game_date",
+                            "game_id",
+                        ]
+                    )
+                )
+
+            if update_params:
+                stmt = (
                     update(PropOpportunityLog)
                     .where(
-                        PropOpportunityLog.id == int(opp_row.id),
+                        PropOpportunityLog.id == _bindparam("_opportunity_id"),
                         or_(
                             PropOpportunityLog.result == "PENDING",
                             PropOpportunityLog.result.is_(None),
                             PropOpportunityLog.result == "",
                         ),
                     )
-                    .values(**values)
+                    .values(
+                        result=_bindparam("_result"),
+                        actual_value=_bindparam("_actual_value"),
+                        graded_at=_bindparam("_graded_at"),
+                        analyst_grade=_bindparam("_analyst_grade"),
+                        analyst_graded_at=_bindparam("_analyst_graded_at"),
+                        error_type=_bindparam("_error_type"),
+                        void_reason=_bindparam("_void_reason"),
+                    )
+                    .execution_options(
+                        synchronize_session=False,
+                        dml_strategy="core_only",
+                    )
                 )
-                applied += int(response.rowcount or 0)
+                response = await s.execute(stmt, update_params)
+                applied = int(response.rowcount or 0)
+            else:
+                applied = 0
             await s.commit()
         return applied
 
@@ -9607,6 +9649,226 @@ class Database:
             },
             "adaptive_learning": adaptive_status,
         }
+
+    async def get_game_results_for_grading_bulk(
+        self,
+        opportunities: "list[object]",
+    ) -> "dict[int, tuple[Optional[PlayerGameResult], Optional[str]]]":
+        """Resolve a pending grading page with bounded bulk reads.
+
+        The single-row resolver remains the compatibility API.  The scheduled
+        grader uses this method for large pages so settlement does not acquire
+        a SQLite session and issue a query for every opportunity.
+
+        Matching stays strict: a dated opportunity requires that date (or the
+        provider-local previous date already allowed by the grader), while an
+        undated opportunity requires its event identity.  Provider fallback
+        may reconcile event-ID namespaces, but never removes the date/event
+        boundary.
+        """
+        if not opportunities:
+            return {}
+
+        composite_components = {
+            "hits + runs + rbis": ("hits", "runs", "rbis"),
+            "hits+runs+rbis": ("hits", "runs", "rbis"),
+            "points + rebounds + assists": ("points", "rebounds", "assists"),
+            "pts+reb+ast": ("points", "rebounds", "assists"),
+            "pts + reb + ast": ("points", "rebounds", "assists"),
+            "points + rebounds": ("points", "rebounds"),
+            "pts+reb": ("points", "rebounds"),
+            "points + assists": ("points", "assists"),
+            "pts+ast": ("points", "assists"),
+            "rebounds + assists": ("rebounds", "assists"),
+            "reb+ast": ("rebounds", "assists"),
+            "goals + assists": ("goals", "assists"),
+            "g+a": ("goals", "assists"),
+        }
+
+        def _metadata(opp):
+            game_date = (
+                opp.game_time.strftime("%Y-%m-%d")
+                if getattr(opp, "game_time", None)
+                else None
+            )
+            if (
+                not game_date
+                and getattr(opp, "game_id", "")
+                and getattr(opp, "detected_at", None)
+            ):
+                game_date = opp.detected_at.strftime("%Y-%m-%d")
+            dates = [game_date] if game_date else []
+            if game_date and getattr(opp, "game_time", None):
+                previous = (
+                    opp.game_time - timedelta(days=1)
+                ).strftime("%Y-%m-%d")
+                if previous != game_date:
+                    dates.append(previous)
+            stat = str(getattr(opp, "stat_type", "") or "").lower().strip()
+            stats = set(composite_components.get(stat, (stat,)))
+            stats.add(stat)
+            return (
+                str(getattr(opp, "player_name", "") or ""),
+                str(getattr(opp, "sport", "") or "").upper().strip(),
+                stat,
+                dates,
+                str(getattr(opp, "game_id", "") or ""),
+                bool(getattr(opp, "provider", None)),
+                stats,
+            )
+
+        metadata = {
+            int(getattr(opp, "id", 0) or 0): (opp, _metadata(opp))
+            for opp in opportunities
+            if getattr(opp, "id", None) is not None
+        }
+        if not metadata:
+            return {}
+
+        # SQLite's bind limit is lower than the largest grading page. Chunk
+        # player names and event IDs while keeping each query a bulk read.
+        player_names = {
+            info[1][0]
+            for info in metadata.values()
+            if info[1][0]
+        }
+        sports = {info[1][1] for info in metadata.values() if info[1][1]}
+        dates = {
+            date
+            for info in metadata.values()
+            for date in info[1][3]
+            if date
+        }
+        stats = {
+            stat
+            for info in metadata.values()
+            for stat in info[1][6]
+            if stat
+        }
+        event_ids = {
+            info[1][4]
+            for info in metadata.values()
+            if info[1][4]
+        }
+
+        rows: list[PlayerGameResult] = []
+        async with self.session() as s:
+            player_list = sorted(player_names)
+            for offset in range(0, len(player_list), 350):
+                player_chunk = player_list[offset : offset + 350]
+                if not player_chunk or not dates:
+                    continue
+                result = await s.execute(
+                    select(PlayerGameResult).where(
+                        # Provider upserts already normalize these columns.
+                        # Keep the SQL predicates index-friendly; the
+                        # in-memory keys below retain case-insensitive
+                        # provider reconciliation.
+                        PlayerGameResult.player_name.in_(player_chunk),
+                        PlayerGameResult.sport.in_(sports),
+                        PlayerGameResult.stat_type.in_(stats),
+                        PlayerGameResult.game_date.in_(dates),
+                    ).order_by(PlayerGameResult.id.desc())
+                )
+                rows.extend(result.scalars().all())
+
+            event_list = sorted(event_ids)
+            for offset in range(0, len(event_list), 350):
+                event_chunk = event_list[offset : offset + 350]
+                if not event_chunk:
+                    continue
+                result = await s.execute(
+                    select(PlayerGameResult).where(
+                        PlayerGameResult.game_id.in_(event_chunk),
+                    ).order_by(PlayerGameResult.id.desc())
+                )
+                rows.extend(result.scalars().all())
+
+        by_date: dict[tuple[str, str, str, str], list[PlayerGameResult]] = {}
+        by_event: dict[tuple[str, str, str, str], list[PlayerGameResult]] = {}
+        for row in rows:
+            player_key = str(row.player_name or "").lower().strip()
+            sport_key = str(row.sport or "").upper().strip()
+            stat_key = str(row.stat_type or "").lower().strip()
+            date_key = str(row.game_date or "")
+            by_date.setdefault(
+                (player_key, sport_key, stat_key, date_key), []
+            ).append(row)
+            if row.game_id:
+                by_event.setdefault(
+                    (player_key, sport_key, stat_key, str(row.game_id)), []
+                ).append(row)
+
+        resolved: dict[int, tuple[Optional[PlayerGameResult], Optional[str]]] = {}
+        for opp_id, (opp, info) in metadata.items():
+            player_name, sport, stat, candidate_dates, game_id, provider, _ = info
+            player_key = player_name.lower().strip()
+            event_row = None
+            if game_id:
+                for row in by_event.get((player_key, sport, stat, game_id), []):
+                    event_row = row
+                    break
+                if event_row is not None:
+                    resolved[opp_id] = (event_row, event_row.game_date)
+                    continue
+
+            # A direct dated match is valid even when the source event ID is
+            # absent. With a provider, this also covers cross-provider IDs.
+            for candidate_date in candidate_dates:
+                dated_rows = by_date.get(
+                    (player_key, sport, stat, candidate_date), []
+                )
+                if dated_rows:
+                    if game_id and not provider:
+                        dated_rows = [
+                            row for row in dated_rows
+                            if str(row.game_id or "") == game_id
+                        ]
+                    if dated_rows:
+                        resolved[opp_id] = (dated_rows[0], candidate_date)
+                        break
+            if opp_id in resolved:
+                continue
+
+            components = composite_components.get(stat)
+            if not components or not provider:
+                continue
+            for candidate_date in candidate_dates:
+                component_rows = {
+                    component: by_date.get(
+                        (player_key, sport, component, candidate_date), []
+                    )[0]
+                    for component in components
+                    if by_date.get(
+                        (player_key, sport, component, candidate_date), []
+                    )
+                }
+                if len(component_rows) != len(components):
+                    continue
+                selected = [component_rows[component] for component in components]
+                resolved[opp_id] = (
+                    PlayerGameResult(
+                        player_name=player_name,
+                        sport=sport,
+                        stat_type=stat,
+                        game_date=candidate_date,
+                        opponent=next(
+                            (row.opponent for row in selected if row.opponent),
+                            None,
+                        ),
+                        actual_value=sum(
+                            float(row.actual_value) for row in selected
+                        ),
+                        source="derived_from_db",
+                        game_id=next(
+                            (str(row.game_id) for row in selected if row.game_id),
+                            "",
+                        ),
+                    ),
+                    candidate_date,
+                )
+                break
+        return resolved
 
     async def get_game_result_for_grading(
         self,

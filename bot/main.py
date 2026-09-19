@@ -1165,11 +1165,16 @@ async def post_shutdown(application: Application) -> None:
 
 # ── Heartbeat job ─────────────────────────────────────────────────────────────
 
-# Read the active book in one bounded bulk page.  The old 250-row request
-# (and the database's 500-row safety cap) left large backlogs growing faster
-# than the grader could drain them.  5,000 covers the current active book
-# while keeping provider fetches and the final bulk commits bounded.
-_GRADE_BATCH_SIZE = 5000
+# Read a substantial historical page in one bulk pass. The old 250-row
+# request (and the database's 500-row safety cap) left large backlogs growing
+# faster than the grader could drain them. 2,000 keeps the database work bulk
+# while leaving headroom for live scans and history collection.
+_GRADE_BATCH_SIZE = 2000
+# A bulk database page can contain many historical rows for the same target.
+# Keep the fallback provider work bounded separately so a large page does not
+# turn into thousands of remote requests; rows with stored evidence still
+# grade in the same bulk pass.
+_GRADE_PROVIDER_FETCH_BATCH_SIZE = 50
 _GRADE_FETCH_CONCURRENCY = 12
 _GRADE_FETCH_TIMEOUT_SECONDS = 20
 # Monitoring and grading have independent owners. Keep each grading pass
@@ -1383,10 +1388,38 @@ async def _grade_opportunities_job(context) -> None:
                         )
                         return []
 
+            # The database page is intentionally larger than the provider
+            # fallback page. Existing durable evidence for the full page can
+            # be graded now; only missing evidence gets a bounded number of
+            # remote lookups before the next scheduled pass.
+            _grade_targets = _grade_targets[:_GRADE_PROVIDER_FETCH_BATCH_SIZE]
             try:
-                _grade_batches = await asyncio.gather(
-                    *(_fetch_grade_results(_gopp) for _gopp in _grade_targets)
+                _grade_tasks = [
+                    asyncio.create_task(_fetch_grade_results(_gopp))
+                    for _gopp in _grade_targets
+                ]
+                _grade_done, _grade_deferred = await asyncio.wait(
+                    _grade_tasks,
+                    timeout=max(
+                        1,
+                        _GRADE_CYCLE_BUDGET_SECONDS - _GRADE_CYCLE_HEADROOM_SECONDS,
+                    ),
                 )
+                for _deferred_task in _grade_deferred:
+                    _deferred_task.cancel()
+                if _grade_deferred:
+                    await asyncio.gather(*_grade_deferred, return_exceptions=True)
+                    logger.info(
+                        "_grade_opportunities_job: deferred %d provider "
+                        "fetches after the cycle budget",
+                        len(_grade_deferred),
+                    )
+                _grade_batches = [
+                    _grade_task.result()
+                    for _grade_task in _grade_done
+                    if not _grade_task.cancelled()
+                    and _grade_task.exception() is None
+                ]
                 _all_grade_results = [
                     _gr
                     for _graw in _grade_batches
@@ -1419,6 +1452,21 @@ async def _grade_opportunities_job(context) -> None:
         # collector. Never perform a per-opportunity PropLine settlement
         # request here: the available PropLine history endpoints are singular,
         # while the collector owns the bulk/full-book history budget.
+        _bulk_settlement_matches = None
+        _bulk_settlement_loader = getattr(
+            db, "get_game_results_for_grading_bulk", None
+        )
+        if inspect.iscoroutinefunction(_bulk_settlement_loader):
+            try:
+                _bulk_settlement_matches = (
+                    await _bulk_settlement_loader(pending)
+                )
+            except Exception as _bulk_settlement_exc:
+                logger.warning(
+                    "_grade_opportunities_job: bulk settlement lookup failed; "
+                    "using compatibility lookups: %s",
+                    _bulk_settlement_exc,
+                )
 
         graded   = 0
         no_data  = 0
@@ -1488,17 +1536,24 @@ async def _grade_opportunities_job(context) -> None:
                 _result_lookup_kwargs["provider"] = opp.provider
             result_row = None
             _matched_game_date = game_date
-            for _candidate_game_date in _game_dates:
-                result_row = await db.get_game_result_for_grading(
-                    opp.player_name,
-                    opp.sport,
-                    opp.stat_type,
-                    _candidate_game_date,
-                    **_result_lookup_kwargs,
+            if _bulk_settlement_matches is not None:
+                _bulk_match = _bulk_settlement_matches.get(
+                    int(getattr(opp, "id", 0) or 0)
                 )
-                if result_row is not None:
-                    _matched_game_date = _candidate_game_date
-                    break
+                if _bulk_match:
+                    result_row, _matched_game_date = _bulk_match
+            else:
+                for _candidate_game_date in _game_dates:
+                    result_row = await db.get_game_result_for_grading(
+                        opp.player_name,
+                        opp.sport,
+                        opp.stat_type,
+                        _candidate_game_date,
+                        **_result_lookup_kwargs,
+                    )
+                    if result_row is not None:
+                        _matched_game_date = _candidate_game_date
+                        break
             # Some PropLine projections have a stable event identity but no
             # game timestamp. Once the official result has been persisted,
             # reconcile by that identity instead of leaving the row pending
