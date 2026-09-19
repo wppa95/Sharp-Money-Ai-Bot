@@ -7104,10 +7104,32 @@ class Database:
                         ),
                     ),
                 )
-                .order_by(PropTrackingLog.detected_at, PropTrackingLog.id)
             )
             if after_id is not None:
                 stmt = stmt.where(PropTrackingLog.id > int(after_id))
+            _sport_rank = case(
+                {
+                    "MLB": 0,
+                    "NBA": 1,
+                    "WNBA": 2,
+                    "NHL": 3,
+                    "TENNIS": 4,
+                    "DOTA": 5,
+                    "MMA": 6,
+                    "LIGUE1": 7,
+                    "EPL": 8,
+                    "LALIGA": 9,
+                    "SERIEA": 10,
+                    "BUNDESLIGA": 11,
+                    "MLS": 12,
+                    "LIGA_MX": 13,
+                    "UFC": 14,
+                    "NFL": 20,
+                },
+                value=func.upper(PropTrackingLog.sport),
+                else_=30,
+            )
+            stmt = stmt.order_by(_sport_rank, PropTrackingLog.id)
             result = await s.execute(stmt.limit(max(1, min(int(limit), 500))))
             return list(result.scalars().all())
 
@@ -8470,13 +8492,32 @@ class Database:
                         ),
                     ),
                 )
-                # The grader persists an id cursor. Ordering by a different
-                # column can repeatedly skip older rows when new rows arrive
-                # between cycles, so keep the query order cursor-compatible.
-                .order_by(PropOpportunityLog.id)
             )
             if after_id is not None:
                 stmt = stmt.where(PropOpportunityLog.id > int(after_id))
+            _sport_rank = case(
+                {
+                    "MLB": 0,
+                    "NBA": 1,
+                    "WNBA": 2,
+                    "NHL": 3,
+                    "TENNIS": 4,
+                    "DOTA": 5,
+                    "MMA": 6,
+                    "LIGUE1": 7,
+                    "EPL": 8,
+                    "LALIGA": 9,
+                    "SERIEA": 10,
+                    "BUNDESLIGA": 11,
+                    "MLS": 12,
+                    "LIGA_MX": 13,
+                    "UFC": 14,
+                    "NFL": 20,
+                },
+                value=func.upper(PropOpportunityLog.sport),
+                else_=30,
+            )
+            stmt = stmt.order_by(_sport_rank, PropOpportunityLog.id)
             result = await s.execute(stmt.limit(max(1, min(int(limit), 500))))
             return list(result.scalars().all())
 
