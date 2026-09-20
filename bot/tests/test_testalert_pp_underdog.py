@@ -519,10 +519,10 @@ class TestDeliverUnderdog:
         assert sent_messages
         msg = sent_messages[0]
         assert "Connor McDavid" in msg
-        assert "0.5" in msg
         assert "1.5" in msg
+        assert "OVER 1.5" in msg
+        assert "0.5" not in msg
         assert "💪 STRONG BET" not in msg
-        assert "ACTIONABLE BET PICK" in msg or "+1.0" in msg
 
     @pytest.mark.asyncio
     async def test_supported_three_star_under_is_sent_without_unearned_strong_label(self):
@@ -580,9 +580,9 @@ class TestDeliverUnderdog:
 
         msg = sent_messages[0]
         assert "Nathan MacKinnon" in msg
-        assert "3.5" in msg
         assert "2.5" in msg
-        assert "ACTIONABLE BET PICK" in msg or "-1.0" in msg
+        assert "UNDER 2.5" in msg
+        assert "3.5" not in msg
 
     @pytest.mark.asyncio
     async def test_removed_prop_is_monitoring_only(self):

@@ -332,21 +332,21 @@ class TestAlertFreshnessTimestamp:
     """Verify all non-removal alerts include a 'Line as of' timestamp."""
 
     def test_freshness_timestamp_in_alerts_source(self):
-        """The freshness timestamp code must exist in alerts.py."""
-        import inspect, alerts_multiplatform
-        src = inspect.getsource(alerts_multiplatform)
-        assert "Line as of" in src, (
-            "Freshness timestamp ('Line as of HH:MM ET') not found in alerts.py"
+        """Current alerts include a freshness timestamp."""
+        from alerts_multiplatform import format_underdog_change_alert
+        current = format_underdog_change_alert(
+            "Test Player", "TM", "NBA", "Points", 20.5, 21.5,
         )
+        assert "Line as of" in current
 
     def test_timestamp_not_added_to_removal_alerts(self):
-        """Removal alerts must NOT get the freshness footer (field 'removed=True')."""
-        import inspect, alerts_multiplatform
-        src = inspect.getsource(alerts_multiplatform)
-        # The timestamp addition must be guarded by 'not removed'
-        assert "not removed" in src and "Line as of" in src, (
-            "Freshness timestamp must only appear on non-removal alerts"
+        """Removal alerts must not get the current-line freshness footer."""
+        from alerts_multiplatform import format_underdog_change_alert
+        removal = format_underdog_change_alert(
+            "Test Player", "TM", "NBA", "Points", 20.5, 21.5,
+            removed=True,
         )
+        assert "Line as of" not in removal
 
 
 # ══════════════════════════════════════════════════════════════════════

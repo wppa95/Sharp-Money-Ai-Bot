@@ -870,7 +870,7 @@ class TestIndependentPrizePicks:
         )
 
         assert "PLAYER PROP" in message
-        assert "📊 <b>LINE</b>" in message
+        assert "<b>Line:</b>" in message
         assert "📡 <b>Source:</b>  Player Props · PrizePicks" in message
         assert "Underdog" not in message
 

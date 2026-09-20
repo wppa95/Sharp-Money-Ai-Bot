@@ -960,12 +960,18 @@ def _decision_recommendation(decision: Optional[object]) -> str:
 def _format_simple_prop_alert(
     *,
     player_name: str,
+    sport: str,
     stat_type: str,
     line: float,
     decision: Optional[object],
     validation: Optional[object],
+    source: str,
 ) -> str:
     """Render the minimal user-facing player-prop alert."""
+    sport_icon = {
+        "NFL": "🏈", "NBA": "🏀", "MLB": "⚾",
+        "NHL": "🏒", "UFC": "🥊", "WNBA": "🏀",
+    }.get(str(sport).upper(), "🎯")
     recommendation = _decision_recommendation(decision)
     line_text = (
         f"{recommendation} {line:.1f}"
@@ -980,13 +986,17 @@ def _format_simple_prop_alert(
 
     return "\n".join(
         [
-            "🎯 <b>PLAYER PROP</b>",
+            "📊 <b>PLAYER PROP</b>",
             "",
+            f"{sport_icon} <b>{escape(str(sport))}</b>",
             f"👤 <b>Player:</b> {escape(str(player_name))}",
             f"📊 <b>Stat:</b> {escape(str(stat_type))}",
             f"🎯 <b>Line:</b> <code>{line_text}</code>",
             "",
             history,
+            "",
+            f"📡 <b>Source:</b>  Player Props · {escape(str(source).strip() or 'Underdog')}",
+            f"🕐 <b>Line as of:</b> <i>{datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}</i>",
         ]
     )
 
@@ -1032,10 +1042,12 @@ def format_underdog_change_alert(
 
     return _format_simple_prop_alert(
         player_name=player_name,
+        sport=sport,
         stat_type=stat_type,
         line=new_line,
         decision=decision,
         validation=validation,
+        source=source,
     )
 
 
@@ -1120,10 +1132,12 @@ def format_underdog_new_prop_alert(
     """Format a compact first-appearance player-prop alert."""
     return _format_simple_prop_alert(
         player_name=player_name,
+        sport=sport,
         stat_type=stat_type,
         line=line_value,
         decision=decision,
         validation=validation,
+        source=source,
     )
 
 

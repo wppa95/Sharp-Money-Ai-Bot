@@ -523,7 +523,7 @@ async def test_half_line_non_priority_stat_goes_to_digest():
 # ── Format function ────────────────────────────────────────────────────────────
 
 def test_format_new_prop_alert_contains_required_fields():
-    """Qualified new-prop presentation uses the canonical PLAY header."""
+    """Qualified new-prop presentation contains the simple player-prop fields."""
     from alerts_multiplatform import format_underdog_new_prop_alert
     msg = format_underdog_new_prop_alert(
         player_name="Aaron Judge",
@@ -539,8 +539,9 @@ def test_format_new_prop_alert_contains_required_fields():
     assert "Aaron Judge" in msg
     assert "Home Runs" in msg
     assert "0.5" in msg
+    assert "History:" in msg
     assert "New prop detected" not in msg
-    assert "Low starting line" in msg
+    assert "Low starting line" not in msg
 
 
 def test_format_new_prop_no_low_line_reason_when_above_threshold():

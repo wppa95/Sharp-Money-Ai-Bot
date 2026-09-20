@@ -437,7 +437,7 @@ class TestPipelineContinuity:
         assert lifecycle_states[2] == "ACTIVE_ALERTED"
 
     def test_alert_timestamp_reflects_current_line(self):
-        """#27: Alert timestamp label reflects the current line time."""
+        """#27: Alert shows the current line directly."""
         from alerts_multiplatform import format_underdog_change_alert
         decision = _decision("A", 75, "OVER")
         decision.l5_hit_rate = None
@@ -455,8 +455,8 @@ class TestPipelineContinuity:
             score       = score,
             decision    = decision,
         )
-        # The alert must include a UTC timestamp, confirming live timing context
-        assert "UTC" in result or "AVAILABLE" in result
+        assert "<b>Line:</b>" in result
+        assert "25.5" in result
 
 
 # ─── 9. Config boundary tests ─────────────────────────────────────────────────

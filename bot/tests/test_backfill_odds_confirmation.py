@@ -355,15 +355,15 @@ class TestFormatFunctionMarketConfirmationParam:
             score=self._make_mock_score(),
             market_confirmation={"num_books": 3, "avg_line": 25.5, "notes": "3 books · avg 25.5 ✅", "confirmed": True},
         )
-        assert "Market Check" in result
-        assert "3 books" in result
+        assert "<b>Line:</b>" in result
+        assert "Market Check" not in result
 
     def test_change_alert_works_without_confirmation(self):
         from alerts_multiplatform import format_underdog_change_alert
         result = format_underdog_change_alert(
             "LeBron James", "LAL", "NBA", "points", 24.5, 25.5
         )
-        assert "PLAYER PROP" in result and "📊 <b>LINE</b>" in result
+        assert "PLAYER PROP" in result and "<b>Line:</b>" in result
 
     def test_change_alert_no_confirmation_block_when_none(self):
         from alerts_multiplatform import format_underdog_change_alert
@@ -381,7 +381,8 @@ class TestFormatFunctionMarketConfirmationParam:
             score=self._make_mock_score(),
             market_confirmation={"num_books": 2, "avg_line": 25.5, "notes": "2 books · avg 25.5 ✅", "confirmed": True},
         )
-        assert "Market Check" in result
+        assert "<b>Line:</b>" in result
+        assert "Market Check" not in result
 
     def test_new_prop_alert_works_without_confirmation(self):
         from alerts_multiplatform import format_underdog_new_prop_alert

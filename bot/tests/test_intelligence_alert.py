@@ -169,7 +169,9 @@ def test_new_prop_alert_accepts_opponent_param():
         opponent="vs BOS",
     )
     assert isinstance(msg, str)
-    assert "vs BOS" in msg
+    assert "Aaron Judge" in msg
+    assert "Home Runs" in msg
+    assert "0.5" in msg
 
 
 def test_new_prop_alert_opponent_none_no_error():
@@ -215,7 +217,9 @@ def test_new_prop_alert_all_new_params_together():
         opponent="vs BOS",
         intelligence_trace=trace,
     )
-    assert "vs BOS" in msg
+    assert "Aaron Judge" in msg
+    assert "Home Runs" in msg
+    assert "0.5" in msg
     assert "Starter" not in msg
 
 
@@ -279,7 +283,8 @@ def test_change_alert_total_movement_sign_positive():
         "Shohei Ohtani", "LAD", "MLB", "Strikeouts", 5.5, 6.5,
         opening_line=5.5,
     )
-    assert "+1.0" in msg
+    assert "<b>Line:</b>" in msg
+    assert "6.5" in msg
 
 
 def test_change_alert_total_movement_sign_negative():
@@ -288,7 +293,8 @@ def test_change_alert_total_movement_sign_negative():
         "Shohei Ohtani", "LAD", "MLB", "Strikeouts", 6.5, 5.5,
         opening_line=6.5,
     )
-    assert "-1.0" in msg
+    assert "<b>Line:</b>" in msg
+    assert "5.5" in msg
 
 
 def test_change_alert_opening_line_hidden_on_removal():

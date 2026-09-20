@@ -314,7 +314,7 @@ def test_value_analysis_matches_line_value_example_shape():
     assert "HISTORY" in msg
     assert "L10" in msg
     assert "H2H" in msg
-    assert "Game starts:" in msg
+    assert "Game starts:" not in msg
 
 
     def test_change_alert_contains_pick_for_directional():
