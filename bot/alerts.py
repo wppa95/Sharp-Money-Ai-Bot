@@ -1972,53 +1972,87 @@ class AlertDelivery:
             return DeliveryResult(sent=False, deduped=True)
 
 
-        # 4. Format
-        if market_move_only:
-            message = format_market_move_detected(
-                player_name, team, sport, stat_type,
-                old_line, new_line,
-                game_time,
+        # 4. Format.  Formatting is deliberately fail-open: malformed
+        # provider/history metadata must not turn an otherwise valid pick into
+        # a silent delivery outage.  The fallback retains the player, stat,
+        # direction, and line so the user still receives the actionable alert.
+        try:
+            if market_move_only:
+                message = format_market_move_detected(
+                    player_name, team, sport, stat_type,
+                    old_line, new_line,
+                    game_time,
+                )
+            elif new_prop:
+                message = format_underdog_new_prop_alert(
+                    player_name, team, sport, stat_type,
+                    new_line,
+                    game_time,
+                    score=score,
+                    validation=validation,
+                    decision=decision,
+                    market_quality=market_quality,
+                    market_pressure=market_pressure,
+                    pp_line=pp_line,
+                    dk_line=dk_line,
+                    fd_line=fd_line,
+                    low_line_threshold=config.UD_NEW_PROP_LOW_LINE_THRESHOLD,
+                    opponent=opponent,
+                    intelligence_trace=intelligence_trace,
+                    market_confirmation=market_confirmation,
+                    source=source,
+                )
+            else:
+                message = format_underdog_change_alert(
+                    player_name, team, sport, stat_type,
+                    old_line, new_line,
+                    game_time,
+                    score=score,
+                    validation=validation,
+                    decision=decision,
+                    market_quality=market_quality,
+                    market_pressure=market_pressure,
+                    pp_line=pp_line,
+                    dk_line=dk_line,
+                    fd_line=fd_line,
+                    removed=removed,
+                    standing=standing,
+                    removal_reason=removal_reason,
+                    opponent=opponent,
+                    intelligence_trace=intelligence_trace,
+                    opening_line=opening_line,
+                    market_confirmation=market_confirmation,
+                    source=source,
+                )
+        except Exception:
+            logger.exception(
+                "Underdog alert formatter failed; using delivery fallback: "
+                "%s | %s | %s",
+                player_name,
+                sport,
+                stat_type,
             )
-        elif new_prop:
-            message = format_underdog_new_prop_alert(
-                player_name, team, sport, stat_type,
-                new_line,
-                game_time,
-                score=score,
-                validation=validation,
-                decision=decision,
-                market_quality=market_quality,
-                market_pressure=market_pressure,
-                pp_line=pp_line,
-                dk_line=dk_line,
-                fd_line=fd_line,
-                low_line_threshold=config.UD_NEW_PROP_LOW_LINE_THRESHOLD,
-                opponent=opponent,
-                intelligence_trace=intelligence_trace,
-                market_confirmation=market_confirmation,
-                source=source,
+            try:
+                _fallback_line = f"{float(new_line):g}"
+            except (TypeError, ValueError):
+                _fallback_line = str(new_line or "N/A")
+            _fallback_direction = _direction if _direction in {"OVER", "UNDER"} else ""
+            _fallback_line = (
+                f"{_fallback_direction} {_fallback_line}"
+                if _fallback_direction
+                else _fallback_line
             )
-        else:
-            message = format_underdog_change_alert(
-                player_name, team, sport, stat_type,
-                old_line, new_line,
-                game_time,
-                score=score,
-                validation=validation,
-                decision=decision,
-                market_quality=market_quality,
-                market_pressure=market_pressure,
-                pp_line=pp_line,
-                dk_line=dk_line,
-                fd_line=fd_line,
-                removed=removed,
-                standing=standing,
-                removal_reason=removal_reason,
-                opponent=opponent,
-                intelligence_trace=intelligence_trace,
-                opening_line=opening_line,
-                market_confirmation=market_confirmation,
-                source=source,
+            message = "\n".join(
+                [
+                    "📊 <b>PLAYER PROP</b>",
+                    "",
+                    f"👤 <b>Player:</b> {escape(str(player_name))}",
+                    f"📊 <b>Stat:</b> {escape(str(stat_type))}",
+                    f"🎯 <b>Line:</b> <code>{escape(_fallback_line)}</code>",
+                    "",
+                    "📈 <b>History:</b>",
+                    "   N/A",
+                ]
             )
 
         # 5. Broadcast

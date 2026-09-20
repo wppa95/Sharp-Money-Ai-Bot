@@ -14,3 +14,9 @@ Every callable prop-to-Telegram adapter must enforce the canonical direction-and
 **Why:** Low-level compatibility senders can bypass the active ranked queue; treating movement or removal as a pick reintroduces the exact monitoring-versus-delivery leakage the queue prevents.
 
 **How to apply:** Keep monitoring observations available for persistence and reporting, but allow only genuine OVER/UNDER recommendations with supporting player-result evidence to reach Telegram.
+
+Formatting is part of the delivery boundary: malformed history or provider metadata must not strand a pre-delivery claim or silently suppress a valid pick. Prefer a minimal actionable fallback; otherwise release the claim and record the formatter failure.
+
+**Why:** A formatter exception occurs after the atomic claim but before Telegram I/O, so treating formatting as harmless presentation can turn one bad payload into a delivery outage and suppress retries.
+
+**How to apply:** Wrap user-facing prop formatting after the claim, log the exception, and preserve player, stat, direction, and line in the fallback message.

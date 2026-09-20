@@ -525,6 +525,45 @@ class TestDeliverUnderdog:
         assert "💪 STRONG BET" not in msg
 
     @pytest.mark.asyncio
+    async def test_formatter_failure_uses_actionable_fallback(self):
+        """A malformed history payload must not suppress a valid Telegram pick."""
+        sent_messages: list[str] = []
+
+        async def capture(chat_id, text, **kwargs):
+            sent_messages.append(text)
+            return MagicMock()
+
+        mock_bot = MagicMock()
+        mock_bot.send_message = AsyncMock(side_effect=capture)
+        delivery = AlertDelivery(_make_db_mock(), mock_bot, [1])
+
+        with patch(
+            "alerts_multiplatform.format_underdog_change_alert",
+            side_effect=ValueError("malformed history"),
+        ):
+            result = await delivery.deliver_underdog(
+                player_name="Connor McDavid",
+                team="EDM",
+                sport="NHL",
+                stat_type="Points",
+                old_line=0.5,
+                new_line=1.5,
+                validation=_make_real_validation(),
+                decision=MagicMock(
+                    recommendation="OVER",
+                    confidence=66,
+                    decision_tier="B",
+                ),
+                score=MagicMock(total=66, stars=3, tier="B"),
+            )
+
+        assert result.sent is True
+        assert sent_messages
+        assert "Connor McDavid" in sent_messages[0]
+        assert "OVER 1.5" in sent_messages[0]
+        assert "History" in sent_messages[0]
+
+    @pytest.mark.asyncio
     async def test_supported_three_star_under_is_sent_without_unearned_strong_label(self):
         sent_messages: list[str] = []
 
