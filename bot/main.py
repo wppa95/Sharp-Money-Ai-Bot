@@ -1228,18 +1228,45 @@ async def _grade_opportunities_job(context) -> None:
             if _ht_start and hasattr(_ht_start, "get_tracking_grader_cursor")
             else 0
         )
+        _fair_sport_cursors = bool(
+            _ht_start
+            and hasattr(_ht_start, "get_opportunity_grader_sport_cursors")
+            and hasattr(_ht_start, "get_tracking_grader_sport_cursors")
+            and hasattr(db, "get_pending_opportunities")
+        )
+        _opportunity_sport_cursors = (
+            _ht_start.get_opportunity_grader_sport_cursors()
+            if _fair_sport_cursors
+            else {}
+        )
+        _tracking_sport_cursors = (
+            _ht_start.get_tracking_grader_sport_cursors()
+            if _fair_sport_cursors
+            else {}
+        )
         try:
+            if _fair_sport_cursors:
+                pending = await db.get_pending_opportunities(
+                    cutoff_hours=0.0,
+                    limit=_GRADE_BATCH_SIZE,
+                    sport_cursors=_opportunity_sport_cursors,
+                )
+            else:
+                pending = await db.get_pending_opportunities(
+                    cutoff_hours=0.0,
+                    after_id=_cursor,
+                    limit=_GRADE_BATCH_SIZE,
+                )
+        except TypeError:
+            # Keep lightweight test doubles and older database adapters
+            # compatible while production uses the rotating query.
             pending = await db.get_pending_opportunities(
                 cutoff_hours=0.0,
                 after_id=_cursor,
                 limit=_GRADE_BATCH_SIZE,
             )
-        except TypeError:
-            # Keep lightweight test doubles and older database adapters
-            # compatible while production uses the rotating query.
-            pending = await db.get_pending_opportunities(cutoff_hours=0.0)
         # Wrap once the cursor reaches the end of the pending set.
-        if not pending and _cursor:
+        if not pending and _cursor and not _fair_sport_cursors:
             try:
                 pending = await db.get_pending_opportunities(
                     cutoff_hours=0.0,
@@ -1258,6 +1285,22 @@ async def _grade_opportunities_job(context) -> None:
         _get_pending_tracked = getattr(db, "get_pending_tracked_props", None)
         if callable(_get_pending_tracked):
             try:
+                if _fair_sport_cursors:
+                    _tracked_result = _get_pending_tracked(
+                        cutoff_hours=0.0,
+                        limit=_GRADE_BATCH_SIZE,
+                        sport_cursors=_tracking_sport_cursors,
+                    )
+                else:
+                    _tracked_result = _get_pending_tracked(
+                        cutoff_hours=0.0,
+                        after_id=_tracked_cursor,
+                        limit=_GRADE_BATCH_SIZE,
+                    )
+                if hasattr(_tracked_result, "__await__"):
+                    _tracked_pending = await _tracked_result
+            except TypeError:
+                # Compatibility with older adapters that do not accept limit.
                 _tracked_result = _get_pending_tracked(
                     cutoff_hours=0.0,
                     after_id=_tracked_cursor,
@@ -1265,12 +1308,7 @@ async def _grade_opportunities_job(context) -> None:
                 )
                 if hasattr(_tracked_result, "__await__"):
                     _tracked_pending = await _tracked_result
-            except TypeError:
-                # Compatibility with older adapters that do not accept limit.
-                _tracked_result = _get_pending_tracked(cutoff_hours=0.0)
-                if hasattr(_tracked_result, "__await__"):
-                    _tracked_pending = await _tracked_result
-            if not _tracked_pending and _tracked_cursor:
+            if not _tracked_pending and _tracked_cursor and not _fair_sport_cursors:
                 try:
                     _tracked_result = _get_pending_tracked(
                         cutoff_hours=0.0,
@@ -1688,11 +1726,47 @@ async def _grade_opportunities_job(context) -> None:
             )
         _ht_g = get_health_tracker()
         if _ht_g:
-            if hasattr(_ht_g, "set_opportunity_grader_cursor") and _legacy_pending:
+            if (
+                _fair_sport_cursors
+                and hasattr(_ht_g, "set_opportunity_grader_sport_cursors")
+                and _legacy_pending
+            ):
+                _next_opportunity_sport_cursors = dict(
+                    _opportunity_sport_cursors
+                )
+                for _opp in _legacy_pending:
+                    _sport = str(
+                        getattr(_opp, "sport", "UNKNOWN") or "UNKNOWN"
+                    ).upper().strip()
+                    _next_opportunity_sport_cursors[_sport] = max(
+                        _next_opportunity_sport_cursors.get(_sport, 0),
+                        int(getattr(_opp, "id", 0) or 0),
+                    )
+                _ht_g.set_opportunity_grader_sport_cursors(
+                    _next_opportunity_sport_cursors
+                )
+            elif hasattr(_ht_g, "set_opportunity_grader_cursor") and _legacy_pending:
                 _ht_g.set_opportunity_grader_cursor(
                     max(int(getattr(_opp, "id", 0) or 0) for _opp in _legacy_pending)
                 )
-            if hasattr(_ht_g, "set_tracking_grader_cursor") and _tracked_pending:
+            if (
+                _fair_sport_cursors
+                and hasattr(_ht_g, "set_tracking_grader_sport_cursors")
+                and _tracked_pending
+            ):
+                _next_tracking_sport_cursors = dict(_tracking_sport_cursors)
+                for _tracked in _tracked_pending:
+                    _sport = str(
+                        getattr(_tracked, "sport", "UNKNOWN") or "UNKNOWN"
+                    ).upper().strip()
+                    _next_tracking_sport_cursors[_sport] = max(
+                        _next_tracking_sport_cursors.get(_sport, 0),
+                        int(getattr(_tracked, "id", 0) or 0),
+                    )
+                _ht_g.set_tracking_grader_sport_cursors(
+                    _next_tracking_sport_cursors
+                )
+            elif hasattr(_ht_g, "set_tracking_grader_cursor") and _tracked_pending:
                 _ht_g.set_tracking_grader_cursor(
                     max(int(getattr(_tracked, "id", 0) or 0) for _tracked in _tracked_pending)
                 )

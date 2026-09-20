@@ -7082,29 +7082,99 @@ class Database:
         cutoff_hours: float = 0.5,
         after_id: Optional[int] = None,
         limit: int = 5000,
+        sport_cursors: Optional[dict[str, int]] = None,
     ) -> "list[PropTrackingLog]":
         """Return old, unresolved universal tracking rows for settlement."""
+        import math
         from datetime import timedelta
 
         cutoff = datetime.utcnow() - timedelta(hours=cutoff_hours)
         async with self.session() as s:
-            stmt = (
-                select(PropTrackingLog)
-                .where(
-                    PropTrackingLog.result == "PENDING",
-                    or_(
-                        and_(
-                            PropTrackingLog.game_time.isnot(None),
-                            PropTrackingLog.game_time < cutoff,
-                        ),
-                        and_(
-                            PropTrackingLog.game_time.is_(None),
-                            PropTrackingLog.detected_at < cutoff,
-                            PropTrackingLog.game_id != "",
-                        ),
+            _base_filters = [
+                PropTrackingLog.result == "PENDING",
+                or_(
+                    and_(
+                        PropTrackingLog.game_time.isnot(None),
+                        PropTrackingLog.game_time < cutoff,
                     ),
+                    and_(
+                        PropTrackingLog.game_time.is_(None),
+                        PropTrackingLog.detected_at < cutoff,
+                        PropTrackingLog.game_id != "",
+                    ),
+                ),
+            ]
+            _limit = max(1, min(int(limit), 5000))
+
+            if sport_cursors is not None:
+                _sport_result = await s.execute(
+                    select(func.upper(PropTrackingLog.sport))
+                    .where(*_base_filters)
+                    .distinct()
                 )
-            )
+                _sports = sorted(
+                    {
+                        str(row[0]).upper().strip()
+                        for row in _sport_result.all()
+                        if row[0]
+                    }
+                )
+                if not _sports:
+                    return []
+                _per_sport_limit = max(
+                    1,
+                    math.ceil(_limit / len(_sports)),
+                )
+                _rows_by_sport: dict[str, list[PropTrackingLog]] = {}
+                for _sport in _sports:
+                    _sport_cursor = max(
+                        0,
+                        int(sport_cursors.get(_sport, 0) or 0),
+                    )
+                    _fresh_limit = (
+                        _per_sport_limit
+                        if _sport_cursor == 0
+                        else max(1, _per_sport_limit // 2)
+                    )
+                    _sport_stmt = (
+                        select(PropTrackingLog)
+                        .where(
+                            *_base_filters,
+                            func.upper(PropTrackingLog.sport) == _sport,
+                            PropTrackingLog.id > _sport_cursor,
+                        )
+                        .order_by(PropTrackingLog.id)
+                        .limit(_fresh_limit)
+                    )
+                    _sport_rows = await s.execute(_sport_stmt)
+                    _selected_rows = list(_sport_rows.scalars().all())
+                    _retry_limit = _per_sport_limit - len(_selected_rows)
+                    if _retry_limit > 0 and _sport_cursor > 0:
+                        _retry_stmt = (
+                            select(PropTrackingLog)
+                            .where(
+                                *_base_filters,
+                                func.upper(PropTrackingLog.sport) == _sport,
+                                PropTrackingLog.id <= _sport_cursor,
+                            )
+                            .order_by(PropTrackingLog.id)
+                            .limit(_retry_limit)
+                        )
+                        _retry_rows = await s.execute(_retry_stmt)
+                        _selected_rows.extend(_retry_rows.scalars().all())
+                    _rows_by_sport[_sport] = _selected_rows
+
+                _interleaved: list[PropTrackingLog] = []
+                for _index in range(_per_sport_limit):
+                    for _sport in _sports:
+                        _sport_rows = _rows_by_sport[_sport]
+                        if _index < len(_sport_rows):
+                            _interleaved.append(_sport_rows[_index])
+                            if len(_interleaved) >= _limit:
+                                return _interleaved
+                return _interleaved
+
+            stmt = select(PropTrackingLog).where(*_base_filters)
             if after_id is not None:
                 stmt = stmt.where(PropTrackingLog.id > int(after_id))
             _sport_rank = case(
@@ -7130,7 +7200,7 @@ class Database:
                 else_=30,
             )
             stmt = stmt.order_by(_sport_rank, PropTrackingLog.id)
-            result = await s.execute(stmt.limit(max(1, min(int(limit), 5000))))
+            result = await s.execute(stmt.limit(_limit))
             return list(result.scalars().all())
 
     @_retry_sqlite_write
@@ -8473,6 +8543,7 @@ class Database:
         cutoff_hours: float = 0.5,
         after_id: Optional[int] = None,
         limit: int = 5000,
+        sport_cursors: Optional[dict[str, int]] = None,
     ) -> "list[PropOpportunityLog]":
         """
         Return PENDING tracking rows old enough to attempt resolution.
@@ -8484,27 +8555,101 @@ class Database:
         lets the hourly job rotate through a large backlog without retrying the
         same oldest rows on every cycle.
         """
+        import math
         from datetime import timedelta
         cutoff = datetime.utcnow() - timedelta(hours=cutoff_hours)
         async with self.session() as s:
-            stmt = (
-                select(PropOpportunityLog)
-                .where(
-                    PropOpportunityLog.result    == "PENDING",
-                    PropOpportunityLog.recommendation.in_(("OVER", "UNDER")),
-                    or_(
-                        and_(
-                            PropOpportunityLog.game_time.isnot(None),
-                            PropOpportunityLog.game_time < cutoff,
-                        ),
-                        and_(
-                            PropOpportunityLog.game_time.is_(None),
-                            PropOpportunityLog.detected_at < cutoff,
-                            PropOpportunityLog.game_id != "",
-                        ),
+            _base_filters = [
+                PropOpportunityLog.result == "PENDING",
+                PropOpportunityLog.recommendation.in_(("OVER", "UNDER")),
+                or_(
+                    and_(
+                        PropOpportunityLog.game_time.isnot(None),
+                        PropOpportunityLog.game_time < cutoff,
                     ),
+                    and_(
+                        PropOpportunityLog.game_time.is_(None),
+                        PropOpportunityLog.detected_at < cutoff,
+                        PropOpportunityLog.game_id != "",
+                    ),
+                ),
+            ]
+            _limit = max(1, min(int(limit), 5000))
+
+            # Production grading uses independent sport cursors. Fetch an
+            # even quota per sport and interleave the rows so a large MLB
+            # backlog cannot consume the whole page before NBA/NFL/esports
+            # receive a settlement attempt. The legacy single-ID path below
+            # remains for older callers and compatibility adapters.
+            if sport_cursors is not None:
+                _sport_result = await s.execute(
+                    select(func.upper(PropOpportunityLog.sport))
+                    .where(*_base_filters)
+                    .distinct()
                 )
-            )
+                _sports = sorted(
+                    {
+                        str(row[0]).upper().strip()
+                        for row in _sport_result.all()
+                        if row[0]
+                    }
+                )
+                if not _sports:
+                    return []
+                _per_sport_limit = max(
+                    1,
+                    math.ceil(_limit / len(_sports)),
+                )
+                _rows_by_sport: dict[str, list[PropOpportunityLog]] = {}
+                for _sport in _sports:
+                    _sport_cursor = max(
+                        0,
+                        int(sport_cursors.get(_sport, 0) or 0),
+                    )
+                    _fresh_limit = (
+                        _per_sport_limit
+                        if _sport_cursor == 0
+                        else max(1, _per_sport_limit // 2)
+                    )
+                    _sport_stmt = (
+                        select(PropOpportunityLog)
+                        .where(
+                            *_base_filters,
+                            func.upper(PropOpportunityLog.sport) == _sport,
+                            PropOpportunityLog.id > _sport_cursor,
+                        )
+                        .order_by(PropOpportunityLog.id)
+                        .limit(_fresh_limit)
+                    )
+                    _sport_rows = await s.execute(_sport_stmt)
+                    _selected_rows = list(_sport_rows.scalars().all())
+                    _retry_limit = _per_sport_limit - len(_selected_rows)
+                    if _retry_limit > 0 and _sport_cursor > 0:
+                        _retry_stmt = (
+                            select(PropOpportunityLog)
+                            .where(
+                                *_base_filters,
+                                func.upper(PropOpportunityLog.sport) == _sport,
+                                PropOpportunityLog.id <= _sport_cursor,
+                            )
+                            .order_by(PropOpportunityLog.id)
+                            .limit(_retry_limit)
+                        )
+                        _retry_rows = await s.execute(_retry_stmt)
+                        _selected_rows.extend(_retry_rows.scalars().all())
+                    _rows_by_sport[_sport] = _selected_rows
+
+                _interleaved: list[PropOpportunityLog] = []
+                for _index in range(_per_sport_limit):
+                    for _sport in _sports:
+                        _sport_rows = _rows_by_sport[_sport]
+                        if _index < len(_sport_rows):
+                            _interleaved.append(_sport_rows[_index])
+                            if len(_interleaved) >= _limit:
+                                return _interleaved
+                return _interleaved
+
+            stmt = select(PropOpportunityLog).where(*_base_filters)
             if after_id is not None:
                 stmt = stmt.where(PropOpportunityLog.id > int(after_id))
             _sport_rank = case(
@@ -8530,7 +8675,7 @@ class Database:
                 else_=30,
             )
             stmt = stmt.order_by(_sport_rank, PropOpportunityLog.id)
-            result = await s.execute(stmt.limit(max(1, min(int(limit), 5000))))
+            result = await s.execute(stmt.limit(_limit))
             return list(result.scalars().all())
 
     @_retry_sqlite_write

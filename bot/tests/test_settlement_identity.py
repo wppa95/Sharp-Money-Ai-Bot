@@ -49,6 +49,53 @@ def _opportunity(provider: str, game_id: str, external_id: str) -> dict:
 
 
 class TestSettlementIdentity:
+    async def test_pending_opportunity_sport_cursors_interleave_large_backlogs(self, db):
+        """A dominant sport must not consume the entire grading page."""
+        for index in range(30):
+            await db.log_prop_opportunity(
+                **(
+                    _opportunity(
+                        "Underdog",
+                        f"mlb-event-{index}",
+                        f"mlb-prop-{index}",
+                    )
+                    | {"sport": "MLB"}
+                )
+            )
+        for index in range(3):
+            await db.log_prop_opportunity(
+                **(
+                    _opportunity(
+                        "Underdog",
+                        f"nba-event-{index}",
+                        f"nba-prop-{index}",
+                    )
+                    | {"sport": "NBA"}
+                )
+            )
+            await db.log_prop_opportunity(
+                **(
+                    _opportunity(
+                        "Underdog",
+                        f"nfl-event-{index}",
+                        f"nfl-prop-{index}",
+                    )
+                    | {"sport": "NFL"}
+                )
+            )
+
+        rows = await db.get_pending_opportunities(
+            cutoff_hours=0.0,
+            limit=9,
+            sport_cursors={"MLB": 0, "NBA": 0, "NFL": 0},
+        )
+
+        assert len(rows) == 9
+        assert {row.sport for row in rows} == {"MLB", "NBA", "NFL"}
+        assert sum(row.sport == "MLB" for row in rows) == 3
+        assert sum(row.sport == "NBA" for row in rows) == 3
+        assert sum(row.sport == "NFL" for row in rows) == 3
+
     async def test_same_player_date_can_store_two_event_results(self, db):
         await db.upsert_player_result(_result("event-a", 25.0))
         await db.upsert_player_result(_result("event-b", 10.0))

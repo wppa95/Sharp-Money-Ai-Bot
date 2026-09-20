@@ -106,6 +106,8 @@ _RUNTIME_SESSION_KEYS = frozenset({
     "wl_refresh_cursor",
     "opportunity_grader_cursor",
     "tracking_grader_cursor",
+    "opportunity_grader_sport_cursors",
+    "tracking_grader_sport_cursors",
     "fpr_cursor",
     "fpr_rotation",
     "stable_refresh_stats",
@@ -992,6 +994,56 @@ class HealthTracker:
         """Persist the neutral-tracking checkpoint used by hourly grading."""
         with self._lock:
             self._state["tracking_grader_cursor"] = max(0, int(cursor))
+            self._save()
+
+    def get_opportunity_grader_sport_cursors(self) -> dict[str, int]:
+        """Return independent durable grading positions for each sport."""
+        with self._lock:
+            raw = self._state.get("opportunity_grader_sport_cursors", {})
+            if not isinstance(raw, dict):
+                return {}
+            return {
+                str(sport).upper().strip(): max(0, int(cursor or 0))
+                for sport, cursor in raw.items()
+                if str(sport).strip()
+            }
+
+    def set_opportunity_grader_sport_cursors(
+        self,
+        cursors: dict[str, int],
+    ) -> None:
+        """Persist independent directional-opportunity positions by sport."""
+        with self._lock:
+            self._state["opportunity_grader_sport_cursors"] = {
+                str(sport).upper().strip(): max(0, int(cursor or 0))
+                for sport, cursor in cursors.items()
+                if str(sport).strip()
+            }
+            self._save()
+
+    def get_tracking_grader_sport_cursors(self) -> dict[str, int]:
+        """Return independent durable tracking-grader positions for each sport."""
+        with self._lock:
+            raw = self._state.get("tracking_grader_sport_cursors", {})
+            if not isinstance(raw, dict):
+                return {}
+            return {
+                str(sport).upper().strip(): max(0, int(cursor or 0))
+                for sport, cursor in raw.items()
+                if str(sport).strip()
+            }
+
+    def set_tracking_grader_sport_cursors(
+        self,
+        cursors: dict[str, int],
+    ) -> None:
+        """Persist independent neutral-tracking positions by sport."""
+        with self._lock:
+            self._state["tracking_grader_sport_cursors"] = {
+                str(sport).upper().strip(): max(0, int(cursor or 0))
+                for sport, cursor in cursors.items()
+                if str(sport).strip()
+            }
             self._save()
 
     def get_wl_refresh_cursor(self) -> int:
