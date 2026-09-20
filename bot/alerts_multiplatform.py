@@ -948,6 +948,49 @@ def _market_availability_status(game_time: Optional[datetime]) -> str:
         return "🟢 AVAILABLE NOW"
 
 
+def _decision_recommendation(decision: Optional[object]) -> str:
+    """Return the directional recommendation without exposing model metadata."""
+    if isinstance(decision, dict):
+        value = decision.get("recommendation")
+    else:
+        value = getattr(decision, "recommendation", None) if decision else None
+    return str(value or "").strip().upper()
+
+
+def _format_simple_prop_alert(
+    *,
+    player_name: str,
+    stat_type: str,
+    line: float,
+    decision: Optional[object],
+    validation: Optional[object],
+) -> str:
+    """Render the minimal user-facing player-prop alert."""
+    recommendation = _decision_recommendation(decision)
+    line_text = (
+        f"{recommendation} {line:.1f}"
+        if recommendation in {"OVER", "UNDER"}
+        else f"{line:.1f}"
+    )
+    history = _format_history_block(decision, validation)
+    if history:
+        history = history.lstrip("\n")
+    else:
+        history = "📈 <b>History:</b>\n   N/A"
+
+    return "\n".join(
+        [
+            "🎯 <b>PLAYER PROP</b>",
+            "",
+            f"👤 <b>Player:</b> {escape(str(player_name))}",
+            f"📊 <b>Stat:</b> {escape(str(stat_type))}",
+            f"🎯 <b>Line:</b> <code>{line_text}</code>",
+            "",
+            history,
+        ]
+    )
+
+
 def format_underdog_change_alert(
     player_name: str,
     team: str,
@@ -974,139 +1017,26 @@ def format_underdog_change_alert(
     market_confirmation: Optional[dict] = None,  # OddsAPI sportsbook confirmation data
     source: str = "Underdog",
 ) -> str:
-    """Format a player-prop line change or removed prop.
-
-    Now includes an "Available Lines" block showing all 4 providers, and
-    separates Market Movement Score from Bet Confidence.
-
-    When *score* (a UDPropScore) is supplied, the grade is shown.
-    When *validation* is supplied, a compact history signal line is appended.
-    """
-    source = source.strip() or "Underdog"
-    source_upper = source.upper()
-    source_emoji = "🎯"
-    sport_icon = {
-        "NFL": "🏈", "NBA": "🏀", "MLB": "⚾",
-        "NHL": "🏒", "UFC": "🥊", "WNBA": "🏀",
-    }.get(sport, "🎯")
-
+    """Format a compact player-prop alert with only the actionable details."""
     if removed:
-        header         = "🚫 <b>PLAYER PROP REMOVED</b>"
-        movement_block = f"  🎯 <b>Last Line:</b>  <code>{old_line:.1f}</code>"
-    elif standing:
-        header         = "📊 <b>PLAYER PROP</b>"
-        movement_block = (
-            f"📊 <b>LINE</b>\n"
-            f"  {source_emoji} <code>{new_line:.1f}</code>  {_line_label(new_line)}"
-        )
-    else:
-        change         = new_line - old_line
-        direction_icon = "📈" if change > 0 else "📉"
-        header         = "📊 <b>PLAYER PROP</b>"
-        change_sign    = "+" if change >= 0 else ""
-        movement_block = (
-            f"📊 <b>LINE</b>\n"
-            f"  {source_emoji} <code>{new_line:.1f}</code>  {_line_label(new_line)}\n"
-            f"  Previous:         <code>{old_line:.1f}</code>\n"
-            f"  {direction_icon} Move:  <code>{change_sign}{change:.1f}</code>"
-        )
-
-    opponent_str = f"\n  <b>vs:</b>      {escape(str(opponent))}" if opponent else ""
-    game_str = (
-        f"\n  🕐 <b>Game starts:</b>  {_format_game_time_et(game_time)}"
-        if game_time else ""
-    )
-
-    # Opening line display — show only when different from current and not a removal
-    opening_str = ""
-    if not removed and opening_line is not None and abs(opening_line - new_line) >= 0.1:
-        total_move_sign = "+" if (new_line - opening_line) >= 0 else ""
-        opening_str = (
-            f"\n  <b>Opened:</b>  <code>{opening_line:.1f}</code>"
-            f"  <i>(total move: {total_move_sign}{new_line - opening_line:.1f})</i>"
-        )
-
-    _thick = "━" * 18
-
-    # ── Compact alert (decision-first) ──────────────────────────────────────
-    change = (new_line - old_line) if not removed else 0.0
-    change_sign = "+" if change >= 0 else ""
-
-    # Pick from the directional decision only.
-    rec = getattr(decision, "recommendation", None) if decision else None
-
-    pick_line = ""
-    if rec in ("OVER", "UNDER") and not removed:
-        pick_emoji = "🟢" if rec == "OVER" else "🔴"
-        pick_line = f"📌 <b>PICK:</b>  {pick_emoji} <b>{rec} {new_line:.1f}</b>"
-
-    if removed:
-        body_lines = [
-            _thick,
-            header,
-            _thick,
-            "",
-            f"{sport_icon} <b>{escape(str(sport))} — {escape(str(stat_type))}</b>",
-            f"👤 <b>{escape(str(player_name))}</b>",
-            "",
-            f"{source_emoji} Last Line: <code>{old_line:.1f}</code>",
-            f"Removal: {escape(removal_reason or 'Market no longer available')}",
-            "",
-            f"{EMOJI['clock']} <i>{datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}</i>",
-            "",
-            _thick,
-        ]
-    else:
-        # OddsAPI sportsbook confirmation footer
-        _confirm_line = ""
-        if market_confirmation is not None:
-            _cn = market_confirmation.get("notes", "")
-            if _cn:
-                _confirm_line = f"📡 <b>Market Check:</b>  {escape(str(_cn))}"
-
-        body_lines = [
-            _thick,
-            header,
-            _thick,
-            "",
-            f"{sport_icon} <b>{escape(str(sport))} — {escape(str(stat_type))}</b>",
-            f"👤 <b>{escape(str(player_name))}</b>",
-            "",
-            movement_block,
-            f"📡 <b>Source:</b>  Player Props · {escape(source)}",
-            opponent_str,
-            game_str,
-            opening_str,
-            "",
-            pick_line,
-        ]
-        if decision is not None:
-            evidence_label, evidence_count = _evidence_display(validation, decision)
-            body_lines += [
-                f"🧾 <b>Evidence:</b>  {escape(evidence_label)}"
-                + (f" ({evidence_count} games)" if evidence_count else "")
+        return "\n".join(
+            [
+                "🚫 <b>PLAYER PROP REMOVED</b>",
+                "",
+                f"👤 <b>Player:</b> {escape(str(player_name))}",
+                f"📊 <b>Stat:</b> {escape(str(stat_type))}",
+                f"🎯 <b>Last line:</b> <code>{old_line:.1f}</code>",
+                f"Reason: {escape(removal_reason or 'Market no longer available')}",
             ]
-            if _has_strong_directional_history(validation, decision):
-                body_lines += ["💪 STRONG BET"]
-            decision_reason = _clean_reason(getattr(decision, "reason", ""))
-            history = _format_history_block(decision, validation)
-            if history:
-                body_lines += [history]
-            if decision_reason:
-                body_lines += [f"\n💬 <b>Reason:</b>\n   <i>{decision_reason}</i>"]
-        if _confirm_line:
-            body_lines += [_confirm_line]
-        body_lines += [
-            "",
-            f"📍 <b>Status:</b>  {_market_availability_status(game_time)}",
-            f"{EMOJI['clock']} <i>{datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}</i>",
-            "",
-            _thick,
-        ]
+        )
 
-    # Drop empty strings from optional lines
-    parts = [ln for ln in body_lines if ln is not None and ln != ""]
-    return "\n".join(parts)
+    return _format_simple_prop_alert(
+        player_name=player_name,
+        stat_type=stat_type,
+        line=new_line,
+        decision=decision,
+        validation=validation,
+    )
 
 
 def format_market_move_detected(
@@ -1187,85 +1117,14 @@ def format_underdog_new_prop_alert(
     market_confirmation: Optional[dict] = None,  # OddsAPI sportsbook confirmation data
     source: str = "Underdog",
 ) -> str:
-    """Format a 🚨 PLAYER PROP LIVE alert for a first-appearance prop.
-
-    Fires when a (player_name, stat_type) pair is seen for the very first
-    time AND has sufficient history to justify an immediate alert.
-    The validation gate ensures props with no history go to digest only.
-    """
-    source = source.strip() or "Underdog"
-    source_upper = source.upper()
-    source_emoji = "🎯"
-    sport_icon = {
-        "NFL": "🏈", "NBA": "🏀", "MLB": "⚾",
-        "NHL": "🏒", "UFC": "🥊", "WNBA": "🏀",
-    }.get(sport, "🎯")
-
-    opponent_str = f"  <b>vs:</b> {escape(str(opponent))}" if opponent else ""
-    game_str = (
-        f"  🕐 <b>Game starts:</b> {_format_game_time_et(game_time)}"
-        if game_time else ""
+    """Format a compact first-appearance player-prop alert."""
+    return _format_simple_prop_alert(
+        player_name=player_name,
+        stat_type=stat_type,
+        line=line_value,
+        decision=decision,
+        validation=validation,
     )
-
-    # Reason bullets
-    reasons = ["Qualified current-line player evidence"]
-    if line_value <= low_line_threshold:
-        reasons.append(f"Low starting line ({line_value} ≤ {low_line_threshold})")
-    if (
-        validation is not None
-        and getattr(validation, "has_supporting_data", False)
-        and str(getattr(validation, "data_source", "")).lower() == "real"
-    ):
-        reasons.append(
-            f"Supporting game history available ({getattr(validation, 'n_real_games', 0)} games)"
-        )
-
-    history_block = _format_history_block(decision, validation)
-    context_line = (
-        f"  <b>First Seen:</b>    {datetime.utcnow().strftime('%H:%M UTC')}"
-        + (f"\n{opponent_str}" if opponent_str else "")
-        + (f"\n{game_str}" if game_str else "")
-        + (f"\n{history_block}" if history_block else "")
-    )
-
-    _thick = "━" * 18
-    parts = [
-        _thick,
-        "📊 <b>PLAYER PROP</b>",
-        _thick,
-        "",
-            f"{sport_icon} <b>{escape(str(sport))} — {escape(str(stat_type))}</b>",
-            f"👤 <b>{escape(str(player_name))}</b>",
-        "",
-        _div(),
-        f"📡 <b>Source:</b>  Player Props · {escape(source)}",
-        f"  {source_emoji} <code>{line_value:.1f}</code>  {_line_label(line_value)}",
-        context_line,
-        *(
-            [
-                f"📌 <b>PICK:</b>  "
-                f"{'🟢' if getattr(decision, 'recommendation', '') == 'OVER' else '🔴'} "
-                f"<b>{escape(str(getattr(decision, 'recommendation', '')))} {line_value:.1f}</b>"
-            ]
-            if getattr(decision, "recommendation", "") in ("OVER", "UNDER")
-            else []
-        ),
-        *(
-            ["💪 STRONG BET"]
-            if _has_strong_directional_history(validation, decision)
-            else []
-        ),
-        "",
-        "<b>Reason:</b>\n" + " · ".join(escape(reason) for reason in reasons),
-        *([f"📡 <b>Market Check:</b>  {escape(str(market_confirmation['notes']))}"]
-          if market_confirmation and market_confirmation.get("notes") else []),
-        "",
-        f"{EMOJI['clock']} <b>Line as of:</b> "
-        f"<i>{datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}</i>",
-        "",
-        _thick,
-    ]
-    return "\n".join(parts)
 
 
 # ── Underdog end-of-cycle new-prop digest ─────────────────────────────────────
