@@ -602,7 +602,7 @@ def _format_history_block(
         over = _numeric_attr(decision, over_name)
         shown_label = _history_window_label(label, games, l30_games)
         if rate is None or games is None or games <= 0:
-            if label in {"L20", "L30"}:
+            if label in {"L5", "L20", "L30"}:
                 rows.append(f"   <b>{shown_label}:</b> N/A")
             continue
         if over is not None:

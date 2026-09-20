@@ -332,15 +332,15 @@ class TestAlertFreshnessTimestamp:
     """Verify all non-removal alerts include a 'Line as of' timestamp."""
 
     def test_freshness_timestamp_in_alerts_source(self):
-        """Current alerts include a freshness timestamp."""
+        """Compact alerts omit the freshness footer."""
         from alerts_multiplatform import format_underdog_change_alert
         current = format_underdog_change_alert(
             "Test Player", "TM", "NBA", "Points", 20.5, 21.5,
         )
-        assert "Line as of" in current
+        assert "Line as of" not in current
 
     def test_timestamp_not_added_to_removal_alerts(self):
-        """Removal alerts must not get the current-line freshness footer."""
+        """Removal alerts also omit the removed freshness footer."""
         from alerts_multiplatform import format_underdog_change_alert
         removal = format_underdog_change_alert(
             "Test Player", "TM", "NBA", "Points", 20.5, 21.5,

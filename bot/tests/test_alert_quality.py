@@ -393,12 +393,12 @@ def test_qualified_play_omits_all_market_quality_display():
         l10_games=10,
         l10_over=2,
         l10_hit_rate=0.2,
-        l20_games=None,
-        l20_over=None,
-        l20_hit_rate=None,
-        l30_games=None,
-        l30_over=None,
-        l30_hit_rate=None,
+        l20_games=20,
+        l20_over=12,
+        l20_hit_rate=0.60,
+        l30_games=30,
+        l30_over=18,
+        l30_hit_rate=0.60,
     )
     market_quality = MarketQuality(
         label=MarketQualityLabel("STRONG"),
@@ -455,12 +455,12 @@ def test_alert_history_includes_h2h_window_from_decision():
         l10_games=None,
         l10_over=None,
         l10_hit_rate=None,
-        l20_games=None,
-        l20_over=None,
-        l20_hit_rate=None,
-        l30_games=None,
-        l30_over=None,
-        l30_hit_rate=None,
+        l20_games=20,
+        l20_over=12,
+        l20_hit_rate=0.60,
+        l30_games=30,
+        l30_over=18,
+        l30_hit_rate=0.60,
         season_games=None,
         season_over=None,
         season_hit_rate=None,
@@ -481,6 +481,10 @@ def test_alert_history_includes_h2h_window_from_decision():
 
     assert "H2H:" in message
     assert "67% (2/3)" in message
+    assert "L20:" in message
+    assert "60% (12/20)" in message
+    assert "L30:" in message
+    assert "60% (18/30)" in message
 
 
 def test_alert_history_includes_h2h_from_validation_when_decision_lacks_it():
