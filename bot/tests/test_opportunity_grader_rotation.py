@@ -252,7 +252,71 @@ async def test_grader_fetches_concurrently_with_a_bounded_batch():
     )
     assert health.cursor == 30
     assert health.runs == 1
+    assert (
+        propline_provider.fetch_resolved_results.await_count
+        == main._GRADE_PROPLINE_FETCH_BATCH_SIZE
+    )
+
+
+@pytest.mark.asyncio
+async def test_grader_uses_explicit_propline_settlement_before_writing_grade():
+    row = _opp(31, "PropLine Player", "Points")
+    row.game_time = datetime(2026, 9, 5, 18, 0)
+    row.game_id = "propline-event-31"
+    propline_result = SimpleNamespace(
+        player_name="PropLine Player",
+        sport="NBA",
+        stat_type="points",
+        game_date="2026-09-05",
+        actual_value=8.0,
+        source="propline_history",
+        game_id="propline-event-31",
+    )
+    settlement = SimpleNamespace(
+        actual_value=8.0,
+        game_date="2026-09-05",
+        source="propline_history",
+    )
+
+    db = MagicMock()
+    db.get_pending_opportunities = AsyncMock(return_value=[row])
+    db.get_player_results_bulk = AsyncMock(return_value={})
+    db.upsert_player_results_bulk = AsyncMock()
+    db.get_game_results_for_grading_bulk = AsyncMock(
+        return_value={31: (settlement, "2026-09-05")}
+    )
+    db.grade_opportunities_bulk = AsyncMock()
+    health = _Health()
+    stats_provider = MagicMock()
+    stats_provider.fetch_results = AsyncMock(return_value=[])
+    propline_provider = SimpleNamespace(
+        fetch_resolved_event_results=AsyncMock(return_value=[propline_result]),
+        fetch_resolved_results=AsyncMock(return_value=[]),
+    )
+
+    with (
+        patch.object(main, "get_health_tracker", return_value=health),
+        patch(
+            "providers.player_stats.PlayerStatsProvider",
+            return_value=stats_provider,
+        ),
+        patch(
+            "providers.player_history.get_player_history_provider",
+            return_value=propline_provider,
+        ),
+    ):
+        await main._grade_opportunities_job(_context(db))
+
+    propline_provider.fetch_resolved_event_results.assert_awaited_once_with(
+        "propline-event-31",
+        "NBA",
+        source_provider="Underdog",
+    )
     propline_provider.fetch_resolved_results.assert_not_awaited()
+    db.upsert_player_results_bulk.assert_awaited_once_with([propline_result])
+    db.grade_opportunities_bulk.assert_awaited_once_with(
+        [{"id": 31, "result": "MISS", "actual_value": 8.0, "error_type": "Market"}]
+    )
 
 
 @pytest.mark.asyncio

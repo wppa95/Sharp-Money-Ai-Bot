@@ -96,6 +96,50 @@ def _client(entries):
     return client
 
 
+@pytest.mark.asyncio
+async def test_event_settlement_fetch_uses_provider_identity_and_explicit_rows():
+    evidence = SimpleNamespace(
+        event_id="event-1",
+        player_name="Alex Example",
+        sport="NBA",
+        stat_type="points",
+        actual_value=24.0,
+        commence_time=datetime(2026, 8, 29),
+        resolved_at=None,
+        observed_at=None,
+        is_settled=True,
+    )
+    client = SimpleNamespace(
+        is_configured=True,
+        official_sport_for=lambda sport: "basketball_nba",
+        fetch_event_results=AsyncMock(
+            return_value=SimpleNamespace(
+                results=(evidence,),
+                succeeded=True,
+                complete=True,
+                redacted=False,
+            )
+        ),
+    )
+    provider = PlayerHistoryProvider(propline_client=client)
+
+    rows = await provider.fetch_resolved_event_results(
+        "event-1",
+        "NBA",
+        source_provider="Underdog",
+    )
+
+    client.fetch_event_results.assert_awaited_once_with(
+        "basketball_nba",
+        "event-1",
+        bookmaker="underdog",
+    )
+    assert len(rows) == 1
+    assert rows[0].player_name == "Alex Example"
+    assert rows[0].actual_value == 24.0
+    assert rows[0].game_id == "event-1"
+
+
 def _endpoint(payload, *, succeeded=True, complete=True):
     return SimpleNamespace(
         payload=payload,

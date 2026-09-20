@@ -678,6 +678,66 @@ class PlayerHistoryProvider:
             instrumentation=instrumentation,
         )
 
+    async def fetch_resolved_event_results(
+        self,
+        event_id: str,
+        sport: str,
+        *,
+        source_provider: str = "Underdog",
+    ) -> list:
+        """Fetch explicit PropLine settlements for one known event.
+
+        Event results are the preferred settlement path when a pending prop
+        carries its provider event identity. They preserve the provider's
+        result payload even when the display market is not supported by the
+        player-history market catalog.
+        """
+        from providers.propline import PropLineClient
+
+        event_key = str(event_id or "").strip()
+        sport_u = str(sport or "").upper().strip()
+        if not event_key or not sport_u:
+            return []
+        if self._propline_client is None:
+            self._propline_client = PropLineClient()
+        client = self._propline_client
+        if not getattr(client, "is_configured", False):
+            return []
+
+        try:
+            official_sport = client.official_sport_for(sport_u)
+            if not official_sport:
+                discovered = await client.discover_sports()
+                official_sport = next(
+                    (
+                        item.official_key
+                        for item in discovered
+                        if str(item.canonical_key).upper().strip() == sport_u
+                    ),
+                    None,
+                )
+            bookmaker = _propline_bookmaker_for_source(source_provider)
+            if not official_sport or not bookmaker:
+                return []
+            result = await client.fetch_event_results(
+                official_sport,
+                event_key,
+                bookmaker=bookmaker,
+            )
+        except Exception as exc:
+            logger.debug(
+                "PlayerHistoryProvider: PropLine event settlement failed "
+                "%s/%s: %s",
+                sport_u,
+                event_key,
+                exc,
+            )
+            return []
+
+        if not result.succeeded or not result.complete or result.redacted:
+            return []
+        return propline_result_rows(result.results)
+
     async def _fetch_propline_event_stats(
         self,
         player_name: str,

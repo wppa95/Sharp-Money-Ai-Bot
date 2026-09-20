@@ -1175,6 +1175,7 @@ _GRADE_BATCH_SIZE = 2000
 # turn into thousands of remote requests; rows with stored evidence still
 # grade in the same bulk pass.
 _GRADE_PROVIDER_FETCH_BATCH_SIZE = 50
+_GRADE_PROPLINE_FETCH_BATCH_SIZE = 25
 _GRADE_FETCH_CONCURRENCY = 12
 _GRADE_FETCH_TIMEOUT_SECONDS = 20
 # Monitoring and grading have independent owners. Keep each grading pass
@@ -1486,10 +1487,150 @@ async def _grade_opportunities_job(context) -> None:
                     _prov_fetch_exc,
                 )
 
-        # Grading uses results already collected by the independent history
-        # collector. Never perform a per-opportunity PropLine settlement
-        # request here: the available PropLine history endpoints are singular,
-        # while the collector owns the bulk/full-book history budget.
+        # PropLine exposes explicit OVER/UNDER settlement results for the
+        # evaluated bookmaker. Use a bounded set of those results when the
+        # primary stats provider did not produce an event/date match.
+        # ``fetch_resolved_results`` only returns explicitly settled provider
+        # rows, so this does not infer an outcome from player/stat history.
+        _propline_history = None
+        try:
+            from providers.player_history import (
+                get_player_history_provider as _get_player_history_provider,
+            )
+
+            _propline_history = _get_player_history_provider()
+        except Exception as _propline_init_exc:
+            logger.debug(
+                "_grade_opportunities_job: PropLine settlement provider "
+                "initialization failed: %s",
+                _propline_init_exc,
+            )
+
+        if _propline_history is not None and pending:
+            _propline_targets: list = []
+            _propline_keys: set[tuple[str, str, str]] = set()
+            for _gopp in pending:
+                if _has_stored_grade_result(_gopp):
+                    continue
+                _gkey = (
+                    str(_gopp.player_name),
+                    str(_gopp.sport).upper(),
+                    str(_gopp.stat_type or "").lower().strip(),
+                )
+                if _gkey in _propline_keys:
+                    continue
+                _propline_keys.add(_gkey)
+                _propline_targets.append(_gopp)
+                if len(_propline_targets) >= _GRADE_PROPLINE_FETCH_BATCH_SIZE:
+                    break
+
+            _propline_sem = asyncio.Semaphore(_GRADE_FETCH_CONCURRENCY)
+
+            async def _fetch_propline_results(_gopp):
+                async with _propline_sem:
+                    try:
+                        _event_id = str(
+                            getattr(_gopp, "game_id", "") or ""
+                        ).strip()
+                        _source_provider = (
+                            getattr(_gopp, "provider", None)
+                            or getattr(_gopp, "source_provider", None)
+                            or "Underdog"
+                        )
+                        if _event_id:
+                            _event_fetcher = getattr(
+                                _propline_history,
+                                "fetch_resolved_event_results",
+                                None,
+                            )
+                            if callable(_event_fetcher):
+                                _event_rows = await asyncio.wait_for(
+                                    _event_fetcher(
+                                        _event_id,
+                                        _gopp.sport,
+                                        source_provider=_source_provider,
+                                    ),
+                                    timeout=_GRADE_FETCH_TIMEOUT_SECONDS,
+                                )
+                                if _event_rows:
+                                    return _event_rows
+                        return await asyncio.wait_for(
+                            _propline_history.fetch_resolved_results(
+                                _gopp.player_name,
+                                _gopp.sport,
+                                _gopp.stat_type,
+                                source_provider=_source_provider,
+                            ),
+                            timeout=_GRADE_FETCH_TIMEOUT_SECONDS,
+                        )
+                    except Exception as _propline_fetch_exc:
+                        logger.debug(
+                            "_grade_opportunities_job: PropLine settlement "
+                            "fetch failed for %s/%s: %s",
+                            _gopp.player_name,
+                            _gopp.stat_type,
+                            _propline_fetch_exc,
+                        )
+                        return []
+
+            try:
+                _propline_tasks = [
+                    asyncio.create_task(_fetch_propline_results(_gopp))
+                    for _gopp in _propline_targets
+                ]
+                if _propline_tasks:
+                    _propline_done, _propline_deferred = await asyncio.wait(
+                        _propline_tasks,
+                        timeout=max(
+                            1,
+                            _GRADE_CYCLE_BUDGET_SECONDS - _GRADE_CYCLE_HEADROOM_SECONDS,
+                        ),
+                    )
+                    for _deferred_task in _propline_deferred:
+                        _deferred_task.cancel()
+                    if _propline_deferred:
+                        await asyncio.gather(
+                            *_propline_deferred,
+                            return_exceptions=True,
+                        )
+                    _propline_rows = [
+                        _row
+                        for _result_task in _propline_done
+                        if not _result_task.cancelled()
+                        and _result_task.exception() is None
+                        for _row in (_result_task.result() or [])
+                    ]
+                    _propline_writer = getattr(
+                        db, "upsert_player_results_bulk", None
+                    )
+                    if callable(_propline_writer) and _propline_rows:
+                        await _propline_writer(_propline_rows)
+                    else:
+                        for _row in _propline_rows:
+                            await db.upsert_player_result(_row)
+                    for _row in _propline_rows:
+                        _row_key = (
+                            str(getattr(_row, "player_name", "") or ""),
+                            str(getattr(_row, "sport", "") or "").upper(),
+                            str(getattr(_row, "stat_type", "") or "").lower().strip(),
+                        )
+                        _stored_grade_results.setdefault(_row_key, []).append(_row)
+                    if _propline_rows:
+                        logger.info(
+                            "_grade_opportunities_job: PropLine explicit "
+                            "settlements fetched=%d targets=%d",
+                            len(_propline_rows),
+                            len(_propline_targets),
+                        )
+            except Exception as _propline_fetch_exc:
+                logger.warning(
+                    "_grade_opportunities_job: PropLine settlement "
+                    "fetch/persist failed: %s",
+                    _propline_fetch_exc,
+                )
+
+        # All provider results are durable before the single bulk settlement
+        # lookup. Matching remains bounded by event date or event identity.
         _bulk_settlement_matches = None
         _bulk_settlement_loader = getattr(
             db, "get_game_results_for_grading_bulk", None
