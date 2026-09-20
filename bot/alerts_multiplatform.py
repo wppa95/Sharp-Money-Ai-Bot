@@ -602,6 +602,8 @@ def _format_history_block(
         over = _numeric_attr(decision, over_name)
         shown_label = _history_window_label(label, games, l30_games)
         if rate is None or games is None or games <= 0:
+            if label in {"L20", "L30"}:
+                rows.append(f"   <b>{shown_label}:</b> N/A")
             continue
         if over is not None:
             value = f"{rate:.0%} ({int(over)}/{int(games)})"
@@ -617,6 +619,8 @@ def _format_history_block(
     validation_h2h = _numeric_attr(validation, "h2h_hit_rate")
     if not h2h_rendered and validation_h2h is not None:
         rows.append(f"   <b>H2H:</b> {validation_h2h:.0%}")
+    elif not h2h_rendered:
+        rows.append("   <b>H2H:</b> N/A")
 
     if not rows:
         return "\n\n📈 <b>HISTORY</b>\n   <b>L5:</b> N/A — no history available"
@@ -965,7 +969,6 @@ def _format_simple_prop_alert(
     line: float,
     decision: Optional[object],
     validation: Optional[object],
-    source: str,
 ) -> str:
     """Render the minimal user-facing player-prop alert."""
     sport_icon = {
@@ -994,9 +997,6 @@ def _format_simple_prop_alert(
             f"🎯 <b>Line:</b> <code>{line_text}</code>",
             "",
             history,
-            "",
-            f"📡 <b>Source:</b>  Player Props · {escape(str(source).strip() or 'Underdog')}",
-            f"🕐 <b>Line as of:</b> <i>{datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}</i>",
         ]
     )
 
@@ -1047,7 +1047,6 @@ def format_underdog_change_alert(
         line=new_line,
         decision=decision,
         validation=validation,
-        source=source,
     )
 
 
@@ -1137,7 +1136,6 @@ def format_underdog_new_prop_alert(
         line=line_value,
         decision=decision,
         validation=validation,
-        source=source,
     )
 
 
