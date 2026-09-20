@@ -4532,6 +4532,12 @@ async def clv_check_job(context) -> None:
 
 # ── Shared Underdog + PropLine monitoring cycle ────────────────────────────────
 
+# Do not let a quota-paced PropLine fetch hold the live monitoring cycle open.
+# Fast test/provider doubles and already-completed fetches still hand off in the
+# same cycle; a slow fetch remains owned by its task and is picked up next time.
+_PROPLINE_HANDOFF_GRACE_SECONDS = 0.05
+
+
 def _shared_monitoring_cycle(cycle_branch):
     """Run Underdog, then hand completed PropLine observations to its pipeline."""
 
@@ -4552,11 +4558,13 @@ def _shared_monitoring_cycle(cycle_branch):
             _propline_ingest_task is None
             or _propline_ingest_task.done()
         )
+        ingestion_started_here = False
         if new_ingestion_task:
-            # Only clear the previous handoff when starting a replacement
-            # ingestion task.  An active task owns the pending batch and must
-            # not lose it while the Underdog branch is evaluating.
-            _propline_pending_props.clear()
+            ingestion_started_here = True
+            # Do not clear a completed task's pending handoff here. A slow
+            # request may finish after the prior cycle returns but before this
+            # replacement starts; the next cycle must be allowed to deliver
+            # those observations together with its new batch.
             _propline_ingest_task = asyncio.create_task(
                 propline_request_scan_job(context),
                 name="shared_monitoring_propline_ingestion",
@@ -4603,15 +4611,35 @@ def _shared_monitoring_cycle(cycle_branch):
             raise
         else:
             ingestion_complete = False
-            if _ingestion_task is not None:
-                try:
-                    ingestion_complete = bool(await _ingestion_task)
-                except asyncio.CancelledError:
-                    raise
-                except Exception as exc:  # noqa: BLE001
-                    logger.warning(
-                        "shared_monitoring_cycle: PropLine handoff unavailable: %s",
-                        type(exc).__name__,
+            # A prior monitoring cycle may still own a slow PropLine request.
+            # Do not make the next cycle wait on that unrelated task: it will
+            # retain its handoff for the next cycle.  A task started by this
+            # cycle gets a short grace period so the normal fast handoff remains
+            # atomic without coupling the monitor to provider pacing.
+            if _ingestion_task is not None and (
+                ingestion_started_here or _ingestion_task.done()
+            ):
+                if not _ingestion_task.done():
+                    _done, _pending = await asyncio.wait(
+                        {_ingestion_task},
+                        timeout=_PROPLINE_HANDOFF_GRACE_SECONDS,
+                    )
+                else:
+                    _done = {_ingestion_task}
+                if _ingestion_task in _done:
+                    try:
+                        ingestion_complete = bool(_ingestion_task.result())
+                    except asyncio.CancelledError:
+                        raise
+                    except Exception as exc:  # noqa: BLE001
+                        logger.warning(
+                            "shared_monitoring_cycle: PropLine handoff unavailable: %s",
+                            type(exc).__name__,
+                        )
+                else:
+                    logger.debug(
+                        "shared_monitoring_cycle: PropLine handoff deferred "
+                        "while provider request remains active"
                     )
 
             pending_props = list(_propline_pending_props.values())

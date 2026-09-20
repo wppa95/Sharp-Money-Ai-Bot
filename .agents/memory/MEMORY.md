@@ -156,3 +156,4 @@
 - [Strong pick quality gate](strong-pick-quality-gate.md) — user-facing picks require complete directional history; direction-only rows must not reach alerts or `/picks`.
 - [Telegram transport error handling](telegram-transport-errors.md) — python-telegram-bot wraps httpx read failures in NetworkError; classify the cause as transient polling noise.
 - [Grader backlog fairness](grader-backlog-fairness.md) — id-only settlement rotation can starve evidence-backed sports behind unresolved football rows; prefer cheap sport-priority ordering over correlated evidence scans.
+- [PropLine handoff pacing](propline-handoff-pacing.md) — a quota-paced PropLine fetch must not block the live monitor; preserve completed handoffs for the next cycle.

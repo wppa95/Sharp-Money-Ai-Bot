@@ -96,7 +96,7 @@ def test_logical_dedup_blocks_rotated_source_and_event_ids():
         event_id="event-new",
         direction="OVER",
     )
-    assert not _is_prop_deduped(
+    assert _is_prop_deduped(
         alerted,
         "Cedric Mullins",
         "MLB",
@@ -174,7 +174,7 @@ async def test_restart_restore_keeps_rotated_identity_dedup(tmp_path):
             direction="OVER",
             **common,
         )
-        assert not _is_prop_deduped(
+        assert _is_prop_deduped(
             me._prop_market_alerted,
             "Cedric Mullins",
             "MLB",

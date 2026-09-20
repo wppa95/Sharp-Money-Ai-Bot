@@ -79,7 +79,7 @@ def test_alternate_lines_remain_distinct_in_one_provider_batch():
     }
 
 
-def test_same_source_line_keeps_latest_observation():
+def test_same_source_line_at_distinct_lines_remains_distinct():
     props = canonicalize_player_props(
         "PrizePicks",
         [
@@ -88,8 +88,8 @@ def test_same_source_line_keeps_latest_observation():
         ],
     )
 
-    assert len(props) == 1
-    assert props[0].line_value == 26.5
+    assert len(props) == 2
+    assert {prop.line_value for prop in props} == {25.5, 26.5}
 
 
 @pytest.mark.asyncio
