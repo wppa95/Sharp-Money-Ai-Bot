@@ -69,7 +69,7 @@ async def test_cs_does_not_use_singular_propline_history_enrichment():
     assert result is not None
     assert result.has_real_data is True
     assert result.total_games == 5
-    assert result.n_supplemental_games == 0
+    assert result.n_supplemental_games == 5
     primary_provider.fetch_results.assert_awaited_once()
 
 
@@ -141,7 +141,7 @@ def test_serialized_validation_json_keeps_propline_provenance_and_count():
     "source",
     ["historical_average", "historical-average", "historical line average fallback"],
 )
-def test_historical_average_without_windows_is_telegram_deliverable(source):
+def test_historical_average_without_windows_is_not_telegram_deliverable(source):
     validation = SimpleNamespace(
         has_supporting_data=True,
         data_source=source,
@@ -159,13 +159,13 @@ def test_historical_average_without_windows_is_telegram_deliverable(source):
         sport="SOCCER",
         validation=validation,
         decision=decision,
-    ) is True
+    ) is False
     assert serialized_evidence_supports_delivery(
         {"evidence": {"data_source": source}}
     ) is True
 
 
-def test_mixed_over_history_with_provenance_is_telegram_deliverable():
+def test_primary_history_without_propline_is_not_telegram_deliverable():
     validation = SimpleNamespace(
         has_supporting_data=True,
         data_source="real",
@@ -204,14 +204,14 @@ def test_mixed_over_history_with_provenance_is_telegram_deliverable():
         sport="MLB",
         validation=validation,
         decision=decision,
-    ) is True
+    ) is False
     assert market_engine._has_strong_delivery_evidence(
         validation=validation,
         decision=decision,
     ) is False
 
 
-def test_historical_average_evidence_source_is_read_from_decision_json():
+def test_historical_average_evidence_source_is_not_delivery_evidence():
     decision = {
         "recommendation": "OVER",
         "evidence_source": "historical_average",
@@ -230,10 +230,10 @@ def test_historical_average_evidence_source_is_read_from_decision_json():
         sport="SOCCER",
         validation=validation,
         decision=decision,
-    ) is True
+    ) is False
 
 
-def test_historical_average_evidence_source_without_windows_is_deliverable():
+def test_historical_average_evidence_source_without_windows_is_not_deliverable():
     validation = SimpleNamespace(
         has_supporting_data=True,
         data_source="proxy",
@@ -250,19 +250,19 @@ def test_historical_average_evidence_source_without_windows_is_deliverable():
         sport="TENNIS",
         validation=validation,
         decision=decision,
-    ) is True
+    ) is False
     assert _has_strong_underdog_evidence(
         sport="TENNIS",
         validation=validation,
         decision=decision,
-    ) is True
+    ) is False
 
 
 @pytest.mark.parametrize(
     "sport",
     ["CS", "LOL", "DOTA", "VALORANT", "TENNIS", "SOCCER", "FIFA"],
 )
-def test_history_optional_sports_still_require_direction(sport):
+def test_all_sports_require_propline_history_and_direction(sport):
     no_history = SimpleNamespace(
         recommendation="OVER",
         evidence_source=None,
@@ -271,11 +271,11 @@ def test_history_optional_sports_still_require_direction(sport):
     assert market_engine._has_delivery_evidence(
         sport=sport,
         decision=no_history,
-    ) is True
+    ) is False
     assert _has_strong_underdog_evidence(
         sport=sport,
         decision=no_history,
-    ) is True
+    ) is False
 
     no_direction = SimpleNamespace(
         recommendation="",
@@ -320,9 +320,9 @@ def test_green_goblin_sports_require_history_even_with_direction(sport):
 def test_telegram_delivery_requires_strong_over_in_every_window():
     validation = SimpleNamespace(
         has_supporting_data=True,
-        data_source="real",
-        n_real_games=10,
-        n_supplemental_games=0,
+        data_source="propline",
+        n_real_games=0,
+        n_supplemental_games=10,
     )
     decision = SimpleNamespace(
         recommendation="OVER",
@@ -346,9 +346,9 @@ def test_telegram_delivery_requires_strong_over_in_every_window():
 def test_telegram_delivery_requires_strong_under_in_every_window():
     validation = SimpleNamespace(
         has_supporting_data=True,
-        data_source="real",
-        n_real_games=10,
-        n_supplemental_games=0,
+        data_source="propline",
+        n_real_games=0,
+        n_supplemental_games=10,
     )
     decision = SimpleNamespace(
         recommendation="UNDER",
@@ -373,9 +373,9 @@ def test_telegram_delivery_requires_strong_under_in_every_window():
 def test_legacy_strong_delivery_helper_rejects_direction_without_strong_window():
     validation = SimpleNamespace(
         has_supporting_data=True,
-        data_source="real",
-        n_real_games=10,
-        n_supplemental_games=0,
+        data_source="propline",
+        n_real_games=0,
+        n_supplemental_games=10,
     )
     decision = SimpleNamespace(
         recommendation="UNDER",
@@ -401,9 +401,9 @@ def test_legacy_strong_delivery_helper_rejects_direction_without_strong_window()
 def test_legacy_strong_delivery_helper_rejects_when_one_window_is_missing():
     validation = SimpleNamespace(
         has_supporting_data=True,
-        data_source="real",
-        n_real_games=50,
-        n_supplemental_games=0,
+        data_source="propline",
+        n_real_games=0,
+        n_supplemental_games=50,
     )
     decision = SimpleNamespace(
         recommendation="OVER",

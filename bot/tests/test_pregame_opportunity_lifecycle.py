@@ -128,8 +128,9 @@ async def test_pregame_underdog_prop_can_reach_delivery():
             strict_pregame=True,
             validation=SimpleNamespace(
                 has_supporting_data=True,
-                data_source="real",
-                n_real_games=5,
+                data_source="propline",
+                n_real_games=0,
+                n_supplemental_games=5,
             ),
             decision=SimpleNamespace(recommendation="OVER", confidence=80),
         )
@@ -184,8 +185,9 @@ async def test_scheduled_non_mlb_underdog_prop_can_reach_delivery(sport):
             strict_pregame=True,
             validation=SimpleNamespace(
                 has_supporting_data=True,
-                data_source="real",
-                n_real_games=5,
+                data_source="propline",
+                n_real_games=0,
+                n_supplemental_games=5,
             ),
             decision=SimpleNamespace(recommendation="OVER", confidence=80),
         )

@@ -263,9 +263,9 @@ async def test_underdog_cap_disabled_when_limit_is_zero():
                 score=MagicMock(total=75),
                 validation=SimpleNamespace(
                     has_supporting_data=True,
-                    data_source="real",
-                    n_real_games=10,
-                    n_supplemental_games=0,
+                        data_source="propline",
+                        n_real_games=0,
+                        n_supplemental_games=10,
                 ),
                 decision=MagicMock(recommendation="OVER", confidence=80),
             )
@@ -296,9 +296,9 @@ async def test_underdog_allowed_when_under_cap():
             score=MagicMock(total=75),
             validation=SimpleNamespace(
                 has_supporting_data=True,
-                data_source="real",
-                n_real_games=10,
-                n_supplemental_games=0,
+                    data_source="propline",
+                    n_real_games=0,
+                    n_supplemental_games=10,
             ),
             decision=MagicMock(recommendation="OVER", confidence=80),
         )

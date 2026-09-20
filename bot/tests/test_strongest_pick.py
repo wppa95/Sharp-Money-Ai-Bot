@@ -32,8 +32,9 @@ def _candidate(
         "market_quality": SimpleNamespace(score=mq),
         "validation": SimpleNamespace(
             has_supporting_data=evidence,
-            n_real_games=evidence_count,
-            n_supplemental_games=0,
+            data_source="propline" if evidence else "primary",
+            n_real_games=0,
+            n_supplemental_games=evidence_count if evidence else 0,
         ),
     }
 
@@ -235,7 +236,7 @@ def test_strong_mode_keeps_consistent_history_and_ranks_it_first():
 
 
 @pytest.mark.parametrize("sport", ["CFB", "WNBA", "NHL", "FIFA", "KBO"])
-def test_high_priority_non_strict_sports_do_not_need_six_window_history(sport):
+def test_non_football_sports_still_need_propline_history(sport):
     candidate = _candidate(
         "Underdog",
         "Jordan Lee",
@@ -253,7 +254,7 @@ def test_high_priority_non_strict_sports_do_not_need_six_window_history(sport):
     assert select_strongest_actionable_picks(
         [candidate],
         require_strong=True,
-    ) == [candidate]
+    ) == []
 
 
 @pytest.mark.parametrize("sport", ["MLB", "NFL", "NBA"])

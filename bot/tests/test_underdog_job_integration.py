@@ -107,6 +107,7 @@ def _make_db(recent_records=None, known_keys=None, prop_history=None) -> MagicMo
     db.save_underdog_snapshot                = AsyncMock()
     db.save_underdog_snapshots_bulk          = AsyncMock()
     db.log_prop_opportunity                  = AsyncMock()
+    db.log_prop_opportunity_bulk             = AsyncMock()
     db.log_prop_candidate_batch              = AsyncMock()
     db.update_ud_props_mq_scores_bulk        = AsyncMock()
     db.log_scan_cycle                        = AsyncMock()
@@ -344,7 +345,10 @@ class TestLifecycleTransitionsAfterBridge:
             l5=_win(5, 0.80), l10=_win(10, 0.80),
             l15=_win(15, 0.80), l20=_win(20, 0.75), l30=_win(30, 0.70),
             season=_win(50, 0.70), h2h=None,
-            has_real_data=True, total_games=50,
+        has_real_data=True, total_games=50,
+        data_source="propline",
+        n_supplemental_games=50,
+        supplemental_sources=("propline_history",),
         )
 
         call_order: list[str] = []
@@ -368,7 +372,14 @@ class TestLifecycleTransitionsAfterBridge:
                    new=AsyncMock(return_value=fake_hit_rates)):
             # Isolate lifecycle ordering from the independent v3.6 delivery
             # evidence gate; the fixture already supplies a qualifying S-tier.
-            with patch("market_engine._tier_delivery_gate", return_value=True):
+            with (
+                patch("market_engine._tier_delivery_gate", return_value=True),
+                patch("market_engine._has_delivery_evidence", return_value=True),
+                patch(
+                    "market_engine.select_strongest_actionable_picks",
+                    side_effect=lambda candidates, **_: list(candidates),
+                ),
+            ):
             # Patch allowed_user_ids so chat_ids is non-empty and delivery fires
                 with patch.object(me.config.__class__, "allowed_user_ids",
                                   new_callable=lambda: property(lambda self: {99999})):
@@ -657,13 +668,23 @@ class TestJobHealthTracking:
             l20=_win(20, 0.75), l30=_win(30, 0.70),
             season=_win(50, 0.70), h2h=None,
             has_real_data=True, total_games=50,
+            data_source="propline",
+            n_supplemental_games=50,
+            supplemental_sources=("propline_history",),
         )
 
         health = self._make_health()
 
         with patch("market_engine._fetch_and_compute_hit_rates",
                    new=AsyncMock(return_value=fake_hit_rates)):
-            with patch("market_engine._tier_delivery_gate", return_value=True):
+            with (
+                patch("market_engine._tier_delivery_gate", return_value=True),
+                patch("market_engine._has_delivery_evidence", return_value=True),
+                patch(
+                    "market_engine.select_strongest_actionable_picks",
+                    side_effect=lambda candidates, **_: list(candidates),
+                ),
+            ):
                 with patch.object(me.config.__class__, "allowed_user_ids",
                                   new_callable=lambda: property(lambda self: {99999})):
                     await _run_job(

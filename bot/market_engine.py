@@ -61,6 +61,7 @@ from engine.delivery_evidence import (
     has_strict_directional_history,
     is_history_optional_sport,
     is_historical_average_source,
+    propline_history_supports_delivery,
     serialized_evidence_supports_delivery,
 )
 from engine.ai_analyst import (
@@ -3969,6 +3970,12 @@ def _has_delivery_evidence(
         or ""
     ).upper()
     if direction not in {"OVER", "UNDER"}:
+        return False
+    if not propline_history_supports_delivery(
+        validation,
+        decision,
+        intelligence_trace,
+    ):
         return False
     if is_history_optional_sport(sport):
         return True

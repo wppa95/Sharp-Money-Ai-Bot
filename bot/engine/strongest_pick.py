@@ -13,6 +13,7 @@ from engine.ud_scoring import _HIGH_FLOOR_STATS
 from engine.delivery_evidence import (
     has_strong_directional_history,
     is_history_optional_sport,
+    propline_history_supports_delivery,
 )
 
 
@@ -154,6 +155,12 @@ def is_strong_actionable_pick(
 
     sport = _sport(candidate)
     history = candidate.get("hit_rates") or candidate.get("decision")
+    if not propline_history_supports_delivery(
+        history,
+        candidate.get("validation"),
+        candidate.get("decision"),
+    ):
+        return False
     if is_history_optional_sport(sport):
         # Non-goblin sports are actionable as soon as the canonical gate has
         # a direction. Do not turn the legacy confidence score into a second

@@ -195,6 +195,29 @@ def compute_hit_rates(
     first = sorted_results[0]
     player_name = getattr(first, "player_name", "")
     stat_type   = getattr(first, "stat_type",   "")
+    supplemental_rows = [
+        row
+        for row in sorted_results
+        if str(getattr(row, "source", "") or "").lower().startswith("propline")
+    ]
+    supplemental_sources = tuple(
+        sorted(
+            {
+                str(getattr(row, "source", "") or "").strip()
+                for row in supplemental_rows
+                if str(getattr(row, "source", "") or "").strip()
+            }
+        )
+    )
+    n_supplemental = len(supplemental_rows)
+    if n_supplemental:
+        data_source = (
+            "propline"
+            if n_supplemental == len(sorted_results)
+            else "real+propline"
+        )
+    else:
+        data_source = "primary"
 
     return PlayerHitRates(
         player_name   = player_name,
@@ -209,6 +232,9 @@ def compute_hit_rates(
         h2h           = h2h_stats,
         has_real_data = True,
         total_games   = len(sorted_results),
+        data_source   = data_source,
+        n_supplemental_games = n_supplemental,
+        supplemental_sources = supplemental_sources,
         h2h_l5       = h2h_l5_stats,
         h2h_l10      = h2h_l10_stats,
         h2h_l20      = h2h_l20_stats,

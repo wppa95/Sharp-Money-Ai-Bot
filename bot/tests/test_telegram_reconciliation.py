@@ -177,8 +177,9 @@ async def _deliver_traceable_play(db, *, source_id: str, event_id: str, path: st
             new_line=1.5,
             validation=SimpleNamespace(
                 has_supporting_data=True,
-                data_source="real",
-                n_real_games=5,
+                data_source="propline",
+                n_real_games=0,
+                n_supplemental_games=5,
             ),
             decision=SimpleNamespace(
                 recommendation="OVER",
@@ -286,8 +287,9 @@ async def test_failed_play_is_audited_but_not_marked_delivered(db):
             "Traceable Player", "TEAM", "MLB", "Hits", 0.5, 1.5,
             validation=SimpleNamespace(
                 has_supporting_data=True,
-                data_source="real",
-                n_real_games=5,
+                data_source="propline",
+                n_real_games=0,
+                n_supplemental_games=5,
             ),
             decision=SimpleNamespace(
                 recommendation="OVER", confidence=85, decision_tier="A"

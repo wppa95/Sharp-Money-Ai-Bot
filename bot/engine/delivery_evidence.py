@@ -45,6 +45,73 @@ def is_history_optional_sport(sport: Any) -> bool:
     return bool(normalized) and normalized not in _STRICT_HISTORY_SPORTS
 
 
+def propline_history_supports_delivery(
+    *values: Any,
+    min_samples: int = 5,
+) -> bool:
+    """Return whether any evidence payload contains enough PropLine history.
+
+    Primary-provider game logs and line-movement snapshots are useful for
+    diagnostics, but they do not satisfy the product's user-facing evidence
+    contract. A PropLine-only payload needs ``min_samples`` supplemental
+    results; a mixed payload still needs that many PropLine results.
+    """
+    minimum = max(1, int(min_samples))
+
+    def _payload(payload: Any, depth: int = 0) -> bool:
+        if payload is None or depth > 6:
+            return False
+        if isinstance(payload, str):
+            text = payload.strip()
+            if not text or text[0] not in "[{":
+                return False
+            try:
+                payload = json.loads(text)
+            except (TypeError, ValueError):
+                return False
+        if isinstance(payload, dict):
+            source = next(
+                (
+                    str(payload.get(key) or "").strip().lower()
+                    for key in _SOURCE_KEYS
+                    if str(payload.get(key) or "").strip()
+                ),
+                "",
+            )
+            supplemental, supplemental_present = _first_count(
+                payload,
+                ("n_supplemental_games", "n_supp"),
+            )
+            total, total_present = _total_count(payload)
+            if source == "propline":
+                count = supplemental if supplemental_present else (
+                    total if total_present else None
+                )
+                if count is not None and count >= minimum:
+                    return True
+            elif source in {"real+propline", "primary+propline"}:
+                if supplemental is not None and supplemental >= minimum:
+                    return True
+            return any(
+                _payload(child, depth + 1)
+                for key in _NESTED_KEYS
+                if (child := payload.get(key)) is not None
+            )
+        if isinstance(payload, (list, tuple)):
+            return any(_payload(child, depth + 1) for child in payload)
+        source = str(getattr(payload, "data_source", "") or "").strip().lower()
+        supplemental = _nonnegative_int(
+            getattr(payload, "n_supplemental_games", 0)
+        )
+        return (
+            source in {"propline", "real+propline", "primary+propline"}
+            and supplemental is not None
+            and supplemental >= minimum
+        )
+
+    return any(_payload(value) for value in values)
+
+
 def is_historical_average_source(value: Any) -> bool:
     """Return whether a source label identifies line-average fallback evidence."""
     if not isinstance(value, str):

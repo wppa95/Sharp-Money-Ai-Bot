@@ -96,9 +96,9 @@ async def test_alert_delivery_blocks_already_delivered_funnel_row(db):
     delivery = AlertDelivery(db, bot, [123])
     validation = SimpleNamespace(
         has_supporting_data=True,
-        data_source="real",
-        n_real_games=10,
-        n_supplemental_games=0,
+        data_source="propline",
+        n_real_games=0,
+        n_supplemental_games=10,
     )
 
     with patch("alert_scope_filter.check", return_value=SimpleNamespace(allowed=True)):
