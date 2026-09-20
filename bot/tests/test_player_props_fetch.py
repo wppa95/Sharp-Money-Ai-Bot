@@ -374,16 +374,10 @@ async def test_player_props_job_is_disabled_for_propline_bookmakers():
     with patch.object(main_mod, "_db", mock_db), \
          patch.object(main_mod, "_engine", mock_engine), \
          patch.object(main_mod, "_season_checker", None), \
-         patch.object(main_mod, "config", mock_cfg), \
-         patch.object(
-             main_mod,
-             "persist_canonical_player_props",
-             new=AsyncMock(return_value=1),
-         ) as persist:
+         patch.object(main_mod, "config", mock_cfg):
         await main_mod._player_props_job(MagicMock())
 
     mock_engine.fetch_player_prop_odds.assert_not_called()
-    persist.assert_not_awaited()
 
 
 @pytest.mark.asyncio

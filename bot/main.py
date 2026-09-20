@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import asyncio
 from functools import wraps
-import hashlib
 import inspect
 import logging
 import os
@@ -20,7 +19,6 @@ import sys
 import time
 from collections import defaultdict
 from datetime import datetime, timedelta
-from types import SimpleNamespace
 from typing import Any, Optional
 
 from telegram import BotCommand, Update
@@ -34,13 +32,6 @@ from database import Database, OddsRecord, get_sqlite_backpressure_metrics
 from engine import AnalysisEngine
 from engine.season_check import SeasonChecker
 from engine.analysis import _SPORT_TO_ODDS_API_KEY
-from engine.analysis import (
-    _SPORT_PLAYER_PROP_MARKETS,
-    _ODDS_MARKET_TO_PROP_STAT,
-    SPORTSBOOK_PLAYER_PROP_COVERAGE,
-)
-from engine.player_props_pipeline import persist_canonical_player_props
-from alert_scope_filter import is_ev_line_in_scope
 from logging_utils import install_credential_redaction
 from models import (
     MarketType,
@@ -108,7 +99,7 @@ from player_history_job import (
 from providers import init_health_monitor
 from providers.game_results import OddsApiResultsProvider
 from providers.usage_tracker import init_usage_tracker, get_usage_tracker
-from providers.quota_pacing import init_quota_pacer, get_quota_pacer
+from providers.quota_pacing import init_quota_pacer
 from engine.health import init_health_tracker, get_health_tracker
 
 # ── Logging ───────────────────────────────────────────────────────────────────
@@ -1953,149 +1944,6 @@ async def _player_props_job(context) -> None:
         "persistence, tracking, grading, and source-aware reporting path"
     )
     return
-
-    now      = datetime.utcnow()
-    pacer = get_quota_pacer()
-
-    allowed_books = set()
-    if config.SPORTSBOOK_CONFIRMATION_ENABLED:
-        if config.DRAFTKINGS_ENABLED:
-            allowed_books.add("draftkings")
-        if config.FANDUEL_ENABLED:
-            allowed_books.add("fanduel")
-    if not getattr(config, "ODDS_API_ENABLED", True):
-        logger.debug("_player_props_job: OddsAPI disabled by configuration")
-        return
-
-    configured_sports = _configured_odds_api_sports()
-    configured_prop_sports = getattr(config, "player_prop_sports", None)
-    if not isinstance(configured_prop_sports, (list, tuple, set, frozenset)):
-        raw_prop_sports = getattr(config, "PLAYER_PROP_SPORTS_RAW", "")
-        configured_prop_sports = (
-            str(raw_prop_sports).split(",") if isinstance(raw_prop_sports, str) else []
-        )
-    prop_sports = {str(value).strip().upper() for value in configured_prop_sports}
-    if not configured_sports:
-        aliases = {
-            "CFB": Sport.NCAAF,
-            "NCAA": Sport.NCAAF,
-            "FOOTBALL": Sport.NFL,
-            "BASKETBALL": Sport.NBA,
-            "BASEBALL": Sport.MLB,
-        }
-        by_name = {member.value.upper(): member for member in Sport}
-        configured_sports = [
-            (
-                raw,
-                aliases.get(raw.upper()) or by_name.get(raw.upper()),
-            )
-            for raw in configured_prop_sports
-            if (aliases.get(raw.upper()) or by_name.get(raw.upper())) is not None
-        ]
-    persisted_by_provider: dict[str, list[object]] = defaultdict(list)
-    seen: set[tuple[str, str, str, str]] = set()
-    for sport_str, sport in configured_sports:
-        if sport_str.upper() not in {str(value).upper() for value in prop_sports}:
-            continue
-        if sport not in _SPORT_PLAYER_PROP_MARKETS:
-            coverage = SPORTSBOOK_PLAYER_PROP_COVERAGE.get(
-                str(getattr(sport, "value", sport)),
-                {"status": "unverified", "reason": "sport not mapped"},
-            )
-            logger.debug(
-                "_player_props_job: sportsbook player-prop coverage %s for %s; "
-                "skipping (%s)",
-                coverage.get("status", "unverified"),
-                sport_str,
-                coverage.get("reason", "no validated market mapping"),
-            )
-            continue
-        # Skip sports that are out of season / have no active markets.
-        # The checker is fail-open: returns True if cache not yet populated.
-        if _season_checker is not None:
-            odds_key = _SPORT_TO_ODDS_API_KEY.get(sport)
-            if odds_key and not _season_checker.is_sport_active(odds_key):
-                logger.info(
-                    "_player_props_job: skipping %s (%s) — out of season / no active markets",
-                    sport_str, odds_key,
-                )
-                continue
-        if pacer is not None and not await pacer.wait_for_slot():
-            logger.info(
-                "_player_props_job: Odds API request skipped — %s",
-                pacer.block_reason(),
-            )
-            break
-        lines = await _engine.fetch_player_prop_odds(sport)
-        for line in lines:
-            book_key = str(line.sportsbook or "").lower().replace(" ", "")
-            if book_key not in allowed_books or line.line is None:
-                continue
-            provider = "DraftKings" if book_key == "draftkings" else "FanDuel"
-            stat_type = _ODDS_MARKET_TO_PROP_STAT.get(line.market_key)
-            if not stat_type:
-                continue
-            event_id = str(getattr(line, "event_id", "") or line.event)
-            identity = (
-                provider,
-                event_id,
-                str(line.player_name).strip().lower(),
-                stat_type,
-            )
-            if identity in seen:
-                continue
-            seen.add(identity)
-            source_key = "|".join(str(part) for part in identity)
-            external_id = "odds-" + hashlib.sha1(source_key.encode()).hexdigest()[:32]
-            persisted_by_provider[provider].append(
-                SimpleNamespace(
-                    provider=provider,
-                    sport=sport.value,
-                    player_name=str(line.player_name).strip(),
-                    team="",
-                    stat_type=stat_type,
-                    line_value=float(line.line),
-                    game_time=line.event_start,
-                    provider_status="active",
-                    external_id=external_id,
-                    game_id=event_id,
-                    event_id=event_id,
-                    line_variant="sportsbook",
-                    fetched_at=line.observed_at,
-                )
-            )
-
-    if pacer is not None:
-        logger.info("%s", pacer.telemetry().summary)
-
-    persisted = 0
-    for provider, props in persisted_by_provider.items():
-        try:
-            persisted += await persist_canonical_player_props(
-                _db,
-                provider,
-                props,
-                append_snapshot=True,
-                append_observations=True,
-                track=True,
-            )
-        except Exception as exc:
-            logger.exception(
-                "_player_props_job: player-prop persistence failed provider=%s: %s",
-                provider,
-                exc,
-            )
-    if not persisted:
-        logger.debug("_player_props_job: no player-prop lines persisted")
-        return
-
-    logger.info(
-        "_player_props_job: persisted %d sportsbook player-prop rows "
-        "(DraftKings=%d FanDuel=%d); h2h/totals disabled",
-        persisted,
-        len(persisted_by_provider.get("DraftKings", [])),
-        len(persisted_by_provider.get("FanDuel", [])),
-    )
 
 
 async def _poll_odds_job(context) -> None:

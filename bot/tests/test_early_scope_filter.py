@@ -107,16 +107,10 @@ async def test_poll_odds_job_does_not_fetch_player_props_from_odds_api():
     with patch.object(main_mod, "_db", mock_db), \
          patch.object(main_mod, "_engine", mock_engine), \
          patch.object(main_mod, "_season_checker", None), \
-         patch.object(main_mod, "config", mock_cfg), \
-         patch.object(
-             main_mod,
-             "persist_canonical_player_props",
-             new=AsyncMock(return_value=1),
-         ) as persist:
+         patch.object(main_mod, "config", mock_cfg):
         await main_mod._poll_odds_job(MagicMock())
 
     mock_engine.fetch_player_prop_odds.assert_not_awaited()
-    persist.assert_not_awaited()
     mock_engine.fetch_live_odds.assert_not_called()
 
 
