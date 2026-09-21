@@ -103,7 +103,7 @@ def test_propline_is_not_a_standalone_actionable_provider():
 
 
 @pytest.mark.parametrize("sport", ["NFL", "NBA", "MLB"])
-def test_nfl_nba_and_mlb_keep_only_directional_goblin_lowest_line(sport):
+def test_restricted_sports_use_normal_evidence_ranking(sport):
     high_line = _candidate(
         "Underdog",
         "Jordan Lee",
@@ -149,51 +149,19 @@ def test_nfl_nba_and_mlb_keep_only_directional_goblin_lowest_line(sport):
         [high_line, volatile, directionless, weak_direction, low_line]
     )
 
-    assert selected == [low_line]
+    # Sport and market labels no longer impose a separate green-goblin
+    # allowlist or low-line preference. Evidence ranking chooses the
+    # directional candidate with the largest completed-history sample.
+    assert selected == [volatile]
 
 
-@pytest.mark.parametrize("sport", ["NFL", "NBA", "MLB"])
-def test_nfl_nba_and_mlb_reject_non_directional_goblin_candidates(sport):
-    candidate = _candidate("Underdog", "Jordan Lee", "Passing Yards", line=1.5)
-    candidate["sport"] = sport
-    candidate["decision"].recommendation = ""
-
-    assert select_strongest_actionable_picks([candidate]) == []
-
-
-def test_restricted_sports_keep_strong_under_at_the_lowest_line():
-    low_under = _candidate(
-        "Underdog",
-        "Jordan Lee",
-        "Rushing Yards",
-        confidence=20,
-        line=49.5,
-    )
-    high_under = _candidate(
-        "Underdog",
-        "Jordan Lee",
-        "Rushing Yards",
-        confidence=35,
-        line=59.5,
-    )
-    low_under["sport"] = "NFL"
-    high_under["sport"] = "NFL"
-    low_under["decision"].recommendation = "UNDER"
-    high_under["decision"].recommendation = "UNDER"
-
-    assert select_strongest_actionable_picks([high_under, low_under]) == [
-        low_under
-    ]
-
-
-def test_current_under_confidence_uses_low_underlying_score_signal():
+def test_restricted_sports_do_not_require_high_floor_market():
     candidate = _candidate(
         "Underdog",
         "Jordan Lee",
-        "Rushing Yards",
+        "Interceptions",
         confidence=85,
-        bq=21,
-        line=49.5,
+        line=1.5,
     )
     candidate["sport"] = "NFL"
     candidate["decision"].recommendation = "UNDER"

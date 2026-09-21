@@ -155,3 +155,4 @@
 - [Grader backlog fairness](grader-backlog-fairness.md) — id-only settlement rotation can starve evidence-backed sports behind unresolved football rows; prefer cheap sport-priority ordering over correlated evidence scans.
 - [PropLine handoff pacing](propline-handoff-pacing.md) — a quota-paced PropLine fetch must not block the live monitor; preserve completed handoffs for the next cycle.
 - [Completed-history delivery boundary](completed-history-delivery.md) — primary completed game results qualify like settled PropLine history; proxy-only validation must never be rescued by decision metadata.
+- [Evidence-first candidate selection](evidence-first-selection.md) — post-gate ranking must not apply a sport/stat allowlist; green-goblin filtering suppressed valid completed-history picks.
