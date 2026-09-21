@@ -235,6 +235,40 @@ def test_strong_mode_keeps_consistent_history_and_ranks_it_first():
     assert selected == [strong, weaker_strong]
 
 
+def test_strong_mode_uses_computed_hit_rates_when_decision_omits_windows():
+    candidate = _candidate(
+        "Underdog",
+        "Real History Player",
+        "Hits",
+        confidence=85,
+        line=0.5,
+    )
+    candidate["sport"] = "MLB"
+    candidate["decision"] = SimpleNamespace(
+        recommendation="OVER",
+        confidence=85,
+    )
+    candidate["hit_rates"] = SimpleNamespace(
+        recommendation="OVER",
+        **{
+            f"{prefix}_{field}": value
+            for prefix in ("l5", "l10", "l15", "l20", "l30", "season")
+            for field, value in (("games", 10), ("over", 8), ("under", 2))
+        },
+    )
+    candidate["validation"] = SimpleNamespace(
+        has_supporting_data=True,
+        data_source="primary",
+        n_real_games=10,
+        n_supplemental_games=0,
+    )
+
+    assert select_strongest_actionable_picks(
+        [candidate],
+        require_strong=True,
+    ) == [candidate]
+
+
 @pytest.mark.parametrize("sport", ["CFB", "WNBA", "NHL", "FIFA", "KBO"])
 def test_non_football_sports_still_need_propline_history(sport):
     candidate = _candidate(

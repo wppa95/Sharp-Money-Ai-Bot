@@ -5816,6 +5816,11 @@ async def underdog_job(context) -> None:
                             "score":              score,
                             "decision":           decision,
                             "validation":         validation,
+                            # The strongest-pick selector needs the computed
+                            # completed-game windows independently of the
+                            # decision payload.  The decision may only carry
+                            # the fields used by the bet-decision layer.
+                            "hit_rates":          hit_rates,
                             "intel_trace":        _np_intel_trace,
                             "odds_confirm":       _np_odds_confirm,
                             "pp_line":            _prizepicks_line_from_confirmation(_np_odds_confirm),
@@ -6341,6 +6346,9 @@ async def underdog_job(context) -> None:
                             "score":              score,
                             "decision":           decision,
                             "validation":         validation,
+                            # Preserve the real completed-game windows for
+                            # strict-sport strongest-pick selection.
+                            "hit_rates":          hit_rates,
                             "intel_trace":        _lc_intel_trace,
                             "odds_confirm":       _lc_odds_confirm,
                             "pp_line":            _prizepicks_line_from_confirmation(_lc_odds_confirm),
