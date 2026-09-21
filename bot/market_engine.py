@@ -3299,7 +3299,11 @@ async def _run_prizepicks_independent_cycle(
         return
 
     actionable = _select_strong_directional_picks(
-        select_strongest_actionable_picks(actionable, require_strong=True)
+        # The collection point and AlertDelivery independently enforce the
+        # canonical completed-history gate.  Strong-mode's all-window
+        # directional filter is a reporting/selection preference, not a
+        # second production delivery gate.
+        select_strongest_actionable_picks(actionable, require_strong=False)
     )
     delivered = 0
     delivery = AlertDelivery(db, bot, chat_ids)
@@ -5931,11 +5935,12 @@ async def underdog_job(context) -> None:
                         min_samples  = config.UD_VALIDATION_MIN_SAMPLES,
                         history_snap = _hist_snap,
                     )
-                    # Mark every existing prop handled by this scan so the
-                    # standing compatibility path cannot evaluate it twice.
-                    # This stays after validation so the line-change path
-                    # cannot suppress evidence preparation prematurely.
-                    _processed_keys.add((player, stat_type))
+                    # Do not mark the prop as processed here.  Props whose
+                    # movement is below the alert threshold must still reach
+                    # the standing evidence path below.  Significant
+                    # movement is marked after `should_alert` is established,
+                    # which prevents duplicate evaluation without starving
+                    # stable, history-backed picks.
                     # Fetch real game results — required before any directional pick
                     hit_rates = None
                     if not is_removed:
@@ -6542,6 +6547,14 @@ async def underdog_job(context) -> None:
             for _sp_grp in _by_sport.values():
                 _sp_grp.sort(key=lambda x: x[4].score_total or 0, reverse=True)
                 _standing_ordered.extend(_sp_grp[:3])
+
+            logger.info(
+                "underdog_job: standing evaluation — eligible=%d selected=%d "
+                "processed=%d",
+                len(_standing_candidates),
+                len(_standing_ordered),
+                len(_processed_keys),
+            )
     
             for (_ssnap, _sp, _st, _ssport, _prev) in _standing_ordered:
                 _line_val = _ssnap.line or 0.0
@@ -6825,10 +6838,18 @@ async def underdog_job(context) -> None:
         # compete for rate-limit slots in priority order.  Higher-quality picks get
         # first access; no candidate is hard-rejected — lower-priority ones are deferred
         # and remain available in /picks and the DB.
+        if chat_ids:
+            logger.info(
+                "underdog_job: delivery queue before selection — candidates=%d",
+                len(_delivery_queue),
+            )
         if _delivery_queue and chat_ids:
             _delivery_queue[:] = select_strongest_actionable_picks(
                 _delivery_queue,
-                require_strong=True,
+                # Evidence was already required at collection and is checked
+                # again by AlertDelivery.  Do not add strong-mode's stricter
+                # six-window filter here; five-plus real samples are valid.
+                require_strong=False,
             )
             _apply_delivery_diversification(_delivery_queue)
             _delivery_queue[:] = _select_strong_directional_picks(_delivery_queue)
@@ -9254,7 +9275,7 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
         # losing to an earlier weaker prop for the same provider/player.
         _fpr_selected = select_strongest_actionable_picks(
             _fpr_delivery_candidates,
-            require_strong=True,
+            require_strong=False,
         )
         _fpr_selected = _select_strong_directional_picks(_fpr_selected)
         _fpr_selected_ids = {id(candidate) for candidate in _fpr_selected}

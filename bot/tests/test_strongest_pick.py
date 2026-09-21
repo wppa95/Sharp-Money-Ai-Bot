@@ -186,6 +186,21 @@ def test_restricted_sports_keep_strong_under_at_the_lowest_line():
     ]
 
 
+def test_current_under_confidence_uses_low_underlying_score_signal():
+    candidate = _candidate(
+        "Underdog",
+        "Jordan Lee",
+        "Rushing Yards",
+        confidence=85,
+        bq=21,
+        line=49.5,
+    )
+    candidate["sport"] = "NFL"
+    candidate["decision"].recommendation = "UNDER"
+
+    assert select_strongest_actionable_picks([candidate]) == [candidate]
+
+
 def _decision_with_windows(direction: str, rates: list[float]):
     """Build the serialized decision shape used by the live selector."""
     windows = {}

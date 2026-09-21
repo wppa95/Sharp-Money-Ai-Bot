@@ -415,3 +415,12 @@ class TestSourceCodeFixes:
         assert "_sp" in append_snippet, (
             "Standing lifecycle append must use _sp (not outer 'player')"
         )
+
+    def test_subthreshold_line_change_reaches_standing_path(self):
+        """Only alert-eligible movement may claim a prop before standing evaluation."""
+        src = self._load_source()
+        validation_idx = src.find("validation = validate_player_prop(", src.find("Existing-prop evaluation path"))
+        fetch_idx = src.find("# Fetch real game results — required before any directional pick", validation_idx)
+        assert validation_idx != -1 and fetch_idx != -1
+        evaluation_block = src[validation_idx:fetch_idx]
+        assert "_processed_keys.add((player, stat_type))" not in evaluation_block

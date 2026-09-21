@@ -97,13 +97,33 @@ def _is_low_line_green_goblin(candidate: dict) -> bool:
     """Return whether an NFL/NBA/MLB candidate is a strong goblin pick."""
     direction = _direction(candidate)
     strength = _directional_strength(candidate)
+    score = _number(
+        getattr(candidate.get("score"), "total", None)
+        if candidate.get("score") is not None
+        else candidate.get("score_total"),
+        default=100.0,
+    )
+    # Current UDBetDecision confidence is recommendation confidence: a strong
+    # UNDER therefore also has high confidence.  The low underlying score is
+    # the directional UNDER signal.  Keep the legacy <=25 confidence form for
+    # compatibility with older serialized candidates/tests.
+    under_is_strong = (
+        score <= 30.0
+        or (strength is not None and strength >= 75.0)
+        or (
+            candidate.get("confidence") is not None
+            and _number(candidate.get("confidence"), default=100.0) <= 25.0
+        )
+    )
     return (
         _sport(candidate) in _LOW_LINE_GREEN_GOBLIN_SPORTS
         and _stat(candidate).casefold()
         in _GREEN_GOBLIN_STAT_KEYS
         and direction in {"OVER", "UNDER"}
-        and strength is not None
-        and strength >= 75.0
+        and (
+            (direction == "UNDER" and under_is_strong)
+            or (direction == "OVER" and strength is not None and strength >= 75.0)
+        )
     )
 
 
