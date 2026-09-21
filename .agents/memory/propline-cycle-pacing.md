@@ -44,3 +44,15 @@ lookups from exhausting the live-feed budget.
 **How to apply:** Keep canonical provider sport keys, the configured-sport
 round robin, and separate feed/endpoint admission. Do not report "paced" as a
 sport or repeatedly request a known-empty sport during its cache TTL.
+
+Sport-slot eligibility must account for each configured bookmaker feed. A sport
+whose every bookmaker pair is in empty-slate cooldown must not consume one of
+the cycle's rotation slots; if any bookmaker remains eligible, retain the sport
+and fetch only the available pairs.
+
+**Why:** Cooldowns are keyed by `bookmaker:sport`, not by sport alone. Treating
+the sport as eligible whenever its bare name is absent from the cooldown map
+lets cooled sports fill the bounded batch and starves later active sports.
+
+**How to apply:** Build the bounded rotation from sports with at least one
+eligible bookmaker pair, then keep the per-pair check inside the fetch loop.

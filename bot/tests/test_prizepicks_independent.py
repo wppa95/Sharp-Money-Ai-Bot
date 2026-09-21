@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 import logging
+import time
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -237,6 +238,51 @@ class TestIndependentPrizePicks:
         assert attempted_sports == ["MLB", "NBA", "WNBA", "NHL", "TENNIS"]
         assert len(calls) == 5 * 2
         assert all(sport not in {"NFL", "NCAAF"} for sport, _ in calls)
+
+    async def test_empty_sport_cooldowns_do_not_consume_rotation_slots(
+        self, monkeypatch
+    ):
+        calls = []
+
+        class FakeProvider:
+            client = None
+
+            def is_available(self):
+                return True
+
+            async def fetch_props_for_sport_result(self, sport, bookmaker=None):
+                calls.append((sport, bookmaker))
+                return PropLineFetchResult(
+                    [], datetime.utcnow(), succeeded=True, complete=True
+                )
+
+        monkeypatch.setattr(market_engine, "_propline_provider", FakeProvider())
+        monkeypatch.setattr(market_engine, "_propline_request_cursor", 0)
+        monkeypatch.setattr(
+            market_engine,
+            "_get_prizepicks_scan_sports",
+            AsyncMock(
+                return_value=("NBA", "MLB", "NHL", "WNBA", "TENNIS", "SOCCER")
+            ),
+        )
+        monkeypatch.setattr(
+            market_engine.config, "PROPLINE_BOOKMAKERS_RAW", "prizepicks"
+        )
+        monkeypatch.setattr(
+            market_engine,
+            "_propline_empty_sport_until",
+            {
+                f"prizepicks:{sport}": time.monotonic() + 3600
+                for sport in ("NBA", "MLB", "NHL", "WNBA", "TENNIS")
+            },
+        )
+        monkeypatch.setattr(market_engine, "_propline_empty_feed_streak", {})
+
+        await market_engine.propline_request_scan_job(
+            SimpleNamespace(bot_data={"db": None})
+        )
+
+        assert calls == [("SOCCER", "prizepicks")]
 
     async def test_request_worker_backs_off_only_empty_bookmaker_sport_pairs(
         self, monkeypatch

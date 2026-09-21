@@ -1510,13 +1510,22 @@ async def propline_request_scan_job(context) -> None:
                 "propline_request_scan: no eligible non-football sports"
             )
             return True
+        bookmakers = tuple(
+            str(bookmaker).strip().lower().replace(" ", "")
+            for bookmaker in getattr(config, "propline_bookmakers", [])
+            if str(bookmaker).strip()
+        ) or ("prizepicks",)
         now = time.monotonic()
         eligible_indexes = [
             index
             for index, candidate in enumerate(sports)
-            if _propline_empty_sport_until.get(
-                str(candidate).strip().upper(), 0.0
-            ) <= now
+            if any(
+                _propline_empty_sport_until.get(
+                    f"{bookmaker}:{str(candidate).strip().upper()}",
+                    0.0,
+                ) <= now
+                for bookmaker in bookmakers
+            )
         ]
         if not eligible_indexes:
             logger.info(
@@ -1535,11 +1544,6 @@ async def propline_request_scan_job(context) -> None:
             index for index in eligible_indexes if index < first
         ]
         ordered_indexes = ordered_indexes[:_PROPLINE_SPORTS_PER_CYCLE]
-        bookmakers = tuple(
-            str(bookmaker).strip().lower().replace(" ", "")
-            for bookmaker in getattr(config, "propline_bookmakers", [])
-            if str(bookmaker).strip()
-        ) or ("prizepicks",)
         failed_feeds: list[str] = []
         persisted_feeds: list[str] = []
         failed_prizepicks = False
