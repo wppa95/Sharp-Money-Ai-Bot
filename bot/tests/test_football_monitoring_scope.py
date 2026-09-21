@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from connectors.underdog import UnderdogConnector, UnderdogProjection
+from alerts import is_telegram_suppressed_sport
 from engine.sport_policy import is_football_related_sport
 from providers.propline import PropLineFetchResult, PropLinePrizePicksProvider
 from providers.prop_provider import PlayerProp
@@ -63,6 +64,28 @@ def test_football_aliases_are_classified_as_gridiron_family(sport):
 )
 def test_supported_non_football_sports_remain_allowed(sport):
     assert is_football_related_sport(sport) is False
+
+
+@pytest.mark.parametrize(
+    "sport",
+    [
+        "MLB",
+        "NBA",
+        "WNBA",
+        "NHL",
+        "SOCCER",
+        "EPL",
+        "MLS",
+        "TENNIS",
+        "CS",
+        "DOTA",
+        "LOL",
+        "VAL",
+        "MMA",
+    ],
+)
+def test_telegram_boundary_does_not_block_non_football_sports(sport):
+    assert is_telegram_suppressed_sport(sport) is False
 
 
 def _projection(external_id: str, sport: str) -> UnderdogProjection:
