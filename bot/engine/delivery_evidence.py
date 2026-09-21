@@ -112,6 +112,160 @@ def propline_history_supports_delivery(
     return any(_payload(value) for value in values)
 
 
+_COMPLETED_HISTORY_SOURCES = frozenset(
+    {
+        "real",
+        "primary",
+        "game_results",
+        "player_game_results",
+        "settled_results",
+        "propline",
+        "real+propline",
+        "primary+propline",
+    }
+)
+
+
+def history_supports_delivery(
+    *values: Any,
+    min_samples: int = 5,
+) -> bool:
+    """Return whether a payload contains completed player-game history.
+
+    ``propline_history_supports_delivery`` is retained for callers that need
+    to specifically prove supplemental PropLine coverage.  Telegram
+    qualification, however, accepts either completed primary-provider game
+    results or explicit settled PropLine results.  Both are real history and
+    both must carry a usable sample count; proxy observations and historical
+    line averages do not qualify.
+    """
+    minimum = max(1, int(min_samples))
+
+    def _window_count(payload: dict[str, Any]) -> int | None:
+        counts: list[int] = []
+        for key in (
+            "l5",
+            "l10",
+            "l15",
+            "l20",
+            "l30",
+            "season",
+            "h2h",
+        ):
+            window = payload.get(key)
+            if isinstance(window, dict):
+                count, present = _first_count(window, ("games", "g"))
+                if present and count is not None:
+                    counts.append(count)
+            elif isinstance(window, (int, float)) and not isinstance(window, bool):
+                counts.append(int(window))
+        for key in (
+            "l5_games",
+            "l10_games",
+            "l15_games",
+            "l20_games",
+            "l30_games",
+            "season_games",
+            "h2h_games",
+            "total_games",
+        ):
+            count = _nonnegative_int(payload.get(key))
+            if count is not None:
+                counts.append(count)
+        return max(counts) if counts else None
+
+    def _object_count(payload: Any) -> int | None:
+        counts: list[int] = []
+        for attr in (
+            "n_real_games",
+            "n_supplemental_games",
+            "total_games",
+            "season_games",
+            "l30_games",
+            "l20_games",
+            "l15_games",
+            "l10_games",
+            "l5_games",
+        ):
+            count = _nonnegative_int(getattr(payload, attr, None))
+            if count is not None:
+                counts.append(count)
+        return max(counts) if counts else None
+
+    def _payload(payload: Any, depth: int = 0) -> bool:
+        if payload is None or depth > 6:
+            return False
+        if isinstance(payload, str):
+            text = payload.strip()
+            if not text or text[0] not in "[{":
+                return False
+            try:
+                payload = json.loads(text)
+            except (TypeError, ValueError):
+                return False
+
+        if isinstance(payload, dict):
+            source = next(
+                (
+                    str(payload.get(key) or "").strip().lower()
+                    for key in _SOURCE_KEYS
+                    if str(payload.get(key) or "").strip()
+                ),
+                "",
+            )
+            if source in _COMPLETED_HISTORY_SOURCES:
+                real = _nonnegative_int(
+                    payload.get("n_real_games", payload.get("n_real"))
+                ) or 0
+                supplemental = _nonnegative_int(
+                    payload.get(
+                        "n_supplemental_games",
+                        payload.get("n_supp"),
+                    )
+                ) or 0
+                count = (
+                    real + supplemental
+                    if real or supplemental
+                    else (_total_count(payload)[0] or _window_count(payload))
+                )
+                if count is not None and count >= minimum:
+                    return True
+            return any(
+                _payload(child, depth + 1)
+                for key in _NESTED_KEYS
+                if (child := payload.get(key)) is not None
+            )
+
+        if isinstance(payload, (list, tuple)):
+            return any(_payload(child, depth + 1) for child in payload)
+
+        source = str(
+            getattr(payload, "data_source", "")
+            or getattr(payload, "evidence_source", "")
+            or ""
+        ).strip().lower()
+        if source in _COMPLETED_HISTORY_SOURCES:
+            real = _nonnegative_int(getattr(payload, "n_real_games", None)) or 0
+            supplemental = _nonnegative_int(
+                getattr(payload, "n_supplemental_games", None)
+            ) or 0
+            count = real + supplemental
+            if not count:
+                count = _object_count(payload)
+            if count is not None and count >= minimum:
+                return True
+
+        # A PlayerHitRates object always carries an explicit real-data marker
+        # even in older serialized forms that omitted data_source.
+        if bool(getattr(payload, "has_real_data", False)):
+            count = _object_count(payload)
+            if count is not None and count >= minimum:
+                return True
+        return False
+
+    return any(_payload(value) for value in values)
+
+
 def is_historical_average_source(value: Any) -> bool:
     """Return whether a source label identifies line-average fallback evidence."""
     if not isinstance(value, str):

@@ -405,6 +405,63 @@ class TestDeliverUnderdog:
 
         assert result.sent is True
         assert sent_messages
+        assert "<b>HISTORY</b>" in sent_messages[0]
+        assert "History:</b>\n   N/A" not in sent_messages[0]
+
+    @pytest.mark.asyncio
+    async def test_primary_history_delivers_and_renders_history(self):
+        """Completed primary results qualify and remain visible in Telegram."""
+        sent_messages: list[str] = []
+
+        async def capture(chat_id, text, **kwargs):
+            sent_messages.append(text)
+            return MagicMock()
+
+        mock_bot = MagicMock()
+        mock_bot.send_message = AsyncMock(side_effect=capture)
+        delivery = AlertDelivery(_make_db_mock(), mock_bot, [1])
+        validation = SimpleNamespace(
+            has_supporting_data=True,
+            data_source="real",
+            n_real_games=10,
+            n_supplemental_games=0,
+        )
+        decision = SimpleNamespace(
+            recommendation="OVER",
+            confidence=71,
+            l5_games=5,
+            l5_over=4,
+            l5_hit_rate=0.8,
+            l10_games=10,
+            l10_over=7,
+            l10_hit_rate=0.7,
+            l15_games=None,
+            l15_over=None,
+            l20_games=None,
+            l20_over=None,
+            l30_games=None,
+            l30_over=None,
+            season_games=10,
+            season_over=7,
+            season_hit_rate=0.7,
+        )
+
+        result = await delivery.deliver_underdog(
+            player_name="Supported Player",
+            team="TEAM",
+            sport="CS",
+            stat_type="Kills",
+            old_line=10.5,
+            new_line=11.5,
+            validation=validation,
+            decision=decision,
+        )
+
+        assert result.sent is True
+        assert sent_messages
+        assert "<b>HISTORY</b>" in sent_messages[0]
+        assert "L5:" in sent_messages[0]
+        assert "History:</b>\n   N/A" not in sent_messages[0]
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(

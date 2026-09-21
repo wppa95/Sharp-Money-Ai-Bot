@@ -613,6 +613,30 @@ def _format_history_block(
         if label == "H2H":
             h2h_rendered = True
 
+    # Compatibility delivery callers may provide a validated history snapshot
+    # without a fully materialized UDBetDecision.  Keep the alert historical
+    # rather than falling back to an uninformative N/A block.
+    if not rows and validation is not None:
+        for label, rate_name, games_name in (
+            ("L5", "l5_rate", "l5_games"),
+            ("L10", "l10_rate", "l10_games"),
+            ("L20", "l20_rate", "l20_games"),
+            ("L30", "l30_rate", "l30_games"),
+            ("Season", "season_hit_rate", "season_games"),
+        ):
+            rate = _numeric_attr(validation, rate_name)
+            games = _numeric_attr(validation, games_name)
+            if rate is None or games is None or games <= 0:
+                continue
+            rows.append(f"   <b>{label}:</b> {rate:.0%} ({int(games)} games)")
+
+        if not rows:
+            source, count = _evidence_display(validation, decision)
+            if count > 0 and source != "unavailable":
+                rows.append(
+                    f"   <b>Results:</b> {escape(source)} ({count} games)"
+                )
+
     # Some delivery paths have H2H on PlayerPropValidation before a complete
     # UDBetDecision is available. Preserve that signal rather than silently
     # dropping it from the Telegram alert.

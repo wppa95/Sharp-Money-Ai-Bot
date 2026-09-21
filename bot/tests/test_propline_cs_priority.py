@@ -165,7 +165,7 @@ def test_historical_average_without_windows_is_not_telegram_deliverable(source):
     ) is True
 
 
-def test_primary_history_without_propline_is_not_telegram_deliverable():
+def test_primary_history_without_propline_is_telegram_deliverable():
     validation = SimpleNamespace(
         has_supporting_data=True,
         data_source="real",
@@ -204,7 +204,15 @@ def test_primary_history_without_propline_is_not_telegram_deliverable():
         sport="MLB",
         validation=validation,
         decision=decision,
-    ) is False
+    ) is True
+    # The general delivery gate accepts the completed primary history.  The
+    # legacy strong-history helper remains stricter and rejects this fixture
+    # because its season window is below the OVER threshold.
+    assert market_engine._has_delivery_evidence(
+        sport="CS",
+        validation=validation,
+        decision=decision,
+    ) is True
     assert market_engine._has_strong_delivery_evidence(
         validation=validation,
         decision=decision,

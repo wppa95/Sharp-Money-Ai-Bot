@@ -59,9 +59,9 @@ from engine.strongest_pick import (
 )
 from engine.delivery_evidence import (
     has_strict_directional_history,
+    history_supports_delivery,
     is_history_optional_sport,
     is_historical_average_source,
-    propline_history_supports_delivery,
     serialized_evidence_supports_delivery,
 )
 from engine.ai_analyst import (
@@ -3975,11 +3975,12 @@ def _has_delivery_evidence(
     ).upper()
     if direction not in {"OVER", "UNDER"}:
         return False
-    if not propline_history_supports_delivery(
-        validation,
-        decision,
-        intelligence_trace,
-    ):
+    history_values = (
+        (validation,)
+        if validation is not None
+        else (decision, intelligence_trace)
+    )
+    if not history_supports_delivery(*history_values):
         return False
     if is_history_optional_sport(sport):
         return True
@@ -3999,6 +4000,9 @@ def _has_delivery_evidence(
             )
         ):
             return True
+
+    if history_supports_delivery(decision, intelligence_trace):
+        return True
 
     for obj in (decision, intelligence_trace):
         if isinstance(obj, dict) and serialized_evidence_supports_delivery(

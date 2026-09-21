@@ -38,8 +38,8 @@ from engine.delivery_gates import (
 _directional_evidence_gate = _canonical_tier_delivery_gate
 from engine.score_validation import clamp_score
 from engine.delivery_evidence import (
+    history_supports_delivery,
     is_history_optional_sport,
-    propline_history_supports_delivery,
     serialized_evidence_supports_delivery,
 )
 from engine.sport_policy import is_football_related_sport
@@ -676,11 +676,12 @@ def _has_strong_underdog_evidence(
     ).upper()
     if decision_direction not in {"OVER", "UNDER"}:
         return False
-    if not propline_history_supports_delivery(
-        validation,
-        decision,
-        intelligence_trace,
-    ):
+    history_values = (
+        (validation,)
+        if validation is not None
+        else (decision, intelligence_trace)
+    )
+    if not history_supports_delivery(*history_values):
         return False
     if is_history_optional_sport(sport):
         return True
@@ -702,6 +703,8 @@ def _has_strong_underdog_evidence(
             return True
         if source_lower in {"real+propline", "primary+propline"}:
             return n_real + n_supplemental >= 5
+    if history_supports_delivery(decision, intelligence_trace):
+        return True
     for obj in (decision, intelligence_trace):
         if isinstance(obj, dict):
             if serialized_evidence_supports_delivery(

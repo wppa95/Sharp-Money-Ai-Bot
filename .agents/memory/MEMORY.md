@@ -1,10 +1,7 @@
 - [CLV formula direction](clv-formula.md) — CLV% uses (fp_close/fp_bet - 1), NOT (fp_bet/fp_close - 1); higher fp_close = market tightened after your bet = positive CLV.
-- [Provider abstraction & CLV pipeline](provider-abstraction-dashboard.md) — frozen stable baseline: prop_provider.py ABC, prizepicks/underdog providers, AlertCLVSeed, DashboardEngine, 1716 tests passing July 31 2026.
-- [DK/FD player prop normalization](dk-fd-player-prop-normalize.md) — player_props market key uses outcome["description"]=player, outcome["name"]=Over/Under, outcome["point"]=line; not the standard outcome["name"] h2h/totals path.
 - [Player prop picks/slip framework](picks-slip-framework.md) — /picks and /slip use PropPickAdapter wrapping PropLineHistory+PlayerPropMarketComparison; no PP edge data required; PropPickAdapter implements the slip optimizer interface.
 - [Async test event loop pattern](async-test-loop.md) — Python 3.11 aiosqlite tests must use module-level asyncio.new_event_loop(); never asyncio.get_event_loop() across test files.
 - [Multi-platform connector architecture](connector-architecture.md) — DK/FD connectors use Odds API filtered by bookmaker key; Underdog uses unofficial /v3/over_under_lines; pick'em isolation enforced by is_pickem flag.
-- [AI Ranking & Backtesting Engine](ranking-engine.md) — ranking.py wraps compute_confidence + ±10 historical adj; backtesting.py replays EVRecord via stored ai_confidence; new DB methods and /performance + /backtest commands added.
 - [Alert source priority](source-priority.md) — PrizePicks (primary/daily) → Underdog (secondary) → DK/FD MLB ML/Totals (tertiary); never optimise sportsbook alerts ahead of PP work.
 - [Player Prop Validation + Bet Decision Layer](player-validation-layer.md) — validation gates immediate alerts (n≥5); bet decision (OVER/UNDER/PASS) uses market-proxy signals only; season/h2h always null; stored in 4 new DB columns; shown in every alert.
 - [Esports & Tennis stat providers](esports-tennis-providers.md) — DOTA=OpenDota (free), CS=PandaScore (needs PANDASCORE_API_KEY), Tennis=JeffSackmann CSV (free); multi-map stats scaled by map count; UD_ALERT_SPORTS now includes DOTA/TENNIS/CS.
@@ -157,3 +154,4 @@
 - [Telegram transport error handling](telegram-transport-errors.md) — python-telegram-bot wraps httpx read failures in NetworkError; classify the cause as transient polling noise.
 - [Grader backlog fairness](grader-backlog-fairness.md) — id-only settlement rotation can starve evidence-backed sports behind unresolved football rows; prefer cheap sport-priority ordering over correlated evidence scans.
 - [PropLine handoff pacing](propline-handoff-pacing.md) — a quota-paced PropLine fetch must not block the live monitor; preserve completed handoffs for the next cycle.
+- [Completed-history delivery boundary](completed-history-delivery.md) — primary completed game results qualify like settled PropLine history; proxy-only validation must never be rescued by decision metadata.

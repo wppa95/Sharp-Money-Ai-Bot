@@ -12,8 +12,8 @@ from typing import Iterable
 from engine.ud_scoring import _HIGH_FLOOR_STATS
 from engine.delivery_evidence import (
     has_strong_directional_history,
+    history_supports_delivery,
     is_history_optional_sport,
-    propline_history_supports_delivery,
 )
 
 
@@ -155,11 +155,13 @@ def is_strong_actionable_pick(
 
     sport = _sport(candidate)
     history = candidate.get("hit_rates") or candidate.get("decision")
-    if not propline_history_supports_delivery(
-        history,
-        candidate.get("validation"),
-        candidate.get("decision"),
-    ):
+    validation = candidate.get("validation")
+    history_values = (
+        (validation,)
+        if validation is not None
+        else (history, candidate.get("decision"))
+    )
+    if not history_supports_delivery(*history_values):
         return False
     if is_history_optional_sport(sport):
         # Non-goblin sports are actionable as soon as the canonical gate has
