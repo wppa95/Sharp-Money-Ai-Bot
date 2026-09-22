@@ -1381,6 +1381,7 @@ class Database:
         await self._migrate_prop_line_history_v5()
         await self._migrate_prop_line_history_v6()
         await self._migrate_prop_line_history_v7()
+        await self._migrate_prop_line_history_v8()
         await self._migrate_prop_line_variants_v1()
         await self._migrate_player_props_product_v1()
         await self._migrate_player_game_results_v1()
@@ -3728,6 +3729,8 @@ class Database:
     async def update_ud_props_mq_scores_bulk(
         self,
         mq_map: "dict[tuple[str, str, str], tuple[int, float]]",
+        *,
+        since_at: datetime | None = None,
     ) -> None:
         """
         Update market_quality_score and score_total on the most-recent PropLineHistory
@@ -3742,37 +3745,64 @@ class Database:
             return
         try:
             async with self.session() as s:
-                for (pn, sp, st), scores in mq_map.items():
-                    try:
-                        # Unpack — backward-compat: accept bare int from legacy callers.
-                        if isinstance(scores, tuple):
-                            mq_score, bq_score = scores
-                        else:
-                            mq_score, bq_score = int(scores), None
-                        result = await s.execute(
-                            select(func.max(PropLineHistory.id))
-                            .where(
-                                PropLineHistory.provider    == "Underdog",
-                                PropLineHistory.player_name == pn,
-                                PropLineHistory.sport       == sp,
-                                PropLineHistory.stat_type   == st,
-                                PropLineHistory.removed.isnot(True),
-                            )
-                        )
-                        row_id = result.scalar_one_or_none()
-                        if row_id is not None:
-                            _vals: dict = {"market_quality_score": int(mq_score)}
-                            if bq_score is not None:
-                                _vals["score_total"] = float(bq_score)
-                            await s.execute(
-                                sa_update(PropLineHistory)
-                                .where(PropLineHistory.id == row_id)
-                                .values(**_vals)
-                            )
-                    except Exception as _row_exc:
-                        logger.debug(
-                            "update_ud_props_mq_scores_bulk: %s/%s/%s error: %s",
-                            pn, sp, st, _row_exc,
+                # Find the latest active row for every key in one grouped
+                # read. The old loop issued a SELECT and UPDATE per prop,
+                # turning a 5k feed into roughly 10k SQLite statements.
+                keys = list(mq_map)
+                latest_filters = [
+                    PropLineHistory.provider == "Underdog",
+                    PropLineHistory.removed.isnot(True),
+                    tuple_(
+                        PropLineHistory.player_name,
+                        PropLineHistory.sport,
+                        PropLineHistory.stat_type,
+                    ).in_(keys),
+                ]
+                if since_at is not None:
+                    latest_filters.append(PropLineHistory.fetched_at >= since_at)
+                latest_result = await s.execute(
+                    select(
+                        PropLineHistory.player_name,
+                        PropLineHistory.sport,
+                        PropLineHistory.stat_type,
+                        func.max(PropLineHistory.id).label("row_id"),
+                    )
+                    .where(*latest_filters)
+                    .group_by(
+                        PropLineHistory.player_name,
+                        PropLineHistory.sport,
+                        PropLineHistory.stat_type,
+                    )
+                )
+                latest_ids = {
+                    (row.player_name, row.sport, row.stat_type): row.row_id
+                    for row in latest_result
+                }
+                updates_with_bq: list[dict] = []
+                updates_mq_only: list[dict] = []
+                for key, scores in mq_map.items():
+                    row_id = latest_ids.get(key)
+                    if row_id is None:
+                        continue
+                    # Unpack — backward-compat: accept bare int from legacy callers.
+                    if isinstance(scores, tuple):
+                        mq_score, bq_score = scores
+                    else:
+                        mq_score, bq_score = int(scores), None
+                    values: dict = {
+                        "id": row_id,
+                        "market_quality_score": int(mq_score),
+                    }
+                    if bq_score is not None:
+                        values["score_total"] = float(bq_score)
+                        updates_with_bq.append(values)
+                    else:
+                        updates_mq_only.append(values)
+                for updates in (updates_with_bq, updates_mq_only):
+                    for start in range(0, len(updates), 500):
+                        await s.execute(
+                            sa_update(PropLineHistory),
+                            updates[start:start + 500],
                         )
                 await s.commit()
         except Exception as _bulk_exc:
@@ -4834,32 +4864,63 @@ class Database:
         if not snaps:
             return 0
 
+        # Group the current scan before looking up history.  The live path
+        # supplies an explicit boundary and therefore knows exactly which
+        # provider identities can be relevant.  Do not run the maintenance
+        # path's all-history GROUP BY against a growing append-only table on
+        # every full feed.
+        snap_by_key: dict[tuple, list] = {}
+        for snap in snaps:
+            key = (
+                snap.player_name or "",
+                str(snap.sport or "").upper().strip(),
+                snap.stat_type or "",
+                getattr(snap, "external_id", None)
+                or getattr(snap, "game_id", None)
+                or "",
+            )
+            snap_by_key.setdefault(key, []).append(snap)
+
         # Load latest PropLineHistory row per (player_name, sport, stat_type) for Underdog
         async with self.session() as s:
-            source_identity = case(
-                (
-                    and_(
-                        PropLineHistory.external_id.isnot(None),
-                        PropLineHistory.external_id != "",
+            history_filters = [PropLineHistory.provider == "Underdog"]
+            if since_at is not None:
+                # The canonical feed writer has already persisted this scan's
+                # current rows before the bridge runs. Read only that
+                # freshness slice instead of expanding thousands of source
+                # identity predicates (many legacy Underdog rows have no
+                # external/game ID). Maintenance callers keep the existing
+                # all-history behavior.
+                history_filters.append(PropLineHistory.fetched_at >= cutoff)
+                history_query = select(PropLineHistory).where(*history_filters)
+            else:
+                source_identity = case(
+                    (
+                        and_(
+                            PropLineHistory.external_id.isnot(None),
+                            PropLineHistory.external_id != "",
+                        ),
+                        PropLineHistory.external_id,
                     ),
-                    PropLineHistory.external_id,
-                ),
-                else_=PropLineHistory.game_id,
-            )
-            # Subquery: max id per provider source identity
-            subq = (
-                select(func.max(PropLineHistory.id))
-                .where(PropLineHistory.provider == "Underdog")
-                .group_by(
-                    PropLineHistory.player_name,
-                    PropLineHistory.sport,
-                    PropLineHistory.stat_type,
-                    source_identity,
+                    else_=PropLineHistory.game_id,
                 )
-                .scalar_subquery()
-            )
+                # Subquery: max id per provider source identity
+                subq = (
+                    select(func.max(PropLineHistory.id))
+                    .where(PropLineHistory.provider == "Underdog")
+                    .group_by(
+                        PropLineHistory.player_name,
+                        PropLineHistory.sport,
+                        PropLineHistory.stat_type,
+                        source_identity,
+                    )
+                    .scalar_subquery()
+                )
+                history_query = select(PropLineHistory).where(
+                    PropLineHistory.id.in_(subq)
+                )
             result = await s.execute(
-                select(PropLineHistory).where(PropLineHistory.id.in_(subq))
+                history_query
             )
             latest_rows = {
                 (
@@ -4873,18 +4934,6 @@ class Database:
 
         # Track changes to accumulate within this batch
         # ── Build insert/update batches (no DB I/O yet) ──────────────────────
-        snap_by_key: dict[tuple, list] = {}
-        for snap in snaps:
-            key = (
-                snap.player_name or "",
-                str(snap.sport or "").upper().strip(),
-                snap.stat_type or "",
-                getattr(snap, "external_id", None)
-                or getattr(snap, "game_id", None)
-                or "",
-            )
-            snap_by_key.setdefault(key, []).append(snap)
-
         new_rows:    list[PropLineHistory]          = []
         update_jobs: list[tuple[int, dict]]         = []   # (existing_id, update_vals)
 
@@ -4990,8 +5039,43 @@ class Database:
         upserted = 0
         if new_rows:
             async with self.session() as s:
-                for row in new_rows:
-                    s.add(row)
+                # Core executemany avoids one ORM unit-of-work entry and flush
+                # per row when the first full feed is bridged.  A large feed can
+                # contain thousands of new rows; keeping bounded chunks preserves
+                # the SQLite bind-parameter limit without holding the writer gate
+                # for the ORM bookkeeping of every object.
+                for start in range(0, len(new_rows), 500):
+                    batch = new_rows[start:start + 500]
+                    values = [
+                        {
+                            "provider": row.provider,
+                            "sport": row.sport,
+                            "player_name": row.player_name,
+                            "team": row.team,
+                            "stat_type": row.stat_type,
+                            "line_value": row.line_value,
+                            "game_time": row.game_time,
+                            "provider_status": row.provider_status,
+                            "external_id": row.external_id,
+                            "game_id": row.game_id,
+                            "fetched_at": row.fetched_at,
+                            "first_seen": getattr(row, "first_seen", None),
+                            "last_seen": getattr(row, "last_seen", None),
+                            "change_count": getattr(row, "change_count", 0),
+                            "prev_line": getattr(row, "prev_line", None),
+                            "removed": getattr(row, "removed", False),
+                            "score_tier": getattr(row, "score_tier", None),
+                            "score_total": getattr(row, "score_total", None),
+                            "bet_recommendation": getattr(
+                                row, "bet_recommendation", None
+                            ),
+                            "bet_confidence": getattr(
+                                row, "bet_confidence", None
+                            ),
+                        }
+                        for row in batch
+                    ]
+                    await s.execute(sa_insert(PropLineHistory), values)
                 await s.commit()
             upserted += len(new_rows)
 
@@ -5694,6 +5778,8 @@ class Database:
     async def save_underdog_snapshots_bulk(
         self,
         records: "list[UnderdogSnapshotRecord]",
+        *,
+        batch_size: int | None = None,
     ) -> dict[str, int]:
         """Insert a list of UnderdogSnapshotRecords in a single transaction.
 
@@ -5706,17 +5792,19 @@ class Database:
         if not records:
             return {"records_written": 0, "retry_count": 0}
 
+        chunk_size = max(1, int(batch_size or _UNDERDOG_BULK_BATCH_SIZE))
         # A full live feed can contain several thousand observations. Keep
         # each transaction bounded so one ORM flush does not monopolize SQLite
         # or create a multi-gigabyte WAL burst that blocks evidence writers.
         # Aggregate the per-batch results so callers still receive an exact
         # durable count and retry total for the complete feed.
-        if len(records) > _UNDERDOG_BULK_BATCH_SIZE:
+        if len(records) > chunk_size:
             records_written = 0
             retry_count = 0
-            for start in range(0, len(records), _UNDERDOG_BULK_BATCH_SIZE):
+            for start in range(0, len(records), chunk_size):
                 result = await self.save_underdog_snapshots_bulk(
-                    records[start: start + _UNDERDOG_BULK_BATCH_SIZE]
+                    records[start: start + chunk_size],
+                    batch_size=chunk_size,
                 )
                 records_written += int(result.get("records_written", 0))
                 retry_count += int(result.get("retry_count", 0))
@@ -6655,6 +6743,19 @@ class Database:
                 "ON prop_line_history (provider, fetched_at)"
             ))
 
+    async def _migrate_prop_line_history_v8(self) -> None:
+        """Index provider-owned source identities used by the live bridge."""
+        async with self._engine.begin() as conn:
+            for statement in (
+                "CREATE INDEX IF NOT EXISTS "
+                "ix_prop_line_history_provider_external_id "
+                "ON prop_line_history (provider, external_id)",
+                "CREATE INDEX IF NOT EXISTS "
+                "ix_prop_line_history_provider_game_id "
+                "ON prop_line_history (provider, game_id)",
+            ):
+                await conn.execute(text(statement))
+
     async def _migrate_prop_line_variants_v1(self) -> None:
         """Retain provider-owned standard/goblin/demon line identity."""
         async with self._engine.begin() as conn:
@@ -7530,31 +7631,40 @@ class Database:
                 )
                 failed += 1
 
-        # Required telemetry uses one transaction so a retry cannot duplicate
-        # an earlier partially committed chunk.  The default path retains the
-        # older bounded/isolated behavior for compatibility callers.
-        if strict:
-            async with self.session() as s:
-                s.add_all(rows)
-                await s.commit()
-            await asyncio.sleep(0)
-            return len(rows)
+        def _values(row: PropCandidateLog) -> dict:
+            return {
+                "scan_ts": row.scan_ts,
+                "player_name": row.player_name,
+                "team": row.team,
+                "sport": row.sport,
+                "stat_type": row.stat_type,
+                "line_value": row.line_value,
+                "provider": row.provider,
+                "score_total": row.score_total,
+                "score_tier": row.score_tier,
+                "confidence": row.confidence,
+                "gate_decision": row.gate_decision,
+                "rejection_reason": row.rejection_reason,
+                "reason_codes": row.reason_codes,
+                "snapshot_external_id": row.snapshot_external_id,
+            }
 
-        # Candidate telemetry is non-critical, but it can contain thousands of
-        # neutral evaluations. One session/commit per row monopolizes the
-        # process-wide SQLite writer gate and makes the next live scan stale.
-        # Commit bounded batches, falling back to row isolation only when a
-        # batch contains a database-invalid value.
+        # Candidate telemetry can contain thousands of neutral evaluations.
+        # Core executemany avoids ORM bookkeeping for every row while bounded
+        # transactions still give other SQLite users opportunities to acquire
+        # the writer between feed chunks.
         inserted = 0
-        # Use substantial executemany batches. The caller submits one complete
-        # monitoring cycle; keeping 1,000-row chunks here avoids SQLite bind
-        # limits without turning thousands of candidates into tiny commits.
-        chunk_size = 1000
+        # Strict mode remains fail-fast (it never falls back to row isolation),
+        # but it must not hold SQLite for the entire 5k+ candidate feed.
+        chunk_size = 500
         for start in range(0, len(rows), chunk_size):
             chunk = rows[start:start + chunk_size]
             try:
                 async with self.session() as s:
-                    s.add_all(chunk)
+                    await s.execute(
+                        sa_insert(PropCandidateLog),
+                        [_values(row) for row in chunk],
+                    )
                     await s.commit()
                 inserted += len(chunk)
             except Exception as _batch_exc:

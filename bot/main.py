@@ -530,7 +530,19 @@ _SQLITE_WRITE_JOB_GROUP = "sqlite_write_jobs"
 # Let APScheduler coalesce a slow scan instead of queueing overlapping scans.
 # The coordinator still serializes named callbacks, but an unbounded scheduler
 # backlog can make the next health cycle appear permanently stale.
-_SCAN_JOB_KWARGS = {"coalesce": True}
+# A busy event loop can delay APScheduler's callback dispatch by a few seconds
+# while the bot is parsing a provider response.  Coalescing is still important
+# for scans, but the default one-second misfire grace turns harmless dispatch
+# jitter into a warning and drops the trigger.  Keep a bounded grace period so
+# a delayed scan runs once rather than being silently lost.
+_SCAN_JOB_KWARGS = {
+    "coalesce": True,
+    "misfire_grace_time": 30,
+}
+_MAINTENANCE_JOB_KWARGS = {
+    "coalesce": True,
+    "misfire_grace_time": 30,
+}
 
 
 def _coordinated_job(
@@ -548,6 +560,15 @@ def _coordinated_job(
         callback,
         exclusive_group=exclusive_group,
         allow_overlap=allow_overlap,
+    )
+
+
+def _sqlite_write_coordinated_job(name: str, callback):
+    """Wrap a database-mutating callback in the shared writer ownership group."""
+    return _coordinated_job(
+        name,
+        callback,
+        exclusive_group=_SQLITE_WRITE_JOB_GROUP,
     )
 
 
@@ -932,6 +953,7 @@ async def post_init(application: Application) -> None:
                     grader_callback,
                     when=config.OPPORTUNITY_GRADER_INTERVAL,
                     name="opportunity_grader",
+                    job_kwargs=_SCAN_JOB_KWARGS,
                 )
 
         grader_callback = _coordinated_job(
@@ -960,6 +982,7 @@ async def post_init(application: Application) -> None:
             interval=900,
             first=120,
             name="clv_seeder",
+            job_kwargs=_MAINTENANCE_JOB_KWARGS,
         )
         jq.run_repeating(
             _coordinated_job(
@@ -970,6 +993,7 @@ async def post_init(application: Application) -> None:
             interval=3600,
             first=180,
             name="clv_harvester",
+            job_kwargs=_MAINTENANCE_JOB_KWARGS,
         )
         # Underdog, PropLine, full-pool, grading, and player history each own
         # independent scheduler callbacks. None is a child of another cycle.
@@ -977,7 +1001,7 @@ async def post_init(application: Application) -> None:
         # the heavy-job ownership group with monitoring. It waits for the live
         # scan and its persistence drain before claiming SQLite.
         jq.run_repeating(
-            _coordinated_job(
+            _sqlite_write_coordinated_job(
                 "player_history_collector",
                 player_history_collector_job,
             ),
@@ -993,6 +1017,7 @@ async def post_init(application: Application) -> None:
             _coordinated_job(
                 "propline_read_only_rotation",
                 propline_read_only_rotation_job,
+                exclusive_group=_SQLITE_WRITE_JOB_GROUP,
             ),
             interval=config.PLAYER_HISTORY_POLL_INTERVAL,
             first=150,
@@ -1016,6 +1041,7 @@ async def post_init(application: Application) -> None:
             interval=86400,
                 first=40,
             name="prop_history_pruner",
+            job_kwargs=_MAINTENANCE_JOB_KWARGS,
         )
         # Heartbeat — every 60 s (keeps HealthTracker alive timestamp current)
         jq.run_repeating(_coordinated_job("heartbeat", _heartbeat_job), interval=60, first=30, name="heartbeat")
@@ -1028,6 +1054,7 @@ async def post_init(application: Application) -> None:
                 interval=config.SEASON_CHECK_INTERVAL,  # default interval=3600
                 first=50,
                 name="season_checker",
+                job_kwargs=_MAINTENANCE_JOB_KWARGS,
             )
         _odds_api_status = (
             "settlement/evidence only (16 calls/day, 60m minimum interval)"

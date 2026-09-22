@@ -626,6 +626,12 @@ async def _persist_underdog_postscan(
     now: datetime,
 ) -> None:
     """Bridge and update lifecycle rows as one required post-scan phase."""
+    _bridge_started = time.monotonic()
+    logger.info(
+        "underdog_postscan: bridge start alerted=%d removed=%d",
+        len(lifecycle_alerted),
+        len(lifecycle_removed),
+    )
     bridged = await db.sync_underdog_snapshots_to_prop_history(
         limit=100000,
         since_hours=0.17,
@@ -637,6 +643,11 @@ async def _persist_underdog_postscan(
     )
     if bridged:
         logger.debug("underdog_job: bridged %d rows to PropLineHistory", bridged)
+    logger.info(
+        "underdog_postscan: bridge done bridged=%d elapsed=%.1fs",
+        bridged,
+        time.monotonic() - _bridge_started,
+    )
 
     updates = [
         {
@@ -666,6 +677,11 @@ async def _persist_underdog_postscan(
             raise RuntimeError(
                 f"incomplete lifecycle write ({applied}/{len(updates)})"
             )
+        logger.info(
+            "underdog_postscan: lifecycle done applied=%d elapsed=%.1fs",
+            applied,
+            time.monotonic() - _bridge_started,
+        )
     elif updates:
         raise RuntimeError("bulk lifecycle persistence is unavailable")
 
@@ -827,8 +843,9 @@ async def _persist_required_candidate_batch(
 ) -> int:
     """Persist candidate telemetry before the monitoring cycle is complete.
 
-    Candidate rows are evaluation evidence, not disposable diagnostics. Use a
-    single strict transaction and surface any failure to the scan health state.
+    Candidate rows are evaluation evidence, not disposable diagnostics. The
+    database adapter uses bounded transactions in strict mode and surfaces any
+    failed/incomplete batch to the scan health state.
     """
     if not candidates:
         return 0
@@ -5765,9 +5782,9 @@ async def underdog_job(context) -> None:
                     _new_prop_skip_reasons["stale_line"] = (
                         _new_prop_skip_reasons.get("stale_line", 0) + 1
                     )
-                    logger.warning(
+                    logger.info(
                         "UD freshness_guard [np]: %s | %s | alert_line=%.1f"
-                        " scan line diverged — BLOCKED",
+                        " scan line diverged — blocked as expected",
                         player, stat_type, line_val,
                     )
                     _np_bet_ready = False
@@ -7151,32 +7168,10 @@ async def underdog_job(context) -> None:
         if _incremental_records and db:
             _incr_snapshot = list(_incremental_records)
             _snapshot_batch_failed = False
-            # Keep current live state in the shared lifecycle table. Unchanged
-            # observations update last_seen in place; the append-only raw
-            # snapshot ledger below retains the complete feed separately.
-            if isinstance(db, Database):
-                _live_written = await persist_canonical_player_props(
-                    db,
-                    "Underdog",
-                    _incr_snapshot,
-                    refresh_metadata=True,
-                )
-                if _live_written != len(_incr_snapshot):
-                    raise RuntimeError(
-                        "incomplete Underdog live-props persistence "
-                        f"({_live_written}/{len(_incr_snapshot)})"
-                    )
-            else:
-                await _cycle_timing.await_db(
-                    "write",
-                    "upsert_underdog_live_props",
-                    persist_canonical_player_props(
-                        db,
-                        "Underdog",
-                        _incr_snapshot,
-                        refresh_metadata=True,
-                    ),
-                )
+            # The canonical current-state write already ran before scoring.
+            # Do not upsert this complete feed a second time here: the raw
+            # snapshot ledger below retains every observation, while MQ score
+            # metadata and lifecycle transitions are persisted separately.
             # Keep the raw snapshot append-only for the complete feed. The
             # normalized PropLineHistory upsert above is the current-state
             # index, but it cannot replace the observation ledger needed for
@@ -7186,8 +7181,17 @@ async def underdog_job(context) -> None:
             if isinstance(db, Database):
                 try:
                     _snapshot_batch = list(_incr_snapshot)
+                    _snapshot_write_started = time.monotonic()
+                    logger.info(
+                        "underdog_snapshot_write: start records=%d",
+                        len(_snapshot_batch),
+                    )
                     _write_result = await db.save_underdog_snapshots_bulk(
-                        _snapshot_batch
+                        _snapshot_batch,
+                        # The production feed uses executemany and can safely
+                        # use larger bounded transactions than the default
+                        # compatibility/test batch.
+                        batch_size=1000,
                     )
                     _written = int(
                         _write_result.get("records_written", 0)
@@ -7199,6 +7203,11 @@ async def underdog_job(context) -> None:
                         _write_result.get("retry_count", 0)
                         if isinstance(_write_result, dict)
                         else 0
+                    )
+                    logger.info(
+                        "underdog_snapshot_write: done records=%d elapsed=%.1fs",
+                        _written,
+                        time.monotonic() - _snapshot_write_started,
                     )
                     if _written != len(_snapshot_batch):
                         raise RuntimeError(
@@ -7403,6 +7412,10 @@ async def underdog_job(context) -> None:
         # ── PropCandidateLog bulk write — edge transparency (Phase 4) ───────
         if _scored_props and db and not _cycle_budget_exhausted:
             try:
+                logger.info(
+                    "underdog_final_bookkeeping: candidate start scored=%d",
+                    len(_scored_props),
+                )
                 import json as _json
                 _now_ts    = datetime.utcnow()
                 _cand_rows: list[dict] = []
@@ -7447,6 +7460,10 @@ async def underdog_job(context) -> None:
                         "underdog_job: prepared %d candidates for PropCandidateLog",
                         len(_candidate_batch),
                     )
+                logger.info(
+                    "underdog_final_bookkeeping: candidate prepared rows=%d",
+                    len(_candidate_batch),
+                )
             except Exception as _cand_exc:
                 _persistence_ok = False
                 logger.error(
@@ -7484,15 +7501,23 @@ async def underdog_job(context) -> None:
         # ── Bulk MQ score write — update PropLineHistory for /picks and /slip filtering ──
         if _plh_mq_scores and db and not _cycle_budget_exhausted:
             try:
+                logger.info(
+                    "underdog_final_bookkeeping: mq start rows=%d",
+                    len(_plh_mq_scores),
+                )
                 if isinstance(db, Database):
                     _mq_scores = dict(_plh_mq_scores)
-                    await db.update_ud_props_mq_scores_bulk(_mq_scores)
+                    await db.update_ud_props_mq_scores_bulk(
+                        _mq_scores,
+                        since_at=now,
+                    )
                 else:
                     await _cycle_timing.await_db(
                         "write",
                         "update_ud_props_mq_scores_bulk",
                         db.update_ud_props_mq_scores_bulk(_plh_mq_scores),
                     )
+                logger.info("underdog_final_bookkeeping: mq done")
             except Exception as _mq_bulk_exc:
                 _persistence_ok = False
                 logger.error("underdog_job: mq_scores bulk write failed: %s", _mq_bulk_exc)
@@ -7501,6 +7526,7 @@ async def underdog_job(context) -> None:
         # Proves that all ~4,600 active props are monitored each poll (not just scored ones).
         try:
             if db:
+                logger.info("underdog_final_bookkeeping: scan_cycle start")
                 _scan_cycle_kwargs = dict(
                     scan_ts         = now,
                     fetched         = _n_ud_snaps_this_cycle,
@@ -7530,6 +7556,7 @@ async def underdog_job(context) -> None:
                         "log_scan_cycle",
                         db.log_scan_cycle(**_scan_cycle_kwargs),
                     )
+                logger.info("underdog_final_bookkeeping: scan_cycle done")
             elif db:
                 logger.error(
                     "underdog_cycle_bottleneck: scan-cycle evidence not written "

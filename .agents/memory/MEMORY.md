@@ -11,9 +11,6 @@
 - [Learning label classification](learning-labels.md) — classify_miss() in calibration.py; Variance (conf≥75,S/A) must never update weights; Model (<50 or PASS tier) is the only learnable error type; stored in PropOpportunityLog.error_type.
 - [Alert dedup dict format](alert-dedup-dict.md) — delivery dedup identity includes provider/source/event/direction, with compact legacy aliases retained for restart compatibility.
 - [Prop Intelligence Engine](prop-intelligence.md) — engine/prop_intelligence.py: 5-layer pure-function intelligence (historical/role/matchup/sport-adapters/recommendation); Candidate.with_prop_intelligence(result) applies bounded deltas; _sample_strength suppresses variance bonus for n < 3; no imports from ud_scoring/ud_bet_decision.
-- [Phase 2 alert + tracking upgrades](phase2-upgrades.md) — _format_intelligence_block, opening_line tracking, Phase 2 DB columns, UD_MIN_CONF_S/A/B gate, health upgrade methods, /rollups command; 2490 tests passing Aug 2026.
-- [Final completion batch](final-completion.md) — B-tier star gate=3, analyst inline block, recovery events, matchup 3-bullet expansion; 2636 tests passing Aug 2026.
-- [Crash diagnosis patch](crash-diagnosis.md) — sys.excepthook captures unhandled exc to health sidecar; crash_cause_label() classifies DB lock/Python exc/SIGKILL; restart alert shows real cause; 2595 tests Aug 2026.
 - [Alert quality cleanup](alert-quality-cleanup.md) — intelligence block char-split fix; _confidence_label(); _validate_final_tier() gate; Bet Quality label; 2634 tests Aug 2026.
 - [Phase 4 Evidence Infrastructure](phase4-evidence.md) — PropCandidateLog table; 8 new PropOpportunityLog cols (recommendation_id, provider, bet_quality_score, qualification_path, reason_codes, watchlist_state, settlement_source, manual_opinion); /funnel command; 2685 tests Aug 2026.
 - [Audit bug fixes Aug 2026](audit-bugfixes.md) — 8 confirmed bugs fixed: UD_ALERT_SPORTS env-var name, asyncio import, grade_job health tracking, cmd_config safe fallbacks, /picks logging+case-insensitive rec lookup, PropPickAdapter.best_side default, cross-sport debug ranking, broadcast_alert mock namespace; 2672 tests passing.
@@ -157,3 +154,4 @@
 - [Completed-history delivery boundary](completed-history-delivery.md) — primary completed game results qualify like settled PropLine history; proxy-only validation must never be rescued by decision metadata.
 - [Evidence-first candidate selection](evidence-first-selection.md) — post-gate ranking must not apply a sport/stat allowlist; green-goblin filtering suppressed valid completed-history picks.
 - [Cold-start removal](cold-start-removal.md) — Underdog restarts restore durable state but use the same eligibility and delivery rules as every monitoring cycle.
+- [Live post-scan boundaries](underdog-postscan-performance.md) — live full-feed bookkeeping must use bounded writes and explicit current-cycle history slices; never expand identity predicates across append-only rows.

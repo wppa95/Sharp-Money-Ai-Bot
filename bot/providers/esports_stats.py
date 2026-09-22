@@ -197,6 +197,23 @@ def _resolve_alias(name: str, alias_table: dict[str, str]) -> str:
     return alias_table.get(name.lower().strip(), name)
 
 
+def _is_non_player_placeholder(name: str, alias_table: dict[str, str]) -> bool:
+    """Return whether a feed value cannot be a searchable player identity.
+
+    Some pick'em catalogs use wildcard/placeholder tokens while a market is
+    being assembled (for example ``86*``).  Sending those values to OpenDota
+    creates a guaranteed provider miss and an operator-facing warning.  Known
+    numeric handles such as ``33`` remain valid through the explicit alias
+    table.
+    """
+    value = str(name or "").strip()
+    if not value:
+        return True
+    if any(character in value for character in "*?[]"):
+        return True
+    return value.isdigit() and value.lower() not in alias_table
+
+
 def _group_into_series(
     matches: list[dict],
     max_gap_seconds: int = 14400,
@@ -264,6 +281,12 @@ class EsportsStatsProvider:
 
         try:
             if sport_up == "DOTA":
+                if _is_non_player_placeholder(clean_name, _DOTA_PLAYER_ALIASES):
+                    logger.debug(
+                        "DOTA: skipping non-player catalog placeholder %r",
+                        clean_name,
+                    )
+                    return []
                 return await self._fetch_dota(clean_name, player_name, stat_lower)
             if sport_up == "CS":
                 return await self._fetch_cs(clean_name, player_name, stat_lower)

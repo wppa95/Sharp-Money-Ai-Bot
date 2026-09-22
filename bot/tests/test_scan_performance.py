@@ -1076,10 +1076,10 @@ def test_no_fast_resume_in_config():
 # ── 14. Scheduler trigger coalescing ─────────────────────────────────────────
 
 
-def test_scheduler_does_not_configure_misfire_skips():
-    """Triggers are coalesced by the coordinator, not recorded as skips."""
+def test_scheduler_uses_bounded_misfire_grace():
+    """A few seconds of dispatch jitter must not drop a scheduled trigger."""
     src = _src("main.py")
-    assert "misfire_grace_time" not in src
+    assert '"misfire_grace_time": 30' in src
 
 
 def test_coordinator_and_scan_running_flag_prevent_duplicate_heavy_scans():
