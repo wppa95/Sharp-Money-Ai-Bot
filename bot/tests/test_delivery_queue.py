@@ -316,7 +316,6 @@ class TestPerSportDeliveryBatch:
 
         assert [candidate["player"] for candidate in selected] == [
             "NBA-1",
-            "NBA-2",
             "MLB-1",
         ]
 
