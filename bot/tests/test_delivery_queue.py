@@ -33,6 +33,7 @@ import pytest
 from market_engine import (
     _apply_delivery_diversification,
     _cand_priority,
+    _limit_sport_delivery_batch,
     _limit_strict_sport_delivery_batch,
     _select_best_per_sport,
     _select_best_over_under,
@@ -292,6 +293,31 @@ class TestStrictSportDeliveryBatch:
             "MLB-0",
             "MLB-1",
             "WNBA",
+        ]
+
+
+class TestPerSportDeliveryBatch:
+    def test_two_pick_quota_is_independent_for_each_sport(self):
+        queue = [
+            _make_cand(player="NBA-1", sport="NBA"),
+            _make_cand(player="NBA-2", sport="NBA"),
+            _make_cand(player="NBA-3", sport="NBA"),
+            _make_cand(player="NHL-1", sport="NHL"),
+            _make_cand(player="NHL-2", sport="NHL"),
+            _make_cand(player="NHL-3", sport="NHL"),
+            _make_cand(player="MLB-1", sport="MLB"),
+        ]
+
+        selected = _limit_sport_delivery_batch(
+            queue,
+            {"NBA": 1, "NHL": 2},
+            limit=2,
+        )
+
+        assert [candidate["player"] for candidate in selected] == [
+            "NBA-1",
+            "NBA-2",
+            "MLB-1",
         ]
 
 
