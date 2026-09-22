@@ -211,13 +211,15 @@ class Config:
     CONNECTOR_POLL_INTERVAL:  int = int(os.environ.get("CONNECTOR_POLL_INTERVAL",  "120"))
     CONSENSUS_CHECK_INTERVAL: int = int(os.environ.get("CONSENSUS_CHECK_INTERVAL", "120"))
     CLV_CHECK_INTERVAL:       int = int(os.environ.get("CLV_CHECK_INTERVAL",       "120"))
-    # One shared Player Props evaluation cycle every 150 seconds by default.
-    # Environment overrides are bounded to the one-to-two-and-a-half-minute range.
+    # One shared Player Props evaluation cycle every six minutes by default.
+    # The complete current-feed scan currently takes about five minutes, so
+    # this cadence leaves headroom for SQLite contention and provider variance.
+    # Environment overrides are bounded to the one-to-ten-minute range.
     # Each cycle fetches the complete current Underdog feed; the evaluation
     # budget is a lower bound rather than a feed-size cap.
     UNDERDOG_POLL_INTERVAL:   int = max(
         60,
-        min(150, int(os.environ.get("UNDERDOG_POLL_INTERVAL", "150"))),
+        min(600, int(os.environ.get("UNDERDOG_POLL_INTERVAL", "360"))),
     )
     # Ten-minute cadence for settlement grading. The grader reads durable
     # player-game evidence and independently fetches missing settlement rows.

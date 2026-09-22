@@ -798,7 +798,7 @@ async def player_history_collector_job(context) -> None:
                     await asyncio.wait_for(write_batch(batch), timeout=remaining)
                     persisted_rows += len(batch)
                     # Keep each transaction short and release the window
-                    # between batches so the 150-second FPR can run promptly.
+                    # between batches so the six-minute FPR can run promptly.
                     await asyncio.sleep(_PLAYER_HISTORY_WRITE_YIELD_SECONDS)
                 except asyncio.TimeoutError:
                     logger.warning(
