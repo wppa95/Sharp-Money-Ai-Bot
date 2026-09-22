@@ -156,3 +156,4 @@
 - [PropLine handoff pacing](propline-handoff-pacing.md) — a quota-paced PropLine fetch must not block the live monitor; preserve completed handoffs for the next cycle.
 - [Completed-history delivery boundary](completed-history-delivery.md) — primary completed game results qualify like settled PropLine history; proxy-only validation must never be rescued by decision metadata.
 - [Evidence-first candidate selection](evidence-first-selection.md) — post-gate ranking must not apply a sport/stat allowlist; green-goblin filtering suppressed valid completed-history picks.
+- [Cold-start removal](cold-start-removal.md) — Underdog restarts restore durable state but use the same eligibility and delivery rules as every monitoring cycle.

@@ -28,7 +28,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 # ═══════════════════════════════════════════════════════════════════════════
 
 class TestColdStartGateSource:
-    """Cold-start gate in market_engine must be evidence-based, not unconditional."""
+    """The retired cold-start gate is absent from market_engine."""
 
     def _me_src(self):
         import market_engine as me
@@ -36,32 +36,22 @@ class TestColdStartGateSource:
 
     def test_cold_start_done_flag_exists(self):
         import market_engine as me
-        assert hasattr(me, "_cold_start_done"), "_cold_start_done flag must exist"
+        assert not hasattr(me, "_cold_start_done")
 
     def test_cold_start_is_first_scan_only(self):
-        """is_cold_start must be True only on the FIRST scan (not_cold_start_done)."""
+        """There is no first-scan-only branch."""
         src = self._me_src()
-        assert "is_cold_start = not _cold_start_done" in src or \
-               "is_cold_start=not _cold_start_done" in src, (
-            "is_cold_start must be derived from _cold_start_done — "
-            "True on first scan only, not permanently"
-        )
+        assert "is_cold_start" not in src
 
     def test_cold_start_done_set_after_first_scan(self):
-        """_cold_start_done must be set to True after first scan completes."""
+        """No cold-start latch is set after a scan."""
         src = self._me_src()
-        assert "_cold_start_done = True" in src, (
-            "_cold_start_done must be latched after first scan — "
-            "subsequent scans have is_cold_start=False"
-        )
+        assert "_cold_start_done" not in src
 
     def test_cold_start_not_unconditional_blocker(self):
-        """Cold-start is NOT a permanent blocker — it only applies to the first scan."""
+        """Qualification is never blocked by startup state."""
         import market_engine as me
-        # _cold_start_done is initially False; after latch it becomes True → no more cold_start
-        assert me._cold_start_done is True or isinstance(me._cold_start_done, bool), (
-            "_cold_start_done must be a bool — True means cold-start is done"
-        )
+        assert not hasattr(me, "_cold_start_done")
 
     def test_cold_start_path_always_rescores_on_restart(self):
         """Fast Resume removed — cold-start path scores all props on every restart."""
@@ -76,9 +66,10 @@ class TestColdStartGateSource:
         )
 
     def test_cold_start_has_no_rejection_label(self):
-        """Cold-start is counted as scan context, not a rejection status."""
+        """No cold-start counters or rejection labels remain."""
         src = self._me_src()
-        assert "_n_cold_start_scored" in src
+        assert "_n_cold_start_scored" not in src
+        assert "is_cold_start" not in src
         assert '"cold_start"' not in src and "'cold_start'" not in src
 
 

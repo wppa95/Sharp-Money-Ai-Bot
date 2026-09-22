@@ -40,7 +40,7 @@ def _compute_gate_decision(rejection: str, tier: str) -> str:
         return "REJECTED"
     if tier == "B":
         return "WATCHLIST"
-    if rejection in ("qualified", "sent", "filtered", "new_prop_failed", "cold_start") and tier in ("S", "A"):
+    if rejection in ("qualified", "sent", "filtered", "new_prop_failed") and tier in ("S", "A"):
         return "ACCEPTED"
     return "REJECTED"
 
@@ -69,17 +69,17 @@ class TestColdStartGateDecision:
     """cold_start S/A props must get gate_decision=ACCEPTED, not REJECTED."""
 
     def test_cold_start_s_tier_accepted(self):
-        assert _compute_gate_decision("cold_start", "S") == "ACCEPTED"
+        assert _compute_gate_decision("qualified", "S") == "ACCEPTED"
 
     def test_cold_start_a_tier_accepted(self):
-        assert _compute_gate_decision("cold_start", "A") == "ACCEPTED"
+        assert _compute_gate_decision("qualified", "A") == "ACCEPTED"
 
     def test_cold_start_b_tier_watchlist(self):
         """B-tier cold_start should be WATCHLIST, not ACCEPTED."""
-        assert _compute_gate_decision("cold_start", "B") == "WATCHLIST"
+        assert _compute_gate_decision("qualified", "B") == "WATCHLIST"
 
     def test_cold_start_pass_tier_rejected(self):
-        assert _compute_gate_decision("cold_start", "PASS") == "REJECTED"
+        assert _compute_gate_decision("qualified", "PASS") == "REJECTED"
 
     def test_qualified_s_tier_accepted(self):
         assert _compute_gate_decision("qualified", "S") == "ACCEPTED"
@@ -95,10 +95,11 @@ class TestColdStartGateDecision:
         assert _compute_gate_decision("strict_tier_blocked (A, NFL min=S)", "A") == "REJECTED"
 
     def test_cold_start_in_gate_decision_code(self):
-        """Cold-start is a scan metric, not a candidate classification."""
+        """The retired cold-start state is not a candidate classification."""
         import inspect, market_engine as _me
         src = inspect.getsource(_me.underdog_job)
-        assert "_n_cold_start_scored" in src
+        assert "_n_cold_start_scored" not in src
+        assert "is_cold_start" not in src
         assert '"cold_start"' not in src
 
 
@@ -427,8 +428,8 @@ class TestRegressionGuards:
         assert "_lifecycle_alerted" in src
 
     def test_cold_start_still_suppresses_alerts(self):
-        """cold_start must still block Telegram delivery (only PropCandidateLog label changes)."""
+        """The retired cold-start state no longer blocks Telegram delivery."""
         import inspect, market_engine as _me
         src = inspect.getsource(_me.underdog_job)
-        assert "not is_cold_start" in src
-        assert "cold_start_done = True" in src or "_cold_start_done = True" in src
+        assert "is_cold_start" not in src
+        assert "_cold_start_done" not in src

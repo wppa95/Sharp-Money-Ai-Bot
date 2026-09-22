@@ -915,11 +915,11 @@ def test_single_save_not_called_in_main_loop():
     )
 
 
-def test_cold_start_bulk_save_unchanged():
-    """Cold-start bulk-save path (_cold_start_records) must still be present."""
+def test_all_scan_snapshots_use_incremental_bulk_save():
+    """All cycles use the same bounded incremental snapshot batch."""
     src = _src("market_engine.py")
-    assert "_cold_start_records.append(record)" in src
-    assert "save_underdog_snapshots_bulk(_cs_batch)" in src
+    assert "_incremental_records.append(record)" in src
+    assert "_cold_start_records" not in src
 
 
 # ── 4. No sports silently removed ─────────────────────────────────────────────

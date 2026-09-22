@@ -1178,15 +1178,6 @@ def _player_provider_label(sport: str) -> str:
     }
     return labels.get((sport or "").upper(), "ESPN")
 
-# Set to True after the first complete Underdog prop scan.  The first cycle
-# uses the controlled cold-start target; subsequent cycles use incremental
-# scoring (new props and line-change events only).
-_cold_start_done: bool = False
-# Controlled cold-start experiment: persisted active props are restored and remain
-# available to Stable Refresh/FPR, but are not re-scored in the one-time startup
-# pass. New props and actual line changes continue through their normal paths.
-_COLD_START_RESCAN_TARGET: int = 0
-
 # ── Market availability tracking ─────────────────────────────────────────────
 # Maps "player__stat_type" → datetime of first alert (bet pick).
 # Used to compute how long a market was available before removal.
@@ -1310,7 +1301,7 @@ async def reset_monitoring_runtime_state() -> None:
     global _prizepicks_sport_cursor, _propline_request_cursor
     global _propline_pending_props, _propline_request_lock
     global _propline_ingest_task, _fpr_handoff_task
-    global _cold_start_done, _MARKET_FIRST_ALERT, _priority_override_sent
+    global _MARKET_FIRST_ALERT, _priority_override_sent
     global _ud_full_scan_running, _fpr_execution_running
     global _player_history_persistence_running, _prop_market_alerted
     global _failed_required_persistence_batches
@@ -1350,7 +1341,6 @@ async def reset_monitoring_runtime_state() -> None:
     _propline_request_lock = None
     _propline_ingest_task = None
     _fpr_handoff_task = None
-    _cold_start_done = False
     _MARKET_FIRST_ALERT.clear()
     _priority_override_sent.clear()
     _ud_full_scan_running = False
@@ -1861,7 +1851,7 @@ def _rss_mb() -> Optional[float]:
 async def _init_state_from_db(db: "Database") -> None:
     """Restore module-level state from the database after a restart.
 
-    Called once per process on the first (cold-start) underdog_job cycle.
+    Called once per process before the first regular underdog_job cycle.
     This prevents the bot from losing context it had before it was stopped:
 
     * _MARKET_FIRST_ALERT    — re-populated from recently alerted props so the
@@ -4749,15 +4739,7 @@ async def underdog_job(context) -> None:
     if db is None:
         return
 
-    global _cold_start_done, _ud_scan_state, _ud_known_keys, _ud_scan_db_id
-    # Cold-start scans and state restoration were removed. Every cycle uses
-    # the same incremental/new-prop and line-change rules, including after a
-    # process restart; durable history remains available to normal scoring.
-    # Compatibility marker for older source-level integrations:
-    # is_cold_start = not _cold_start_done
-    # The historical latch would set _cold_start_done = True after its first
-    # pass; this implementation intentionally keeps the runtime path uniform.
-    is_cold_start = False
+    global _ud_scan_state, _ud_known_keys, _ud_scan_db_id
     _new_db_context = _ud_scan_db_id != id(db)
     if _new_db_context:
         # Isolated callers/tests may provide a new database double for each
@@ -4828,8 +4810,8 @@ async def underdog_job(context) -> None:
 
     _cycle_timing.start("state_restore")
     logger.info(
-        "underdog_cycle_started: cycle_id=%d cold_start=%s active_jobs=%s",
-        _cycle_sequence, is_cold_start, sorted(_active_job_names()),
+        "underdog_cycle_started: cycle_id=%d active_jobs=%s",
+        _cycle_sequence, sorted(_active_job_names()),
     )
 
     _health = get_health_tracker()
@@ -5086,12 +5068,10 @@ async def underdog_job(context) -> None:
     _n_new_prop:      int       = 0   # first-appearance props detected this cycle
     _n_new_prop_evaluated: int  = 0   # first-appearance props that used scoring budget
     _n_new_prop_sent:      int       = 0   # immediate new-prop alerts delivered
-    _n_cold_start_scored: int       = 0   # props scored during the one-time cold-start pass
     _n_observation_only:   int       = 0   # observed/tracked but deferred to FPR
     _n_standing_sent:      int       = 0   # standing opportunity alerts delivered (4A)
     _n_unchanged_skipped: int       = 0   # props with unchanged lines — stable, no re-score needed
     _n_lc_sent:            int       = 0   # line-change alerts delivered this cycle
-    _cold_start_records:  list       = []  # records buffered for bulk save at end of cold-start
     _incremental_records: list       = []  # incremental records batched for end-of-loop bulk save
     _scored_props:        list[dict] = []  # all scored props this cycle — for end-of-cycle debug log
     _next_ud_scan_state:  dict[tuple[str, str], object] = {}
@@ -5228,12 +5208,8 @@ async def underdog_job(context) -> None:
                     "live scan will not issue per-prop fallback lookups: %s",
                     _bulk_results_exc,
                 )
-    if is_cold_start:
-        for record in _snapshot_records:
-            _cold_start_records.append(record)
-    else:
-        for record in _snapshot_records:
-            _incremental_records.append(record)
+    for record in _snapshot_records:
+        _incremental_records.append(record)
 
     # Underdog and PropLine now cross the same canonical Player Props
     # persistence boundary before scoring begins.  The provider-specific raw
@@ -5363,16 +5339,7 @@ async def underdog_job(context) -> None:
         # restart there is intentionally no movement classification on the
         # first fresh feed, which prevents false alerts while the durable
         # recovery queries are best-effort and may be slow on a large SQLite DB.
-        if is_cold_start:
-            known_keys = {
-                (snap.player or "Unknown", _extract_ud_stat_type(
-                    snap.selection, snap.player, snap.line,
-                ))
-                for snap in ud_snaps
-            }
-            recent_by_key = {}
-            _cycle_timing.count("history_lookups_bypassed")
-        elif isinstance(db, Database):
+        if isinstance(db, Database):
             # Monitoring comparisons stay in memory. SQLite is reserved for
             # evidence/history/grading/tracking; reading the large snapshot
             # archive to rediscover the active monitoring pool can hold the
@@ -5521,9 +5488,9 @@ async def underdog_job(context) -> None:
             )
             _path_started = time.monotonic() if _path_kind else None
 
-            # Stage 3 — movement detected: significant line move, non-cold-start
+            # Stage 3 — movement detected: significant line move
             if (
-                not is_removed and not is_cold_start
+                not is_removed
                 and line_move_threshold_met
             ):
                 _sp_move = snap.sport or "UNKNOWN"
@@ -5536,7 +5503,6 @@ async def underdog_job(context) -> None:
             # ── Scoring gate ─────────────────────────────────────────────────────
             from engine.ud_scoring import (
                 score_ud_prop, UDPropScore,
-                _score_historical_activity_legacy,  # for cold-start before/after comparison
                 compute_market_quality, detect_market_pressure,
                 _HIGH_FLOOR_STATS,
             )
@@ -6075,52 +6041,6 @@ async def underdog_job(context) -> None:
                         score.n_history, validation.has_supporting_data,
                     )
     
-                elif not is_removed and is_cold_start and _COLD_START_RESCAN_TARGET > 0:
-                    # ── Cold-start path ───────────────────────────────────────────
-                    # First cycle only: score the configured cold-start target so the
-                    # DB has fresh tier / stars / validation data from startup.
-                    # hit_rates are
-                    # intentionally skipped — fetching them for ~1000 props on boot
-                    # would hammer the stats API; they are populated lazily on the
-                    # first qualifying incremental event.  No alerts are sent.
-                    ud_history = await _candidate_line_history(
-                        db,
-                        player,
-                        stat_type,
-                        cycle_timing=_cycle_timing,
-                        operation="get_ud_prop_history",
-                    )
-                    _hist_snap = None  # cold-start: no per-prop PlayerStatsProvider fetch
-
-                    score = _cycle_timing.sync_operation("core_scoring", "score_ud_prop", score_ud_prop,
-                        player_name        = player,
-                        stat_type          = stat_type,
-                        sport              = snap.sport or "UNKNOWN",
-                        current_line       = snap.line or 0.0,
-                        prev_line          = None,   # no change event — baseline score
-                        history            = ud_history,
-                        use_drift_velocity = True,   # cumulative drift from earliest known line
-                    )
-                    validation = validate_player_prop(
-                        player_name  = player,
-                        stat_type    = stat_type,
-                        current_line = snap.line or 0.0,
-                        history      = ud_history,
-                        min_samples  = config.UD_VALIDATION_MIN_SAMPLES,
-                    )
-                    # Compute bet direction during cold-start (no hit_rates at boot).
-                    # This populates bet_recommendation on the snapshot so /picks and
-                    # /slip can display OVER/UNDER immediately after the first cycle.
-                    decision = make_ud_bet_decision(
-                        score        = score,
-                        validation   = validation,
-                        current_line = snap.line or 0.0,
-                        prev_line    = None,
-                        hit_rates    = None,  # no game history at cold-start
-                        sport        = snap.sport or "",
-                    )
-                    _n_cold_start_scored += 1
-    
                 # ── Re-entry detection ────────────────────────────────────────────
                 # A prop returns after removal: known_keys has it (via
                 # get_known_underdog_prop_keys which includes removed rows) but
@@ -6130,7 +6050,7 @@ async def underdog_job(context) -> None:
                 #   - bypasses the timing filter (new_prop=True)
                 #   - fires regardless of prev_line comparison
                 #   - gets a fresh lifecycle DISCOVERED → ACTIVE_ALERTED
-                is_reentry = not is_removed and not is_cold_start and prev_record is None
+                is_reentry = not is_removed and prev_record is None
                 is_reentry_qualified = False
                 if is_reentry:
                     logger.info(
@@ -6211,12 +6131,11 @@ async def underdog_job(context) -> None:
                     is_qualified = False
                 else:
                     # Line-change props need a real directional pick and an
-                    # active provider scope. Cold-start, lifecycle, timing,
-                    # deduplication, and freshness checks remain independent
+                    # active provider scope. Lifecycle, timing, deduplication,
+                    # and freshness checks remain independent
                     # safety/integrity protections.
                     is_qualified = (
-                        not is_cold_start
-                        and score is not None
+                        score is not None
                         and decision is not None
                         and decision.recommendation in ("OVER", "UNDER")
                     )
@@ -6227,7 +6146,7 @@ async def underdog_job(context) -> None:
                         _sport_actionable[_actionable_sport] = (
                             _sport_actionable.get(_actionable_sport, 0) + 1
                         )
-                    # ── Neutral evaluation metrics (line-change / cold-start) ─────
+                    # ── Neutral evaluation metrics (line-change) ─────
                     if score is not None:
                         _scored_props.append({
                             "player":          player,
@@ -6236,7 +6155,7 @@ async def underdog_job(context) -> None:
                             "team":            snap.team or "",
                             "total":           score.total,
                             "score_tier":      score.tier,
-                            "path":            "cs" if is_cold_start else "lc",
+                            "path":            "lc",
                             "direction":       (
                                 decision.recommendation
                                 if decision is not None
@@ -6473,8 +6392,6 @@ async def underdog_job(context) -> None:
             elif not should_alert:
                 if is_removed:
                     _alert_outcome = "removal_skipped"
-                elif is_cold_start and score is not None:
-                    _alert_outcome = "cold_start_scored"
                 else:
                     _alert_outcome = "evaluated"
             elif _dq_collected:
@@ -6560,21 +6477,18 @@ async def underdog_job(context) -> None:
         #  alert_sent=True is reflected in the saved records for delivered candidates.)
 
         # ── 4A: Standing opportunity scan ─────────────────────────────────────────
-        # After cold-start, re-evaluate stable HIGH_FLOOR props that had no line
+        # Re-evaluate stable HIGH_FLOOR props that had no line
         # change and are not new this cycle.  Allows evidence-driven (hit-rate-
         # based) alerts without requiring a line-change event.
         #
         # Constraints to prevent alert spam:
         #   • Only HIGH_FLOOR stat types in the betting-alert whitelist
-        #   • Must have previously scored A or S tier (from cold-start or prior cycles)
+        #   • Must have previously scored A or S tier (from prior cycles)
         #   • No Underdog alert sent for this player/stat in the last 24 h
         #   • Top 5 candidates per cycle (avoids hammering the stats API)
         #   • Full scoring + validation + decision gate — same standard as live alerts
         #
-        # Standing scan runs on scan 2+ only (after the cold-start cycle completes).
-        # Cold-start cycle scores all props without sending alerts; standing picks
-        # up high-confidence candidates from the next scan onward.
-        if not is_cold_start and chat_ids:
+        if chat_ids:
             from engine.ud_scoring import (  # already imported above but local scope
                 compute_market_quality as _cmq,
                 detect_market_pressure as _dmp,
@@ -7345,64 +7259,6 @@ async def underdog_job(context) -> None:
             if not _snapshot_batch_failed:
                 _incremental_records.clear()
 
-        # ── Cold-start bulk save + latch — runs once after the prop loop ──────────
-        if is_cold_start:
-            if _cold_start_records:
-                # Chunk saves to avoid holding thousands of ORM objects in memory
-                # simultaneously — saves 200 at a time and releases each batch.
-                _CS_CHUNK = 200
-                _cs_total = len(_cold_start_records)
-                for _cs_i in range(0, _cs_total, _CS_CHUNK):
-                    _cs_batch = _cold_start_records[_cs_i: _cs_i + _CS_CHUNK]
-                    _snapshot_intended += len(_cs_batch)
-                    try:
-                        _write_result = await _cycle_timing.await_db(
-                            "write",
-                            "save_underdog_snapshots_bulk",
-                            db.save_underdog_snapshots_bulk(_cs_batch),
-                        )
-                        _snapshot_persisted += (
-                            int(_write_result.get("records_written", len(_cs_batch)))
-                            if isinstance(_write_result, dict)
-                            else len(_cs_batch)
-                        )
-                        _snapshot_retry_count += (
-                            int(_write_result.get("retry_count", 0))
-                            if isinstance(_write_result, dict)
-                            else 0
-                        )
-                    except Exception as _cs_exc:
-                        _snapshot_failed_batches += 1
-                        _snapshot_failed_records += len(_cs_batch)
-                        _persistence_ok = False
-                        logger.error(
-                            "underdog_job: cold-start bulk snapshot save permanently "
-                            "failed after database retries (%d records): %s",
-                            len(_cs_batch), _cs_exc,
-                        )
-                    del _cs_batch  # release this batch immediately
-                _cold_start_records.clear()  # release full list
-                logger.info(
-                    "underdog_job: cold-start bulk save — intended=%d persisted=%d "
-                    "failed_records=%d retries=%d (%d chunks)",
-                    _cs_total,
-                    _snapshot_persisted,
-                    _snapshot_failed_records,
-                    _snapshot_retry_count,
-                    (_cs_total + _CS_CHUNK - 1) // _CS_CHUNK,
-                )
-            # Do not latch cold-start complete after an exhausted snapshot batch.
-            # The next feed cycle must retry the cold-start path rather than
-            # falsely treating incomplete persistence as recovered.
-            if _persistence_ok:
-                _cold_start_done = True
-            else:
-                _cold_start_done = False
-            logger.info(
-                "underdog_job: cold-start complete — evaluated %d active props",
-                _n_cold_start_scored,
-            )
-    
         # Keep only compact previous-prop state needed by the next poll.
         # This replaces a full grouped-history query against the raw snapshot
         # table while preserving durable snapshots and known-prop semantics.
@@ -7444,13 +7300,12 @@ async def underdog_job(context) -> None:
             logger.debug("underdog_job: checkpoint record skipped — %s", _ckpt_exc)
 
         logger.info(
-            "underdog_job: fetched=%d evaluated=%d observation_only=%d cold_start=%d "
+            "underdog_job: fetched=%d evaluated=%d observation_only=%d "
             "actionable=%d removed=%d new=%d new_sent=%d budget=%d "
             "deadline_reached=%s elapsed=%.1fs",
             len(ud_snaps),
-            _n_new_prop_evaluated + _n_scored + _n_cold_start_scored,
+            _n_new_prop_evaluated + _n_scored,
             _n_observation_only,
-            _n_cold_start_scored,
             _n_qualified,
             _n_removed,
             _n_new_prop,
@@ -7469,8 +7324,7 @@ async def underdog_job(context) -> None:
             (
                 f"  received={len(ud_snaps)}  analyzed={len(_scored_props)}"
                 f"  (new={_n_new_prop}  line_change={_n_scored}"
-                + (f"  cold_start={_n_cold_start_scored}" if _n_cold_start_scored else "")
-                + f"  removed={_n_removed})"
+                f"  removed={_n_removed})"
             ),
         ]
         if _scored_props:
@@ -7656,8 +7510,7 @@ async def underdog_job(context) -> None:
                     unchanged       = _n_unchanged_skipped,
                     new_props       = _n_new_prop,
                     line_changed    = _n_scored,
-                    cold_start      = _n_cold_start_scored,
-                    analyzed        = _n_new_prop + _n_scored + _n_cold_start_scored,
+                    analyzed        = _n_new_prop + _n_scored,
                     qualified       = _n_qualified,
                     alert_delivered = _n_new_prop_sent + _n_lc_sent + _n_standing_sent,
                     actionable_by_sport = dict(_sport_actionable),

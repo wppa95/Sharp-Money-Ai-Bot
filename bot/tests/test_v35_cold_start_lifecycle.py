@@ -66,21 +66,17 @@ def _make_health(path: Path = None):
 # ═══════════════════════════════════════════════════════════════════════════
 
 class TestReq1NewPropColdStart:
-    """1. New prop enters cold-start on first scan."""
+    """1. New props use the regular scan path immediately."""
 
     def test_cold_start_flag_starts_false(self):
-        """_cold_start_done must be False on initial import (handled per-process)."""
+        """The retired cold-start latch is absent."""
         import market_engine as me
-        # The flag is module-level. In the test process it may already be True
-        # if underdog_job has run. What matters is the flag EXISTS.
-        assert isinstance(me._cold_start_done, bool), "_cold_start_done must be a bool"
+        assert not hasattr(me, "_cold_start_done")
 
     def test_is_cold_start_derived_from_done_flag(self):
-        """is_cold_start = not _cold_start_done — True only while done=False."""
+        """The scan source has no startup-only state branch."""
         src = inspect.getsource(__import__("market_engine").underdog_job)
-        assert "is_cold_start = not _cold_start_done" in src, (
-            "is_cold_start must be derived from _cold_start_done each cycle"
-        )
+        assert "is_cold_start" not in src
 
     def test_new_prop_path_exists(self):
         """is_new_prop detection must exist in underdog_job."""
@@ -88,18 +84,17 @@ class TestReq1NewPropColdStart:
         assert "is_new_prop" in src, "is_new_prop must be tracked in the main loop"
 
     def test_cold_start_scored_outcome_exists(self):
-        """cold_start_scored alert_outcome must be recorded for tracking."""
+        """The retired cold-start outcome is no longer recorded."""
         src = inspect.getsource(__import__("market_engine").underdog_job)
-        assert '"cold_start_scored"' in src or "'cold_start_scored'" in src, (
-            "cold-start props must be tracked with alert_outcome='cold_start_scored'"
-        )
+        assert "cold_start_scored" not in src
 
     def test_cold_start_records_bulk_saved(self):
-        """Cold-start records must be bulk-saved to PropLineHistory / snapshots DB."""
+        """All records use the regular incremental bulk-save path."""
         src = inspect.getsource(__import__("market_engine").underdog_job)
-        assert "_cold_start_records" in src, "_cold_start_records list must exist"
+        assert "_incremental_records" in src
+        assert "_cold_start_records" not in src
         assert "save_underdog_snapshots_bulk" in src, (
-            "Cold-start records must be bulk-saved to DB"
+            "Snapshots must be bulk-saved to DB"
         )
 
 
@@ -199,19 +194,14 @@ class TestReq4RestartResumeIdentification:
             "Standing path must use stored/evaluated tier data with the shared gate"
         )
 
-    def test_standing_path_cold_start_gate(self):
-        """Fast Resume removed — standing path uses plain `not is_cold_start` gate.
-
-        Cold-start cycle (scan 1) scores all props without alerts.
-        Standing path (scan 2+) picks up qualified props on every subsequent scan.
-        """
+    def test_standing_path_has_no_startup_gate(self):
+        """Standing picks use the same path on every scan."""
         src = inspect.getsource(__import__("market_engine").underdog_job)
         assert "_fast_resume" not in src, (
             "Fast Resume removed: _fast_resume must not appear in underdog_job"
         )
-        assert "not is_cold_start and chat_ids" in src, (
-            "Standing path must gate on plain `not is_cold_start` after Fast Resume removal"
-        )
+        assert "is_cold_start" not in src
+        assert "if chat_ids:" in src
 
     def test_standing_path_gate_logic(self):
         """Verify the standing path gate evaluates correctly for all combinations."""
@@ -304,13 +294,11 @@ class TestReq6SubsequentSnapshots:
 class TestReq7ReEvaluationAfterHistory:
     """7. Cold-start prop is re-evaluated by standing path once history is sufficient."""
 
-    def test_standing_path_runs_every_non_cold_start_cycle(self):
-        """Standing path runs every cycle where is_cold_start=False."""
+    def test_standing_path_runs_without_startup_state(self):
+        """Standing path is not conditional on a cold-start flag."""
         src = inspect.getsource(__import__("market_engine").underdog_job)
-        # Confirm standing path guard allows non-cold-start cycles
-        assert "not is_cold_start" in src, (
-            "Standing path must check is_cold_start (runs when False)"
-        )
+        assert "is_cold_start" not in src
+        assert "if chat_ids:" in src
 
     def test_standing_path_refetches_history(self):
         """Standing path fetches fresh history on each evaluation."""
@@ -564,9 +552,8 @@ class TestReq13CheckpointDoesNotSkipColdStart:
         assert "_fast_resume" not in src, (
             "Fast Resume removed: _fast_resume must not appear in underdog_job"
         )
-        assert "not is_cold_start and chat_ids" in src, (
-            "Standing path must use plain 'not is_cold_start' gate (no fast-resume bypass)"
-        )
+        assert "is_cold_start" not in src
+        assert "if chat_ids:" in src
 
     def test_fast_resume_not_skip_gate_logic(self):
         """Cold-start props NOT permanently skipped — standing path evaluates them on scan 1."""
@@ -693,17 +680,10 @@ class TestReq15NewPropsInitialize:
         assert "_fast_resume" not in src, (
             "Fast Resume removed: _fast_resume must not appear in underdog_job"
         )
-        # is_new_prop branch must still exist and precede the cold-start elif
+        # is_new_prop remains, with no startup-only sibling branch.
         new_prop_idx = src.find("is_new_prop")
-        cold_start_idx = src.find("is_cold_start")
-        # Use the cold-start elif gate (more specific than bare is_cold_start)
-        cold_start_idx = src.find("elif not is_removed and is_cold_start")
         assert new_prop_idx != -1, "is_new_prop must exist in underdog_job"
-        assert cold_start_idx != -1, "cold-start elif gate must exist in underdog_job"
-        assert new_prop_idx < cold_start_idx, (
-            "is_new_prop path must come BEFORE cold-start elif gate — "
-            "new props initialize regardless of startup cycle"
-        )
+        assert "is_cold_start" not in src
 
     def test_new_prop_sent_to_digest_or_alerted(self):
         """New props are either immediately alerted or added to the digest batch."""

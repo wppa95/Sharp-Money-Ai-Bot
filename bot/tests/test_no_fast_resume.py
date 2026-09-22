@@ -34,23 +34,19 @@ def _init_src():
 # 1. Normal startup performs the standard scan
 # ─────────────────────────────────────────────────────────────────────────────
 
-def test_01_cold_start_done_latch_still_present():
-    """_cold_start_done latch must still exist — it governs the single startup path."""
+def test_01_cold_start_framework_is_removed():
+    """Every scan uses the same path; no cold-start latch remains."""
     import market_engine as me
-    assert hasattr(me, "_cold_start_done"), (
-        "_cold_start_done flag must remain — it controls the standard cold-start cycle"
+    assert not hasattr(me, "_cold_start_done"), (
+        "The retired cold-start latch must not remain in the market engine"
     )
 
 
-def test_02_cold_start_path_in_underdog_job():
-    """underdog_job must still contain the cold-start scoring path."""
+def test_02_cold_start_path_is_removed_from_underdog_job():
+    """underdog_job must not contain a separate cold-start scoring path."""
     src = _me_src()
-    assert "is_cold_start" in src, (
-        "Cold-start path must remain in underdog_job (is_cold_start check)"
-    )
-    assert "_cold_start_done" in src, (
-        "_cold_start_done flag must be set in underdog_job after first scan"
-    )
+    assert "is_cold_start" not in src
+    assert "_cold_start_done" not in src
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -89,31 +85,22 @@ def test_06_no_fast_resume_in_init_state_from_db():
     )
 
 
-def test_07_standing_path_uses_plain_cold_start_gate():
-    """Standing path gate must be `not is_cold_start` — no fast-resume OR clause."""
+def test_07_standing_path_has_no_cold_start_gate():
+    """Standing picks use the same path on the first and later scans."""
     src = _me_src()
-    # Old form must be gone
-    assert "(not is_cold_start or _fast_resume)" not in src, (
-        "Old fast-resume OR clause must be removed from standing path gate"
-    )
-    # New plain gate must be present
-    assert "not is_cold_start and chat_ids" in src, (
-        "Standing path must gate on `not is_cold_start and chat_ids` directly"
-    )
+    assert "(not is_cold_start or _fast_resume)" not in src
+    assert "not is_cold_start" not in src
+    assert "if chat_ids:" in src
 
 
-def test_08_lc_qualified_uses_plain_cold_start_gate():
-    """LC is_qualified must use `not is_cold_start` — no fast-resume OR clause."""
+def test_08_lc_qualified_has_no_cold_start_gate():
+    """Line-change qualification is not blocked by startup state."""
     src = _me_src()
     idx = src.find("is_qualified = (")
     assert idx != -1, "is_qualified block not found in underdog_job"
     snippet = src[idx: idx + 600]
-    assert "_fast_resume" not in snippet, (
-        "is_qualified gate must not reference _fast_resume — Fast Resume is removed"
-    )
-    assert "not is_cold_start" in snippet, (
-        "is_qualified gate must check `not is_cold_start` directly"
-    )
+    assert "_fast_resume" not in snippet
+    assert "not is_cold_start" not in snippet
 
 
 # ─────────────────────────────────────────────────────────────────────────────

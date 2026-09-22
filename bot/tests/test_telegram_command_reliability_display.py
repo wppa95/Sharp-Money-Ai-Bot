@@ -671,7 +671,6 @@ async def test_real_underdog_registry_failure_and_recovery_reach_command_output(
     async def run_job():
         with (
             patch.object(market_engine, "_registry", registry),
-            patch.object(market_engine, "_cold_start_done", True),
             patch.object(market_engine, "_ud_full_scan_running", False),
             patch.object(market_engine, "_propline_provider", None),
             patch.object(market_engine, "get_health_monitor", return_value=monitor),

@@ -1,4 +1,4 @@
-"""Regression checks for the controlled zero-prop cold-start experiment."""
+"""Regression checks that the retired cold-start framework stays removed."""
 
 from pathlib import Path
 
@@ -8,25 +8,20 @@ ENGINE_SOURCE = (
 ).read_text()
 
 
-def test_cold_start_rescan_target_is_zero():
-    assert "_COLD_START_RESCAN_TARGET: int = 0" in ENGINE_SOURCE
+def test_cold_start_state_is_removed():
+    assert "_COLD_START_RESCAN_TARGET" not in ENGINE_SOURCE
+    assert "_cold_start_done" not in ENGINE_SOURCE
 
 
-def test_cold_start_scoring_requires_positive_target():
-    assert (
-        "and _COLD_START_RESCAN_TARGET > 0"
-        in ENGINE_SOURCE
-    )
+def test_cold_start_branch_is_removed():
+    assert "is_cold_start" not in ENGINE_SOURCE
 
 
-def test_new_prop_branch_remains_before_cold_start_branch():
-    new_branch = ENGINE_SOURCE.index("if is_new_prop:")
-    cold_branch = ENGINE_SOURCE.index("and _COLD_START_RESCAN_TARGET > 0")
-    assert new_branch < cold_branch
+def test_uniform_scan_has_incremental_snapshot_batch():
+    assert "_incremental_records.append(record)" in ENGINE_SOURCE
 
 
-def test_line_change_scoring_path_is_cold_start_gated():
-    """Cold-start scans must not score existing line changes when target is zero."""
-    line_change = ENGINE_SOURCE.index("and line_changed and prev_line is not None")
-    gate_window = ENGINE_SOURCE[line_change - 120:line_change + 120]
-    assert "not is_cold_start" in gate_window
+def test_line_change_scoring_is_not_startup_gated():
+    line_change = ENGINE_SOURCE.index("line_move_threshold_met")
+    gate_window = ENGINE_SOURCE[line_change:line_change + 500]
+    assert "is_cold_start" not in gate_window

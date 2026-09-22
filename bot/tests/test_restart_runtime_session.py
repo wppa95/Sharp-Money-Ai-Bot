@@ -96,7 +96,6 @@ async def test_runtime_reset_cancels_child_tasks_and_clears_process_state():
         assert not market_engine._ud_scan_state
         assert not market_engine._ud_known_keys
         assert market_engine._prizepicks_sport_cursor == 0
-        assert market_engine._cold_start_done is False
         assert market_engine._fpr_deferred_pending is False
         assert market_engine._fpr_execution_running is False
     finally:

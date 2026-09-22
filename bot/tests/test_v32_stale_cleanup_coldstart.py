@@ -202,50 +202,32 @@ class TestTier1InsufficientDataRejected:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# PART 2d — cold_start is global and temporary
+# PART 2d — cold-start framework removed
 # ─────────────────────────────────────────────────────────────────────────────
 
 class TestColdStartBehavior:
-    """cold_start is module-level and initialization-only; it is NOT a permanent per-prop blocker."""
+    """Startup uses the same monitoring and delivery rules as every cycle."""
 
-    def test_cold_start_done_is_module_level(self):
-        """_cold_start_done must be a module-level bool (not per-prop or per-sport)."""
-        assert hasattr(me, "_cold_start_done")
-        assert isinstance(me._cold_start_done, bool)
+    def test_cold_start_done_is_removed(self):
+        assert not hasattr(me, "_cold_start_done")
 
-    def test_cold_start_blocks_is_qualified(self):
-        """is_qualified must include 'not is_cold_start' so no alerts fire during init."""
+    def test_cold_start_does_not_block_is_qualified(self):
         import inspect, market_engine as _me
         src = inspect.getsource(_me.underdog_job)
-        assert "not is_cold_start" in src
+        assert "is_cold_start" not in src
 
-    def test_cold_start_done_set_after_bulk_save(self):
-        """_cold_start_done = True must be set at end of cold_start cycle."""
+    def test_cold_start_bulk_save_is_removed(self):
         import inspect, market_engine as _me
         src = inspect.getsource(_me.underdog_job)
-        assert "_cold_start_done = True" in src
+        assert "_cold_start_records" not in src
 
-    def test_standing_path_cold_start_gate(self):
-        """Standing path gate: runs only when NOT in cold-start cycle.
-
-        Fast Resume is removed — the guard is plain `not is_cold_start`.
-        Cold-start cycle scores all props without sending; standing begins scan 2+.
-        """
+    def test_standing_path_has_no_cold_start_gate(self):
+        """Standing picks are eligible on every scan."""
         import inspect, market_engine as _me
         src = inspect.getsource(_me.underdog_job)
-        # Fast Resume removed: must NOT use the old fast-resume exception
-        assert "_fast_resume" not in src, (
-            "Fast Resume removed: _fast_resume must NOT appear in underdog_job"
-        )
-        # Standing gate must use plain not is_cold_start (no OR clause)
-        assert "not is_cold_start and chat_ids" in src, (
-            "Standing path guard must be 'not is_cold_start and chat_ids'"
-        )
-        # Verify cold-start correctly blocks the standing path
-        is_cold_start = True
-        assert not (not is_cold_start), "Cold-start must block the standing path"
-        is_cold_start = False
-        assert (not is_cold_start), "Non-cold-start must allow the standing path"
+        assert "_fast_resume" not in src
+        assert "is_cold_start" not in src
+        assert "if chat_ids:" in src
 
 
 # ─────────────────────────────────────────────────────────────────────────────

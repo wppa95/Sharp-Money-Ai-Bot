@@ -19,9 +19,9 @@ from typing import Optional
 
 
 def _format_game_time_et(dt: datetime) -> str:
-    """Convert a naive-UTC datetime to a readable 12-hour ET string.
+    """Convert a naive-UTC datetime to a readable date/time in ET.
 
-    Returns e.g. ``"8:40 PM ET"`` for Telegram display.
+    Returns e.g. ``"Sep 22, 8:40 PM ET"`` for Telegram display.
     Falls back to ``"HH:MM UTC"`` if the zoneinfo conversion fails.
     UTC is kept internally everywhere; this is display-only.
     """
@@ -29,7 +29,7 @@ def _format_game_time_et(dt: datetime) -> str:
         from zoneinfo import ZoneInfo
         dt_et = dt.replace(tzinfo=ZoneInfo("UTC")).astimezone(ZoneInfo("America/New_York"))
         # %-I strips the leading zero on Linux ("8:40 PM ET" not "08:40 PM ET")
-        return dt_et.strftime("%-I:%M %p ET")
+        return dt_et.strftime("%b %-d, %-I:%M %p ET")
     except Exception:
         return dt.strftime("%H:%M UTC")
 
@@ -991,6 +991,7 @@ def _format_simple_prop_alert(
     sport: str,
     stat_type: str,
     line: float,
+    game_time: Optional[datetime],
     decision: Optional[object],
     validation: Optional[object],
 ) -> str:
@@ -1019,6 +1020,11 @@ def _format_simple_prop_alert(
             f"👤 <b>Player:</b> {escape(str(player_name))}",
             f"📊 <b>Stat:</b> {escape(str(stat_type))}",
             f"🎯 <b>Line:</b> <code>{line_text}</code>",
+            (
+                f"🕐 <b>Game starts:</b> {_format_game_time_et(game_time)}"
+                if game_time is not None
+                else "🕐 <b>Game starts:</b> N/A"
+            ),
             "",
             history,
         ]
@@ -1069,6 +1075,7 @@ def format_underdog_change_alert(
         sport=sport,
         stat_type=stat_type,
         line=new_line,
+        game_time=game_time,
         decision=decision,
         validation=validation,
     )
@@ -1158,6 +1165,7 @@ def format_underdog_new_prop_alert(
         sport=sport,
         stat_type=stat_type,
         line=line_value,
+        game_time=game_time,
         decision=decision,
         validation=validation,
     )
