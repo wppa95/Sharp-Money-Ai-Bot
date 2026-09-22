@@ -683,7 +683,7 @@ def _has_strong_underdog_evidence(
     if is_telegram_suppressed_sport(sport):
         return False
     if not history_is_available(validation, decision, intelligence_trace):
-        return True
+        return is_history_optional_sport(sport)
 
     history_values = (
         (validation,)

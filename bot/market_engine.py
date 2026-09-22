@@ -3987,7 +3987,7 @@ def _has_delivery_evidence(
     if is_football_related_sport(sport):
         return False
     if not history_is_available(validation, decision, intelligence_trace):
-        return True
+        return is_history_optional_sport(sport)
 
     history_values = (
         (validation,)

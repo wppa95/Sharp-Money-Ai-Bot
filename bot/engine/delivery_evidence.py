@@ -23,21 +23,21 @@ _NESTED_KEYS = (
     "bet_evidence_json",
 )
 
-_STRICT_HISTORY_SPORTS = frozenset({"MLB", "NFL", "NBA"})
+_STRICT_HISTORY_SPORTS = frozenset({"MLB", "NFL", "NBA", "WNBA"})
 
 
 def is_history_optional_sport(sport: Any) -> bool:
     """Return whether direction alone may qualify delivery for *sport*.
 
-    NFL, NBA, and MLB are the strict green-goblin sports. All other sports
-    may be delivered from a directional decision before a completed
-    player-game history is available. The caller still enforces direction,
-    freshness, timing, and deduplication.
+    NFL, NBA, MLB, and WNBA are strict-history sports. Other sports may be
+    delivered from a directional decision before completed player-game history
+    is available, but any history that is present must still pass qualification.
+    The caller still enforces direction, freshness, timing, and deduplication.
 
     This is deliberately based on the strict set rather than a hand-maintained
     list of aliases. The feed contains additional active sports (for example
-    CFB, WNBA, NHL, FIFA, and KBO), and omitting one from an optional-sport
-    allowlist silently turns it into tracking-only data.
+    CFB, NHL, FIFA, and KBO), and omitting one from an optional-sport allowlist
+    silently turns it into tracking-only data.
     """
     normalized = " ".join(
         str(sport or "").strip().upper().replace("_", " ").replace("-", " ").split()

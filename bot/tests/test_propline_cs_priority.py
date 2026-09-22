@@ -325,6 +325,23 @@ def test_football_remains_blocked_but_other_sports_need_only_direction(sport):
     ) is False
 
 
+@pytest.mark.parametrize("sport", ["MLB", "NBA", "WNBA"])
+def test_primary_basketball_and_baseball_sports_require_history(sport):
+    decision = SimpleNamespace(
+        recommendation="OVER",
+        evidence_source=None,
+    )
+
+    assert market_engine._has_delivery_evidence(
+        sport=sport,
+        decision=decision,
+    ) is False
+    assert _has_strong_underdog_evidence(
+        sport=sport,
+        decision=decision,
+    ) is False
+
+
 def test_telegram_delivery_requires_strong_over_in_every_window():
     validation = SimpleNamespace(
         has_supporting_data=True,
