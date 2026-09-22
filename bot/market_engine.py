@@ -6907,28 +6907,28 @@ async def underdog_job(context) -> None:
                         type(_sport_count_exc).__name__,
                     )
             _delivery_queue[:] = _limit_sport_delivery_batch(
-                    _delivery_queue,
-                    _recent_sport_counts,
-                    limit=max(
-                        0,
-                        int(getattr(config, "SPORT_ALERT_LIMIT", 2)),
-                    ),
-                )
-                logger.debug(
-                    "underdog_job: per-sport batch limits applied — limit=%d "
-                    "window=%ss recent=%s remaining=%s",
+                _delivery_queue,
+                _recent_sport_counts,
+                limit=max(
+                    0,
                     int(getattr(config, "SPORT_ALERT_LIMIT", 2)),
-                    int(getattr(config, "SPORT_ALERT_WINDOW_SECONDS", 600)),
-                    _recent_sport_counts,
-                    {
-                        sport: sum(
-                            1
-                            for candidate in _delivery_queue
-                            if str(candidate.get("sport") or "").upper() == sport
-                        )
-                        for sport in sorted(_delivery_sports)
-                    },
-                )
+                ),
+            )
+            logger.debug(
+                "underdog_job: per-sport batch limits applied — limit=%d "
+                "window=%ss recent=%s remaining=%s",
+                int(getattr(config, "SPORT_ALERT_LIMIT", 2)),
+                int(getattr(config, "SPORT_ALERT_WINDOW_SECONDS", 600)),
+                _recent_sport_counts,
+                {
+                    sport: sum(
+                        1
+                        for candidate in _delivery_queue
+                        if str(candidate.get("sport") or "").upper() == sport
+                    )
+                    for sport in sorted(_delivery_sports)
+                },
+            )
             _n_dq_deferred   = 0
             _dq_deferred_log: list[str] = []
             for _dq in _delivery_queue:
