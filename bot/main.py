@@ -1484,6 +1484,7 @@ async def _grade_opportunities_job(context) -> None:
         # ``fetch_resolved_results`` only returns explicitly settled provider
         # rows, so this does not infer an outcome from player/stat history.
         _propline_history = None
+        _propline_void_rows: list = []
         try:
             from providers.player_history import (
                 get_player_history_provider as _get_player_history_provider,
@@ -1591,6 +1592,18 @@ async def _grade_opportunities_job(context) -> None:
                         and _result_task.exception() is None
                         for _row in (_result_task.result() or [])
                     ]
+                    _propline_void_rows = [
+                        _row
+                        for _row in _propline_rows
+                        if str(getattr(_row, "source", "") or "")
+                        == "propline_event_results_void"
+                    ]
+                    _propline_rows = [
+                        _row
+                        for _row in _propline_rows
+                        if str(getattr(_row, "source", "") or "")
+                        != "propline_event_results_void"
+                    ]
                     _propline_writer = getattr(
                         db, "upsert_player_results_bulk", None
                     )
@@ -1637,6 +1650,16 @@ async def _grade_opportunities_job(context) -> None:
                     "using compatibility lookups: %s",
                     _bulk_settlement_exc,
                 )
+
+        _void_settlements = {
+            (
+                str(getattr(row, "player_name", "") or "").lower().strip(),
+                str(getattr(row, "sport", "") or "").upper().strip(),
+                str(getattr(row, "stat_type", "") or "").lower().strip(),
+                str(getattr(row, "game_id", "") or "").strip(),
+            ): row
+            for row in _propline_void_rows
+        }
 
         graded   = 0
         no_data  = 0
@@ -1724,6 +1747,23 @@ async def _grade_opportunities_job(context) -> None:
                     if result_row is not None:
                         _matched_game_date = _candidate_game_date
                         break
+            _void_row = _void_settlements.get(
+                (
+                    str(getattr(opp, "player_name", "") or "").lower().strip(),
+                    str(getattr(opp, "sport", "") or "").upper().strip(),
+                    str(getattr(opp, "stat_type", "") or "").lower().strip(),
+                    str(getattr(opp, "game_id", "") or "").strip(),
+                )
+            )
+            _is_void_settlement = (
+                result_row is None
+                and _void_row is not None
+                and (
+                    not game_date
+                    or str(getattr(_void_row, "game_date", "") or "")
+                    in _game_dates
+                )
+            )
             # Some PropLine projections have a stable event identity but no
             # game timestamp. Once the official result has been persisted,
             # reconcile by that identity instead of leaving the row pending
@@ -1737,7 +1777,7 @@ async def _grade_opportunities_job(context) -> None:
                     None,
                     **_result_lookup_kwargs,
                 )
-            if result_row is None:
+            if result_row is None and not _is_void_settlement:
                 no_data += 1
                 no_data_by_sport[str(getattr(opp, "sport", "UNKNOWN")).upper()] += 1
                 if _stored_history_for(opp):
@@ -1752,6 +1792,24 @@ async def _grade_opportunities_job(context) -> None:
                     opp.player_name, opp.sport, opp.stat_type,
                     game_date or "event identity",
                 )
+                continue
+            if _is_void_settlement:
+                actual = 0.0
+                outcome = "VOID"
+                error_type = None
+                if getattr(opp, "recommendation", None) is None:
+                    _tracked_grades.append((opp.id, outcome, actual))
+                else:
+                    _opportunity_grades.append(
+                        {
+                            "id": opp.id,
+                            "result": outcome,
+                            "actual_value": actual,
+                            "error_type": error_type,
+                            "void_reason": "PropLine VOID",
+                        }
+                    )
+                graded += 1
                 continue
             if _matched_game_date != game_date:
                 date_shifted += 1
@@ -1835,11 +1893,14 @@ async def _grade_opportunities_job(context) -> None:
             await _bulk_opportunities(_opportunity_grades)
         elif _opportunity_grades:
             for _grade in _opportunity_grades:
+                _grade_kwargs = {"error_type": _grade.get("error_type")}
+                if _grade.get("void_reason") is not None:
+                    _grade_kwargs["void_reason"] = _grade["void_reason"]
                 await db.grade_opportunity(
                     _grade["id"],
                     _grade["result"],
                     _grade["actual_value"],
-                    error_type=_grade.get("error_type"),
+                    **_grade_kwargs,
                 )
 
         if graded or no_data:

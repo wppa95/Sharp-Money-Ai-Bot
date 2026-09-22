@@ -36,7 +36,12 @@ PROPLINE_COVERAGE_NOT_NEEDED = "not_needed"
 
 
 def propline_result_rows(results) -> list:
-    """Convert only explicit, non-redacted event settlements to game rows."""
+    """Convert explicit event settlements to game rows.
+
+    VOID/CANCELLED settlements have no numeric player stat. Keep those rows as
+    a private settlement marker so the opportunity grader can close the
+    matching prop, but never treat them as numeric player-history evidence.
+    """
     from providers.player_stats import RawGameResult
 
     rows = []
@@ -53,19 +58,34 @@ def propline_result_rows(results) -> list:
             or getattr(evidence, "resolved_at", None)
             or getattr(evidence, "observed_at", None)
         )
+        resolution_state = str(
+            getattr(evidence, "resolution_state", "") or ""
+        ).upper()
+        is_void = resolution_state in {
+            "VOID",
+            "CANCELLED",
+            "INJURY_VOID",
+            "GAME_INTERRUPTED",
+        }
         if (
             not event_id
             or not player_name
             or not sport
             or not stat_type
-            or actual_value is None
             or resolved_at is None
+            or (actual_value is None and not is_void)
         ):
             continue
-        try:
-            value = float(actual_value)
-        except (TypeError, ValueError):
-            continue
+        if is_void and actual_value is None:
+            # RawGameResult is the existing transport type and requires a
+            # numeric value. This marker is consumed by the settlement grader
+            # and is never written to player_game_results.
+            value = 0.0
+        else:
+            try:
+                value = float(actual_value)
+            except (TypeError, ValueError):
+                continue
         rows.append(
             RawGameResult(
                 player_name=player_name,
@@ -74,7 +94,11 @@ def propline_result_rows(results) -> list:
                 game_date=resolved_at.date().isoformat(),
                 actual_value=value,
                 opponent=None,
-                source="propline_event_results",
+                source=(
+                    "propline_event_results_void"
+                    if is_void
+                    else "propline_event_results"
+                ),
                 game_id=event_id,
             )
         )

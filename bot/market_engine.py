@@ -4836,12 +4836,12 @@ async def underdog_job(context) -> None:
     if _health:
         _health.record_job_started("underdog_job")
 
-    # Claim the full-scan slot before state restoration. A queued trigger waits
-    # for the prior scan to finish instead of taking a partial fast path.
+    # Claim the live-feed scan slot before state restoration. The full-pool
+    # rotation has its own bounded cursor and SQLite writer gate; it must not
+    # hold the live monitoring cadence behind a potentially long rotation.
     global _ud_full_scan_running
     while (
         _ud_full_scan_running
-        or _fpr_execution_running
         or _player_history_persistence_running
     ):
         logger.debug(
@@ -8561,6 +8561,9 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
         _health.record_job_started("full_pool_rescan_job")
 
     global _fpr_execution_running, _ud_full_scan_running
+    # Do not start a new rotation in the middle of a live-feed scan. Once FPR
+    # owns its rotation slot, however, the live feed may proceed independently;
+    # otherwise a long rotation would starve cadence-critical monitoring.
     while (
         _fpr_execution_running
         or _ud_full_scan_running

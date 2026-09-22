@@ -320,6 +320,64 @@ async def test_grader_uses_explicit_propline_settlement_before_writing_grade():
 
 
 @pytest.mark.asyncio
+async def test_grader_closes_explicit_propline_void_without_numeric_history():
+    row = _opp(32, "Void Tennis Player", "Aces")
+    row.sport = "TENNIS"
+    row.game_time = datetime(2026, 9, 22, 5, 0)
+    row.game_id = "tennis-event-32"
+    row.provider = "PrizePicks"
+    void_result = SimpleNamespace(
+        player_name="Void Tennis Player",
+        sport="TENNIS",
+        stat_type="aces",
+        game_date="2026-09-22",
+        actual_value=0.0,
+        source="propline_event_results_void",
+        game_id="tennis-event-32",
+    )
+
+    db = MagicMock()
+    db.get_pending_opportunities = AsyncMock(return_value=[row])
+    db.get_player_results_bulk = AsyncMock(return_value={})
+    db.upsert_player_results_bulk = AsyncMock()
+    db.get_game_results_for_grading_bulk = AsyncMock(return_value={})
+    db.grade_opportunities_bulk = AsyncMock()
+    health = _Health()
+    stats_provider = MagicMock()
+    stats_provider.fetch_results = AsyncMock(return_value=[])
+    propline_provider = SimpleNamespace(
+        fetch_resolved_event_results=AsyncMock(return_value=[void_result]),
+        fetch_resolved_results=AsyncMock(return_value=[]),
+    )
+
+    with (
+        patch.object(main, "get_health_tracker", return_value=health),
+        patch(
+            "providers.player_stats.PlayerStatsProvider",
+            return_value=stats_provider,
+        ),
+        patch(
+            "providers.player_history.get_player_history_provider",
+            return_value=propline_provider,
+        ),
+    ):
+        await main._grade_opportunities_job(_context(db))
+
+    db.upsert_player_results_bulk.assert_not_awaited()
+    db.grade_opportunities_bulk.assert_awaited_once_with(
+        [
+            {
+                "id": 32,
+                "result": "VOID",
+                "actual_value": 0.0,
+                "error_type": None,
+                "void_reason": "PropLine VOID",
+            }
+        ]
+    )
+
+
+@pytest.mark.asyncio
 async def test_grader_wraps_cursor_and_records_no_data_completion():
     row = _opp(7, "Wrap Player", "Points")
     db = MagicMock()

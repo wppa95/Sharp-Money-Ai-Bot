@@ -59,6 +59,30 @@ def test_targets_use_discovered_official_aliases_only():
     } == {"event_results", "event_stats", "event_markets"}
 
 
+def test_propline_result_rows_preserves_explicit_void_as_private_marker():
+    evidence = PropLineResultEvidence(
+        observed_at=datetime(2026, 9, 22, 12, 0),
+        resolution_state="VOID",
+        source_resolution="void",
+        actual_value=None,
+        resolved_at=None,
+        provider="PropLine",
+        player_name="Void Tennis Player",
+        sport="TENNIS",
+        stat_type="aces",
+        event_id="tennis-event-32",
+        bookmaker_key="prizepicks",
+        commence_time=datetime(2026, 9, 22, 5, 0),
+    )
+
+    rows = propline_result_rows([evidence])
+
+    assert len(rows) == 1
+    assert rows[0].source == "propline_event_results_void"
+    assert rows[0].actual_value == 0.0
+    assert rows[0].game_date == "2026-09-22"
+
+
 def test_discovery_audit_reports_new_sport_with_provider_key_and_samples():
     audit = audit_propline_discovery(
         [

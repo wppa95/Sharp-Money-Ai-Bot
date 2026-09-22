@@ -995,7 +995,12 @@ async def propline_read_only_rotation_job(context) -> None:
         async def persist(target, result):
             if target.family != "event_results":
                 return False
-            rows = propline_result_rows(getattr(result, "results", ()))
+            rows = [
+                row
+                for row in propline_result_rows(getattr(result, "results", ()))
+                if str(getattr(row, "source", "") or "")
+                != "propline_event_results_void"
+            ]
             if not rows:
                 return False
             writer = getattr(db, "upsert_player_results_bulk", None)
