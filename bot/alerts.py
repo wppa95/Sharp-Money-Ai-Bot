@@ -39,6 +39,7 @@ _directional_evidence_gate = _canonical_tier_delivery_gate
 from engine.score_validation import clamp_score
 from engine.delivery_evidence import (
     history_supports_delivery,
+    history_is_available,
     is_history_optional_sport,
     serialized_evidence_supports_delivery,
 )
@@ -679,7 +680,55 @@ def _has_strong_underdog_evidence(
     ).upper()
     if decision_direction not in {"OVER", "UNDER"}:
         return False
-    return not is_telegram_suppressed_sport(sport)
+    if is_telegram_suppressed_sport(sport):
+        return False
+    if not history_is_available(validation, decision, intelligence_trace):
+        return True
+
+    history_values = (
+        (validation,)
+        if validation is not None
+        else (decision, intelligence_trace)
+    )
+    if not history_supports_delivery(*history_values):
+        return False
+    if is_history_optional_sport(sport):
+        return True
+
+    if bool(getattr(validation, "has_supporting_data", False)):
+        source = getattr(validation, "data_source", None)
+        if not isinstance(source, str):
+            return False
+        source_lower = source.lower().strip()
+        n_real = int(getattr(validation, "n_real_games", 0) or 0)
+        n_supplemental = int(
+            getattr(validation, "n_supplemental_games", 0) or 0
+        )
+        if source_lower in {"real", "primary"} and n_real >= 5:
+            return True
+        if source_lower == "propline" and n_supplemental >= 5:
+            return True
+        if source_lower in {"real+propline", "primary+propline"}:
+            return n_real + n_supplemental >= 5
+    if history_supports_delivery(decision, intelligence_trace):
+        return True
+    for obj in (decision, intelligence_trace):
+        if isinstance(obj, dict):
+            if serialized_evidence_supports_delivery(
+                obj,
+                allow_historical_average=False,
+            ):
+                return True
+            continue
+        if obj is not None:
+            for attr in ("evidence", "bet_evidence", "intelligence_trace"):
+                value = getattr(obj, attr, None)
+                if serialized_evidence_supports_delivery(
+                    value,
+                    allow_historical_average=False,
+                ):
+                    return True
+    return False
 
 
 # ── Low-level Telegram senders ────────────────────────────────────────────────

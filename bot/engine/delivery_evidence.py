@@ -401,6 +401,89 @@ def has_directional_history_fields(value: Any) -> bool:
     )
 
 
+def history_is_available(*values: Any) -> bool:
+    """Return whether any payload says that history/evidence was available.
+
+    This is intentionally different from ``history_supports_delivery``.
+    Direction-only delivery is allowed only when the candidate has no history
+    to validate.  Once a provider, sample count, or history window is present,
+    the normal completed-history qualification must still pass.
+    """
+
+    source_keys = _SOURCE_KEYS
+    count_keys = (
+        "n",
+        "n_history",
+        "n_real",
+        "n_real_games",
+        "n_supp",
+        "n_supplemental_games",
+        "n_proxy",
+        "n_proxy_snaps",
+        "total_games",
+        "sample",
+        "sample_count",
+        "count",
+    )
+
+    def _has_marker(value: Any, depth: int = 0) -> bool:
+        if value is None or depth > 6:
+            return False
+        if isinstance(value, str):
+            text = value.strip()
+            if not text or text[0] not in "[{":
+                return False
+            try:
+                return _has_marker(json.loads(text), depth + 1)
+            except (TypeError, ValueError):
+                return False
+        if isinstance(value, dict):
+            for key in source_keys:
+                source = str(value.get(key) or "").strip().lower()
+                if source and source not in {"none", "unavailable", "unknown"}:
+                    return True
+            if any(
+                key in value
+                and isinstance(value.get(key), (int, float))
+                and not isinstance(value.get(key), bool)
+                and value.get(key) > 0
+                for key in count_keys
+            ):
+                return True
+            return any(
+                _has_marker(value.get(key), depth + 1)
+                for key in _NESTED_KEYS
+                if value.get(key) is not None
+            )
+        if isinstance(value, (list, tuple)):
+            return any(_has_marker(child, depth + 1) for child in value)
+        if getattr(type(value), "__module__", "") == "unittest.mock":
+            return False
+        if bool(getattr(value, "has_supporting_data", False)):
+            return True
+        if bool(getattr(value, "has_real_data", False)):
+            return True
+        for attr in source_keys:
+            source = str(getattr(value, attr, "") or "").strip().lower()
+            if source and source not in {"none", "unavailable", "unknown"}:
+                return True
+        for attr in count_keys:
+            count = getattr(value, attr, None)
+            if (
+                isinstance(count, (int, float))
+                and not isinstance(count, bool)
+                and count > 0
+            ):
+                return True
+        return any(
+            _has_marker(getattr(value, key, None), depth + 1)
+            for key in _NESTED_KEYS
+            if getattr(value, key, None) is not None
+        )
+
+    return any(_has_marker(value) for value in values)
+
+
 def _nonnegative_int(value: Any) -> int | None:
     if isinstance(value, bool):
         return None

@@ -141,7 +141,7 @@ def test_serialized_validation_json_keeps_propline_provenance_and_count():
     "source",
     ["historical_average", "historical-average", "historical line average fallback"],
 )
-def test_directional_nonfootball_pick_does_not_require_history_windows(source):
+def test_historical_average_without_windows_is_not_telegram_deliverable(source):
     validation = SimpleNamespace(
         has_supporting_data=True,
         data_source=source,
@@ -159,7 +159,7 @@ def test_directional_nonfootball_pick_does_not_require_history_windows(source):
         sport="SOCCER",
         validation=validation,
         decision=decision,
-    ) is True
+    ) is False
     assert serialized_evidence_supports_delivery(
         {"evidence": {"data_source": source}}
     ) is True
@@ -219,7 +219,7 @@ def test_primary_history_without_propline_is_telegram_deliverable():
     ) is False
 
 
-def test_direction_is_delivery_evidence_without_history():
+def test_historical_average_evidence_source_is_not_delivery_evidence():
     decision = {
         "recommendation": "OVER",
         "evidence_source": "historical_average",
@@ -238,10 +238,10 @@ def test_direction_is_delivery_evidence_without_history():
         sport="SOCCER",
         validation=validation,
         decision=decision,
-    ) is True
+    ) is False
 
 
-def test_directional_tennis_pick_does_not_require_history_windows():
+def test_historical_average_evidence_source_without_windows_is_not_deliverable():
     validation = SimpleNamespace(
         has_supporting_data=True,
         data_source="proxy",
@@ -258,12 +258,12 @@ def test_directional_tennis_pick_does_not_require_history_windows():
         sport="TENNIS",
         validation=validation,
         decision=decision,
-    ) is True
+    ) is False
     assert _has_strong_underdog_evidence(
         sport="TENNIS",
         validation=validation,
         decision=decision,
-    ) is True
+    ) is False
 
 
 @pytest.mark.parametrize(
@@ -313,17 +313,16 @@ def test_football_remains_blocked_but_other_sports_need_only_direction(sport):
         avg_vs_line_pct=0.12,
     )
 
-    expected = sport != "NFL"
     assert market_engine._has_delivery_evidence(
         sport=sport,
         validation=validation,
         decision=decision,
-    ) is expected
+    ) is False
     assert _has_strong_underdog_evidence(
         sport=sport,
         validation=validation,
         decision=decision,
-    ) is expected
+    ) is False
 
 
 def test_telegram_delivery_requires_strong_over_in_every_window():

@@ -3,8 +3,8 @@ name: History-optional delivery policy
 description: Sport-specific player-history requirements for directional Telegram delivery.
 ---
 
-Every user-facing pick requires explicit OVER/UNDER direction plus at least five settled PropLine history results; primary-provider history, averages, and line movement are monitoring-only.
+User-facing picks require explicit OVER/UNDER direction. If qualifying history is available, at least five settled results are still required; when no history is available, non-football direction may proceed. Football-family sports remain blocked.
 
-**Why:** The user wants the best picks for non-football sports only, with PropLine responsible for both direction and historical evidence; guessing from another provider is not acceptable.
+**Why:** Directional live opportunities should not disappear solely because a provider has not returned history yet, but available history must never be silently bypassed. Football-family Telegram suppression is unchanged.
 
-**How to apply:** Apply the provenance/sample gate at every Telegram delivery and strongest-pick selection point. Football/gridiron sports remain suppressed separately; monitoring and persistence may continue.
+**How to apply:** Enforce direction and football suppression first. If the candidate carries a history/provider/sample marker, apply the existing completed-history provenance and sample gate; otherwise allow the direction through downstream freshness, timing, tracking, and deduplication checks.

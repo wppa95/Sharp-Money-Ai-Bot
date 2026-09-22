@@ -60,6 +60,7 @@ from engine.strongest_pick import (
 from engine.delivery_evidence import (
     has_strict_directional_history,
     history_supports_delivery,
+    history_is_available,
     is_history_optional_sport,
     is_historical_average_source,
     serialized_evidence_supports_delivery,
@@ -3983,7 +3984,54 @@ def _has_delivery_evidence(
     ).upper()
     if direction not in {"OVER", "UNDER"}:
         return False
-    return not is_football_related_sport(sport)
+    if is_football_related_sport(sport):
+        return False
+    if not history_is_available(validation, decision, intelligence_trace):
+        return True
+
+    history_values = (
+        (validation,)
+        if validation is not None
+        else (decision, intelligence_trace)
+    )
+    if not history_supports_delivery(*history_values):
+        return False
+    if is_history_optional_sport(sport):
+        return True
+
+    if bool(getattr(validation, "has_supporting_data", False)):
+        source = str(getattr(validation, "data_source", "") or "").lower().strip()
+        n_real = int(getattr(validation, "n_real_games", 0) or 0)
+        n_supplemental = int(
+            getattr(validation, "n_supplemental_games", 0) or 0
+        )
+        if (
+            (source in {"real", "primary"} and n_real >= 5)
+            or (source == "propline" and n_supplemental >= 5)
+            or (
+                source in {"real+propline", "primary+propline"}
+                and n_real + n_supplemental >= 5
+            )
+        ):
+            return True
+
+    if history_supports_delivery(decision, intelligence_trace):
+        return True
+
+    for obj in (decision, intelligence_trace):
+        if isinstance(obj, dict) and serialized_evidence_supports_delivery(
+            obj,
+            allow_historical_average=False,
+        ):
+            return True
+        if obj is not None and not isinstance(obj, dict):
+            for attr in ("evidence", "bet_evidence", "intelligence_trace"):
+                if serialized_evidence_supports_delivery(
+                    getattr(obj, attr, None),
+                    allow_historical_average=False,
+                ):
+                    return True
+    return False
 
 
 def _canonical_tier_delivery_gate(
@@ -5674,12 +5722,19 @@ async def underdog_job(context) -> None:
                     and decision.recommendation in ("OVER", "UNDER")
                 )
                 _np_direction = decision.recommendation if decision else ""
+                if not _np_bet_ready:
+                    _new_prop_skip_reasons["no_direction"] = (
+                        _new_prop_skip_reasons.get("no_direction", 0) + 1
+                    )
                 # Game-live hard gate — block actionable alerts when game has already started (#5).
                 # Uses _is_game_live_or_past which checks status field + game_time elapsed.
                 # Internal market intelligence continues regardless.
                 if _np_bet_ready:
                     if _is_game_live_or_past(snap, now):
                         _np_bet_ready = False
+                        _new_prop_skip_reasons["game_live_or_past"] = (
+                            _new_prop_skip_reasons.get("game_live_or_past", 0) + 1
+                        )
                         logger.debug(
                             "UD live_gate [new]: %s | %s | game started/live, alert blocked",
                             player, stat_type,
@@ -5703,6 +5758,9 @@ async def underdog_job(context) -> None:
                         direction=str(_np_direction or ""),
                     ):
                         _np_bet_ready = False
+                        _new_prop_skip_reasons["dedup"] = (
+                            _new_prop_skip_reasons.get("dedup", 0) + 1
+                        )
                         logger.debug(
                             "UD dedup_gate [new]: %s | %s | already alerted recently at line=%.1f",
                             player, stat_type, line_val,
@@ -5710,6 +5768,9 @@ async def underdog_job(context) -> None:
 
                 # Pre-delivery freshness guard — candidate line must match latest scan line.
                 if _np_bet_ready and not _ud_line_fresh(line_val, player, stat_type, _current_scan_line_map):
+                    _new_prop_skip_reasons["stale_line"] = (
+                        _new_prop_skip_reasons.get("stale_line", 0) + 1
+                    )
                     logger.warning(
                         "UD freshness_guard [np]: %s | %s | alert_line=%.1f"
                         " scan line diverged — BLOCKED",
@@ -5762,6 +5823,19 @@ async def underdog_job(context) -> None:
                         ),
                     )
                     if not _np_gate_ok:
+                        if is_football_related_sport(snap.sport or ""):
+                            _skip_reason = "football_suppressed"
+                        elif history_is_available(
+                            validation,
+                            decision,
+                            _np_intel_trace,
+                        ):
+                            _skip_reason = "available_history_not_qualifying"
+                        else:
+                            _skip_reason = "unexpected_direction_gate"
+                        _new_prop_skip_reasons[_skip_reason] = (
+                            _new_prop_skip_reasons.get(_skip_reason, 0) + 1
+                        )
                         logger.debug(
                             "UD direction/evidence gate [new]: %s | %s | sport=%s dir=%s — blocked",
                             player, stat_type, snap.sport, _np_direction,
@@ -5799,6 +5873,10 @@ async def underdog_job(context) -> None:
                         })
                         _dq_collected = True
                         # ud_result stays DeliveryResult(sent=False) — delivery happens below.
+                elif _np_bet_ready and not chat_ids:
+                    _new_prop_skip_reasons["no_chat_ids"] = (
+                        _new_prop_skip_reasons.get("no_chat_ids", 0) + 1
+                    )
                 # ── Neutral evaluation metrics (new-prop) ─────────────────────────
                 if score is not None:
                     _scored_props.append({
@@ -7355,6 +7433,11 @@ async def underdog_job(context) -> None:
             _cycle_budget_exhausted,
             time.monotonic() - _cycle_timing.started_mono,
         )
+        if _new_prop_skip_reasons:
+            logger.info(
+                "underdog_job: new-prop delivery skips — %s",
+                dict(sorted(_new_prop_skip_reasons.items())),
+            )
         # ── Debug: scored prop detail — logged every cycle ────────────────────────
         _dbg_lines: list[str] = [
             (
