@@ -3,8 +3,8 @@ name: History-optional delivery policy
 description: Sport-specific player-history requirements for directional Telegram delivery.
 ---
 
-User-facing picks require explicit OVER/UNDER direction. If qualifying history is available, at least five settled results are still required; when no history is available, non-football direction may proceed. Football-family sports remain blocked.
+User-facing picks require explicit OVER/UNDER direction. MLB, NBA, and WNBA always require qualifying history; other non-football sports may proceed only when no history is available, and any available history still needs five settled results. Football-family sports remain blocked.
 
-**Why:** Directional live opportunities should not disappear solely because a provider has not returned history yet, but available history must never be silently bypassed. Football-family Telegram suppression is unchanged.
+**Why:** Primary baseball/basketball markets are expected to have history, while sparse or newly supported sports should not disappear solely because a provider has not returned history yet. Available history must never be silently bypassed.
 
-**How to apply:** Enforce direction and football suppression first. If the candidate carries a history/provider/sample marker, apply the existing completed-history provenance and sample gate; otherwise allow the direction through downstream freshness, timing, tracking, and deduplication checks.
+**How to apply:** Enforce direction and football suppression first. For MLB/NBA/WNBA, require history even when absent. For other non-football sports, apply the existing completed-history provenance/sample gate when a marker exists; otherwise allow direction through downstream freshness, timing, tracking, and deduplication checks.
