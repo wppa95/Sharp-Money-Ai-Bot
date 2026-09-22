@@ -6848,8 +6848,13 @@ async def underdog_job(context) -> None:
                 # six-window filter here; five-plus real samples are valid.
                 require_strong=False,
             )
-            _apply_delivery_diversification(_delivery_queue)
             _delivery_queue[:] = _select_strong_directional_picks(_delivery_queue)
+            # Keep the strongest eligible directional pick from every sport in
+            # the delivery competition.  This prevents a high-volume sport
+            # from filling the rate-limit window before other sports get a
+            # representative best pick.
+            _delivery_queue[:] = _select_best_per_sport(_delivery_queue)
+            _apply_delivery_diversification(_delivery_queue)
             _strict_sport_candidates = {
                 str(candidate.get("sport") or "").strip().upper()
                 for candidate in _delivery_queue
@@ -9232,6 +9237,7 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
             require_strong=False,
         )
         _fpr_selected = _select_strong_directional_picks(_fpr_selected)
+        _fpr_selected = _select_best_per_sport(_fpr_selected)
         _fpr_selected_ids = {id(candidate) for candidate in _fpr_selected}
         for _fpr_candidate in _fpr_delivery_candidates:
             if id(_fpr_candidate) not in _fpr_selected_ids:
