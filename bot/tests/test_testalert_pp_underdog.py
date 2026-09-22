@@ -245,12 +245,12 @@ class TestDeliverPp:
 
     @pytest.mark.asyncio
     async def test_deliver_pp_without_evidence_is_filtered(self):
-        """A direct PP send cannot bypass the evidence requirement."""
+        """A directional non-football PP pick does not require history evidence."""
         delivery = _make_delivery()
         opp      = _make_opp()
         result   = await delivery.deliver_pp(opp, score=None)
-        assert result.filtered is True
-        assert result.sent is False
+        assert result.filtered is False
+        assert result.sent is True
 
     @pytest.mark.asyncio
     async def test_recipients_failed_reflected(self):

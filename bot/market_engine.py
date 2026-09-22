@@ -75,6 +75,7 @@ from engine.evidence_memory import (
 )
 from providers import FailureType, get_health_monitor
 from engine.delivery_gates import directional_evidence_gate as _directional_evidence_gate
+from engine.sport_policy import is_football_related_sport
 from engine.player_props_pipeline import (
     canonicalize_player_props,
     persist_canonical_player_props,
@@ -3963,10 +3964,13 @@ def _has_delivery_evidence(
     decision: object = None,
     intelligence_trace: object = None,
 ) -> bool:
-    """Return whether a directional candidate has sufficient evidence to send.
+    """Return whether a directional candidate may enter Telegram delivery.
 
-    Esports, tennis, and soccer may qualify on direction alone. Every other
-    sport requires qualifying completed-game history or supplemental history.
+    The active product rule is direction-first: every non-football sport may
+    enter the delivery queue with a valid OVER/UNDER recommendation. Football
+    family suppression is enforced here and again by ``AlertDelivery``. Other
+    safety checks (freshness, timing, tracking, deduplication, and transport)
+    remain downstream.
     """
     direction = str(
         getattr(decision, "recommendation", "")
@@ -3979,49 +3983,7 @@ def _has_delivery_evidence(
     ).upper()
     if direction not in {"OVER", "UNDER"}:
         return False
-    history_values = (
-        (validation,)
-        if validation is not None
-        else (decision, intelligence_trace)
-    )
-    if not history_supports_delivery(*history_values):
-        return False
-    if is_history_optional_sport(sport):
-        return True
-
-    if bool(getattr(validation, "has_supporting_data", False)):
-        source = str(getattr(validation, "data_source", "") or "").lower().strip()
-        n_real = int(getattr(validation, "n_real_games", 0) or 0)
-        n_supplemental = int(
-            getattr(validation, "n_supplemental_games", 0) or 0
-        )
-        if (
-            (source in {"real", "primary"} and n_real >= 5)
-            or (source == "propline" and n_supplemental >= 5)
-            or (
-                source in {"real+propline", "primary+propline"}
-                and n_real + n_supplemental >= 5
-            )
-        ):
-            return True
-
-    if history_supports_delivery(decision, intelligence_trace):
-        return True
-
-    for obj in (decision, intelligence_trace):
-        if isinstance(obj, dict) and serialized_evidence_supports_delivery(
-            obj,
-            allow_historical_average=False,
-        ):
-            return True
-        if obj is not None and not isinstance(obj, dict):
-            for attr in ("evidence", "bet_evidence", "intelligence_trace"):
-                if serialized_evidence_supports_delivery(
-                    getattr(obj, attr, None),
-                    allow_historical_average=False,
-                ):
-                    return True
-    return False
+    return not is_football_related_sport(sport)
 
 
 def _canonical_tier_delivery_gate(

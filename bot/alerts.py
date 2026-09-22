@@ -664,9 +664,12 @@ def _has_strong_underdog_evidence(
     intelligence_trace: object = None,
     sport: str = "",
 ) -> bool:
-    """Apply the terminal history/direction rule without importing market_engine."""
-    # Polling snapshots are monitoring evidence, not completed player games.
-    # Only real game-result evidence can qualify a Telegram PLAY.
+    """Apply the terminal direction/sport rule without importing market_engine.
+
+    History remains useful context in the rendered alert, but it is not a
+    prerequisite for delivery under the active direction-first policy.
+    Football-family sports are blocked separately by the Telegram boundary.
+    """
     decision_direction = str(
         (
             decision.get("recommendation") or decision.get("rec") or ""
@@ -676,52 +679,7 @@ def _has_strong_underdog_evidence(
     ).upper()
     if decision_direction not in {"OVER", "UNDER"}:
         return False
-    history_values = (
-        (validation,)
-        if validation is not None
-        else (decision, intelligence_trace)
-    )
-    if not history_supports_delivery(*history_values):
-        return False
-    if is_history_optional_sport(sport):
-        return True
-
-    if bool(getattr(validation, "has_supporting_data", False)):
-        source = getattr(validation, "data_source", None)
-        # A supporting-data flag without provenance is not enough for a
-        # production delivery.  Monitoring snapshots remain non-actionable.
-        if not isinstance(source, str):
-            return False
-        source_lower = source.lower().strip()
-        n_real = int(getattr(validation, "n_real_games", 0) or 0)
-        n_supplemental = int(
-            getattr(validation, "n_supplemental_games", 0) or 0
-        )
-        if source_lower in {"real", "primary"} and n_real >= 5:
-            return True
-        if source_lower == "propline" and n_supplemental >= 5:
-            return True
-        if source_lower in {"real+propline", "primary+propline"}:
-            return n_real + n_supplemental >= 5
-    if history_supports_delivery(decision, intelligence_trace):
-        return True
-    for obj in (decision, intelligence_trace):
-        if isinstance(obj, dict):
-            if serialized_evidence_supports_delivery(
-                obj,
-                allow_historical_average=False,
-            ):
-                return True
-            continue
-        if obj is not None:
-            for attr in ("evidence", "bet_evidence", "intelligence_trace"):
-                value = getattr(obj, attr, None)
-                if serialized_evidence_supports_delivery(
-                    value,
-                    allow_historical_average=False,
-                ):
-                    return True
-    return False
+    return not is_telegram_suppressed_sport(sport)
 
 
 # ── Low-level Telegram senders ────────────────────────────────────────────────
@@ -1625,7 +1583,9 @@ class AlertDelivery:
         # flood protection, and delivery failures remain independent
         # safety/integrity protections.
         _pp_direction = str(getattr(opp, "best_side", "") or "").strip().upper()
-        if not _directional_evidence_gate(_pp_direction, evidence_available):
+        # PrizePicks uses the same direction-first policy as Underdog. The
+        # sport boundary above still blocks football-family markets.
+        if not _directional_evidence_gate(_pp_direction, True):
             return DeliveryResult(
                 sent=False,
                 filtered=True,
