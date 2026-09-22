@@ -1811,6 +1811,32 @@ def _ud_line_fresh(
     return abs(candidate_line - latest) < 0.01
 
 
+def _line_move_reaches_threshold(
+    current_line: object,
+    previous_line: object,
+    threshold: object = None,
+) -> bool:
+    """Return whether a line moved by the configured minimum in either direction.
+
+    The movement trigger is deliberately independent of the scoring bands used
+    to award extra velocity points.  A half-step move (for example 4.0 → 4.5
+    or 4.0 → 3.5) is an actionable movement observation.
+    """
+    if current_line is None or previous_line is None:
+        return False
+    try:
+        current = float(current_line)
+        previous = float(previous_line)
+        minimum = (
+            config.MIN_UNDERDOG_LINE_CHANGE
+            if threshold is None
+            else float(threshold)
+        )
+    except (TypeError, ValueError):
+        return False
+    return abs(current - previous) >= minimum
+
+
 def _rss_mb() -> Optional[float]:
     """Return current process RSS in MB.
 
@@ -5474,6 +5500,7 @@ async def underdog_job(context) -> None:
             prev_record  = recent_by_key.get((player, stat_type))
             line_changed = False
             prev_line: Optional[float] = None
+            line_move_threshold_met = False
     
             if prev_record is not None and snap.line is not None:
                 # Production cycles use compact in-memory state; compatibility
@@ -5482,6 +5509,10 @@ async def underdog_job(context) -> None:
                 if _previous_line is not None and _previous_line != snap.line:
                     line_changed = True
                     prev_line    = _previous_line
+                    line_move_threshold_met = _line_move_reaches_threshold(
+                        snap.line,
+                        prev_line,
+                    )
 
             _path_kind = (
                 "new_prop" if is_new_prop
@@ -5493,16 +5524,13 @@ async def underdog_job(context) -> None:
             # Stage 3 — movement detected: significant line move, non-cold-start
             if (
                 not is_removed and not is_cold_start
-                and line_changed and prev_line is not None
-                and abs((snap.line or 0.0) - prev_line) >= config.MIN_UNDERDOG_LINE_CHANGE
+                and line_move_threshold_met
             ):
                 _sp_move = snap.sport or "UNKNOWN"
                 _sport_move_detected[_sp_move] = _sport_move_detected.get(_sp_move, 0) + 1
     
             should_alert = is_removed or (
-                line_changed
-                and prev_line is not None
-                and abs(snap.line - prev_line) >= config.MIN_UNDERDOG_LINE_CHANGE
+                line_move_threshold_met
             )
     
             # ── Scoring gate ─────────────────────────────────────────────────────
@@ -6237,9 +6265,7 @@ async def underdog_job(context) -> None:
                         })
     
                 should_alert = is_qualified and (is_reentry or (
-                    line_changed
-                    and prev_line is not None
-                    and abs(snap.line - prev_line) >= config.MIN_UNDERDOG_LINE_CHANGE
+                    line_move_threshold_met
                 ))
                 # Stage 4: gated count — full betting gate passed
                 if should_alert and not is_removed:

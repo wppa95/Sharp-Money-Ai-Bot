@@ -245,7 +245,25 @@ class TestLineMovementThresholdUnchanged:
         src = inspect.getsource(_me.underdog_job)
         assert "MIN_UNDERDOG_LINE_CHANGE" in src
         # Verify the unchanged formula for lc/market-move path
-        assert "abs(snap.line - prev_line) >= config.MIN_UNDERDOG_LINE_CHANGE" in src
+        assert "_line_move_reaches_threshold" in src
+
+    @pytest.mark.parametrize(
+        ("current_line", "previous_line", "expected"),
+        [
+            (4.5, 4.0, True),
+            (3.5, 4.0, True),
+            (4.25, 4.0, False),
+            (4.0, 4.0, False),
+        ],
+    )
+    def test_half_step_movement_triggers_in_either_direction(
+        self, current_line, previous_line, expected
+    ):
+        assert me._line_move_reaches_threshold(
+            current_line,
+            previous_line,
+            threshold=0.5,
+        ) is expected
 
 
 # ─────────────────────────────────────────────────────────────────────────────
