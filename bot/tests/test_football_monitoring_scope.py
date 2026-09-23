@@ -11,7 +11,10 @@ import pytest
 
 from connectors.underdog import UnderdogConnector, UnderdogProjection
 from alerts import is_telegram_suppressed_sport
-from engine.sport_policy import is_football_related_sport
+from engine.sport_policy import (
+    is_disallowed_football_sport,
+    is_football_related_sport,
+)
 from providers.propline import PropLineFetchResult, PropLinePrizePicksProvider
 from providers.prop_provider import PlayerProp
 from providers.underdog_provider import UnderdogProvider
@@ -64,6 +67,21 @@ def test_football_aliases_are_classified_as_gridiron_family(sport):
 )
 def test_supported_non_football_sports_remain_allowed(sport):
     assert is_football_related_sport(sport) is False
+
+
+@pytest.mark.parametrize("sport", ["NFL", "football_nfl", "NCAAF", "CFB", "college_football"])
+def test_nfl_and_college_football_are_the_only_allowed_football_sports(sport):
+    assert is_disallowed_football_sport(sport) is False
+    assert is_telegram_suppressed_sport(sport) is False
+
+
+@pytest.mark.parametrize(
+    "sport",
+    ["FCS", "CFL", "AFL", "AFLW", "UFL", "USFL", "XFL", "rugby_union", "gridiron"],
+)
+def test_other_football_family_sports_remain_suppressed(sport):
+    assert is_disallowed_football_sport(sport) is True
+    assert is_telegram_suppressed_sport(sport) is True
 
 
 @pytest.mark.parametrize(

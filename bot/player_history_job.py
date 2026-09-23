@@ -9,7 +9,7 @@ from dataclasses import replace
 from types import SimpleNamespace
 from typing import Any
 
-from engine.sport_policy import canonical_sport_key, is_football_related_sport
+from engine.sport_policy import canonical_sport_key, is_disallowed_football_sport
 
 logger = logging.getLogger(__name__)
 
@@ -111,9 +111,9 @@ _PLAYER_HISTORY_PROPLINE_TARGETS_PER_CYCLE = max(
 
 
 def _uses_propline_history(sport: str) -> bool:
-    """Reserve PropLine history calls for non-football sports."""
+    """Reserve PropLine history calls for non-football and allowed football sports."""
     canonical = canonical_sport_key(sport)
-    return not is_football_related_sport(canonical)
+    return not is_disallowed_football_sport(canonical)
 
 
 def _history_sport_order(sport: str) -> tuple[int, str]:

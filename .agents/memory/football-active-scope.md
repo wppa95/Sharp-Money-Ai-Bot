@@ -1,20 +1,20 @@
 ---
-name: Football active-scope exclusion
-description: Active player-prop monitoring excludes gridiron, rugby, and Australian-rules football while preserving soccer and historical rows.
+name: Football active-scope policy
+description: NFL and college football are allowed; other football-family sports remain excluded from actionable delivery.
 ---
 
-User-facing actionable delivery must reject football-related provider sports
-before scoring output or Telegram delivery. This includes NFL,
-NCAAF/CFB/FCS, CFL, AFL/AFLW, gridiron, rugby, and provider identifiers
-containing football. Association soccer is not part of this block. Provider
-observations may still be retained for persistence and historical diagnostics.
+User-facing actionable delivery allows NFL and CFB/NCAAF aliases, and rejects
+other football-related provider sports such as FCS, CFL, AFL/AFLW, UFL,
+gridiron, rugby, and unrelated provider identifiers containing football.
+Association soccer is not part of this block. Provider observations may still
+be retained for persistence and historical diagnostics.
 
-**Why:** The product does not bet football, and football-family rows were
-reaching the Underdog delivery path even though the classifier already
-recognized them. Blocking at the final alert boundary prevents user-facing
-picks without deleting evidence or changing historical reports.
+**Why:** The product wants NFL and college-football picks but not other
+football-family markets. Filtering only the disallowed aliases prevents
+unsupported competitions from reaching user-facing alerts without deleting
+evidence or changing historical reports.
 
-**How to apply:** Reuse `is_football_related_sport()` in every actionable
-Telegram path, including direct pregame-watch broadcasts. Keep provider
-observations and historical football records intact, and keep AlertScopeFilter
-available for unrelated scope violations.
+**How to apply:** Reuse the disallowed-football predicate in every actionable
+Telegram and provider-history path, including direct pregame-watch broadcasts.
+Keep provider observations and historical rows intact, and keep
+AlertScopeFilter available for unrelated scope violations.

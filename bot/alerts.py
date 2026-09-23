@@ -43,7 +43,7 @@ from engine.delivery_evidence import (
     is_history_optional_sport,
     serialized_evidence_supports_delivery,
 )
-from engine.sport_policy import is_football_related_sport
+from engine.sport_policy import is_disallowed_football_sport
 from models import EVOpportunity, Recommendation, SteamAlert
 
 if TYPE_CHECKING:
@@ -651,11 +651,11 @@ def format_start_message() -> str:
 def is_telegram_suppressed_sport(sport: Optional[str]) -> bool:
     """Return whether a sport is blocked from user-facing Telegram alerts.
 
-    Football-family markets remain valid provider observations for persistence
-    and historical diagnostics, but they are not part of the product's
-    actionable alert universe.
+    NFL and college football are allowed. Other football-family markets remain
+    valid provider observations for persistence and historical diagnostics, but
+    are not part of the product's actionable alert universe.
     """
-    return is_football_related_sport(sport)
+    return is_disallowed_football_sport(sport)
 
 
 def _has_strong_underdog_evidence(

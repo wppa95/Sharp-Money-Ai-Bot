@@ -31,6 +31,21 @@ _FOOTBALL_ALIASES = frozenset(
     }
 )
 
+_ALLOWED_FOOTBALL_SPORTS = frozenset({"NFL", "NCAAF"})
+_ALLOWED_FOOTBALL_ALIASES = frozenset(
+    {
+        "NFL",
+        "FOOTBALL_NFL",
+        "AMERICANFOOTBALL_NFL",
+        "AMERICAN_FOOTBALL_NFL",
+        "CFB",
+        "NCAAF",
+        "NCAA",
+        "COLLEGE_FOOTBALL",
+        "NCAA_FOOTBALL",
+    }
+)
+
 
 def canonical_sport_key(sport: Optional[object]) -> str:
     """Normalize provider sport labels without conflating soccer and football."""
@@ -68,3 +83,12 @@ def is_football_related_sport(sport: Optional[object]) -> bool:
         or key.endswith("_AFL")
         or key.endswith("_AFLW")
     )
+
+
+def is_disallowed_football_sport(sport: Optional[object]) -> bool:
+    """Return True for football-family sports outside NFL and college football."""
+    raw = sport.value if hasattr(sport, "value") else str(sport or "")
+    raw_key = re.sub(r"[^A-Z0-9]+", "_", raw.upper()).strip("_")
+    if raw_key in _ALLOWED_FOOTBALL_ALIASES:
+        return False
+    return is_football_related_sport(sport)

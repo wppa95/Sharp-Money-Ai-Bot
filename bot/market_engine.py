@@ -77,7 +77,7 @@ from engine.evidence_memory import (
 )
 from providers import FailureType, get_health_monitor
 from engine.delivery_gates import directional_evidence_gate as _directional_evidence_gate
-from engine.sport_policy import is_football_related_sport
+from engine.sport_policy import is_disallowed_football_sport
 from engine.player_props_pipeline import (
     canonicalize_player_props,
     persist_canonical_player_props,
@@ -1506,18 +1506,18 @@ async def propline_request_scan_job(context) -> None:
             return False
         from engine.sport_policy import (
             canonical_sport_key,
-            is_football_related_sport,
+            is_disallowed_football_sport,
         )
 
         discovered_sports = await _get_prizepicks_scan_sports(provider)
         sports = tuple(
             sport
             for sport in discovered_sports
-            if not is_football_related_sport(sport)
+            if not is_disallowed_football_sport(sport)
         )
         if not sports:
             logger.info(
-                "propline_request_scan: no eligible non-football sports"
+                "propline_request_scan: no eligible sports"
             )
             return True
         bookmakers = tuple(
@@ -4018,7 +4018,7 @@ def _has_delivery_evidence(
     ).upper()
     if direction not in {"OVER", "UNDER"}:
         return False
-    if is_football_related_sport(sport):
+    if is_disallowed_football_sport(sport):
         return False
     if not history_is_available(validation, decision, intelligence_trace):
         return is_history_optional_sport(sport)
@@ -5865,7 +5865,7 @@ async def underdog_job(context) -> None:
                         ),
                     )
                     if not _np_gate_ok:
-                        if is_football_related_sport(snap.sport or ""):
+                        if is_disallowed_football_sport(snap.sport or ""):
                             _skip_reason = "football_suppressed"
                         elif history_is_available(
                             validation,
