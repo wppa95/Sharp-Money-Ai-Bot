@@ -31,7 +31,6 @@ _FOOTBALL_ALIASES = frozenset(
     }
 )
 
-_ALLOWED_FOOTBALL_SPORTS = frozenset({"NFL", "NCAAF"})
 _ALLOWED_FOOTBALL_ALIASES = frozenset(
     {
         "NFL",
@@ -39,10 +38,6 @@ _ALLOWED_FOOTBALL_ALIASES = frozenset(
         "AMERICANFOOTBALL_NFL",
         "AMERICAN_FOOTBALL_NFL",
         "CFB",
-        "NCAAF",
-        "NCAA",
-        "COLLEGE_FOOTBALL",
-        "NCAA_FOOTBALL",
     }
 )
 
@@ -86,7 +81,7 @@ def is_football_related_sport(sport: Optional[object]) -> bool:
 
 
 def is_disallowed_football_sport(sport: Optional[object]) -> bool:
-    """Return True for football-family sports outside NFL and college football."""
+    """Return True for football-family sports outside NFL and CFB."""
     raw = sport.value if hasattr(sport, "value") else str(sport or "")
     raw_key = re.sub(r"[^A-Z0-9]+", "_", raw.upper()).strip("_")
     if raw_key in _ALLOWED_FOOTBALL_ALIASES:

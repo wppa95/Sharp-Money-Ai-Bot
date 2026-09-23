@@ -60,7 +60,7 @@ class Config:
     # disabled. ACTIVE_SPORTS may contain provider-only identifiers.
     ODDS_API_SPORTS_RAW: str = os.environ.get(
         "ODDS_API_SPORTS",
-        "MLB,NBA,NHL,NCAAF,NCAAB,UFC,WNBA,EPL,LaLiga,SerieA,"
+        "MLB,NBA,NHL,NCAAB,UFC,WNBA,EPL,LaLiga,SerieA,"
         "Bundesliga,Ligue1,MLS,UCL",
     )
     # Legacy quota values retained for compatibility with old status readers.
@@ -157,7 +157,7 @@ class Config:
     # active catalog remains authoritative when it is available.
     ACTIVE_SPORTS_RAW: str = os.environ.get(
         "ACTIVE_SPORTS",
-        "NFL,CFB,NBA,MLB,NHL,NCAAF,NCAAB,UFC,WNBA,EPL,LaLiga,SerieA,"
+        "NFL,CFB,NBA,MLB,NHL,NCAAB,UFC,WNBA,EPL,LaLiga,SerieA,"
         "Bundesliga,Ligue1,MLS,UCL,SOCCER,CS,LOL,VAL,VALORANT,DOTA,"
         "TENNIS,FIFA,PGA,MMA,GOLF,TT,BADMINTON",
     )
@@ -332,7 +332,7 @@ class Config:
     #   NPB/KBO — no accessible public per-game stat API
     UD_ALERT_SPORTS_RAW: str = os.environ.get(
         "UD_ALERT_SPORTS",
-        "MLB,WNBA,NFL,NBA,DOTA,TENNIS,CS,NHL,LOL,MMA,GOLF,NCAAF,SOCCER,VALORANT,TT,BADMINTON",
+        "MLB,WNBA,NFL,CFB,NBA,DOTA,TENNIS,CS,NHL,LOL,MMA,GOLF,SOCCER,VALORANT,TT,BADMINTON",
     )
 
     # ── Sport priority system ─────────────────────────────────────────────────
@@ -341,7 +341,7 @@ class Config:
     # Override via UD_TIER1_SPORTS env var (comma-separated sport codes).
     UD_TIER1_SPORTS_RAW: str = os.environ.get(
         "UD_TIER1_SPORTS",
-        "WNBA,NHL,CS,TENNIS,DOTA,LOL,VALORANT,TT,BADMINTON,GOLF,NCAAF,MMA,SOCCER",
+        "WNBA,NHL,CS,TENNIS,DOTA,LOL,VALORANT,TT,BADMINTON,GOLF,CFB,MMA,SOCCER",
     )
 
     # MLB alert gate — MLB and NFL (Tier 2) only send Telegram alerts when the
