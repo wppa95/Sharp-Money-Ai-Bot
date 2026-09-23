@@ -437,11 +437,41 @@ class TestStrongDirectionalDelivery:
 
     def test_keeps_all_directional_picks_after_canonical_gate(self):
         queue = [
-            _make_cand(player="Strong Over 1", sport="NBA", direction="OVER", conf=85),
-            _make_cand(player="Strong Over 2", sport="NBA", direction="OVER", conf=75),
-            _make_cand(player="Strong Under", sport="NBA", direction="UNDER", conf=20),
-            _make_cand(player="Weak Over", sport="NBA", direction="OVER", conf=69),
-            _make_cand(player="Weak Under", sport="NBA", direction="UNDER", conf=36),
+            _make_cand(
+                player="Strong Over 1",
+                sport="NBA",
+                direction="OVER",
+                conf=85,
+                over_rate=0.9,
+            ),
+            _make_cand(
+                player="Strong Over 2",
+                sport="NBA",
+                direction="OVER",
+                conf=75,
+                over_rate=0.8,
+            ),
+            _make_cand(
+                player="Strong Under",
+                sport="NBA",
+                direction="UNDER",
+                conf=20,
+                over_rate=0.1,
+            ),
+            _make_cand(
+                player="Weak Over",
+                sport="NBA",
+                direction="OVER",
+                conf=69,
+                over_rate=0.7,
+            ),
+            _make_cand(
+                player="Weak Under",
+                sport="NBA",
+                direction="UNDER",
+                conf=36,
+                over_rate=0.3,
+            ),
         ]
 
         selected = _select_strong_directional_picks(queue)

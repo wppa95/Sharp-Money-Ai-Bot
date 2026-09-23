@@ -4491,17 +4491,8 @@ def _select_strong_directional_picks(candidates: list[dict]) -> list[dict]:
             continue
         selected.append(candidate)
 
-    def _rank(candidate: dict) -> tuple[float, float, float, str, str]:
+    def _rank(candidate: dict) -> tuple[float, float, str, str]:
         decision = candidate.get("decision")
-        raw_confidence = (
-            candidate.get("confidence")
-            if candidate.get("confidence") is not None
-            else getattr(decision, "confidence", 0)
-        )
-        try:
-            confidence = float(raw_confidence)
-        except (TypeError, ValueError):
-            confidence = 0.0
         validation = candidate.get("validation")
         evidence_count = float(
             candidate.get("evidence_count")
@@ -4518,15 +4509,10 @@ def _select_strong_directional_picks(candidates: list[dict]) -> list[dict]:
             or candidate.get("direction")
             or ""
         ).strip().upper()
-        directional_strength = (
-            confidence if direction == "OVER" else 100.0 - confidence
-        )
         hit_rate_strength = directional_hit_rate_strength(candidate)
         return (
             -(hit_rate_strength if hit_rate_strength is not None else -1.0),
             -evidence_count,
-            -directional_strength,
-            -_cand_priority(candidate),
             sport,
             player,
         )

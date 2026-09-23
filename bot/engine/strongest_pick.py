@@ -116,21 +116,6 @@ def directional_hit_rate_strength(candidate: dict) -> float | None:
     return None
 
 
-def _directional_strength(candidate: dict) -> float | None:
-    decision = candidate.get("decision")
-    raw_confidence = (
-        candidate.get("confidence")
-        if candidate.get("confidence") is not None
-        else getattr(decision, "confidence", None)
-    )
-    try:
-        confidence = float(raw_confidence)
-    except (TypeError, ValueError):
-        return None
-    direction = _direction(candidate)
-    return confidence if direction == "OVER" else 100.0 - confidence
-
-
 def _player(candidate: dict) -> str:
     prop = candidate.get("prop")
     return str(
@@ -204,7 +189,6 @@ def _ranking_key(candidate: dict) -> tuple[float, ...]:
         hit_rate_strength if hit_rate_strength is not None else -1.0,
         float(evidence),
         sample_count,
-        float(bool(candidate.get("is_meaningful_change"))),
     )
 
 
@@ -295,8 +279,6 @@ def select_strongest_actionable_picks(
                     else -1.0
                 ),
                 -_validation_evidence(candidate)[1],
-                -(_directional_strength(candidate) or 0.0),
-                -float(bool(candidate.get("is_meaningful_change"))),
                 _provider(candidate),
                 _player(candidate),
                 _tie_key(candidate),
