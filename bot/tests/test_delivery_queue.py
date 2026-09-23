@@ -56,7 +56,11 @@ def _make_cand(
     is_meaningful_change: bool = False,
     direction: str = "OVER",
     evidence_count: int = 5,
+    over_rate: float | None = None,
 ) -> dict:
+    if over_rate is None:
+        over_rate = 0.7 if direction == "OVER" else 0.3
+    over_count = round(over_rate * 10)
     decision = type(
         "Decision",
         (),
@@ -68,7 +72,11 @@ def _make_cand(
                 for window in ("l5", "l10", "l15", "l20", "l30", "season")
             },
             **{
-                f"{window}_over": 7 if direction == "OVER" else 3
+                f"{window}_over": over_count
+                for window in ("l5", "l10", "l15", "l20", "l30", "season")
+            },
+            **{
+                f"{window}_hit_rate": over_rate
                 for window in ("l5", "l10", "l15", "l20", "l30", "season")
             },
         },
@@ -390,6 +398,43 @@ class TestBestPerSportDelivery:
 
 
 class TestStrongDirectionalDelivery:
+    def test_ranks_over_by_highest_rate_and_under_by_lowest_over_rate(self):
+        queue = [
+            _make_cand(
+                player="Over lower",
+                direction="OVER",
+                conf=90,
+                over_rate=0.75,
+            ),
+            _make_cand(
+                player="Under higher",
+                direction="UNDER",
+                conf=90,
+                over_rate=0.30,
+            ),
+            _make_cand(
+                player="Over higher",
+                direction="OVER",
+                conf=90,
+                over_rate=0.95,
+            ),
+            _make_cand(
+                player="Under lower",
+                direction="UNDER",
+                conf=90,
+                over_rate=0.10,
+            ),
+        ]
+
+        selected = _select_strong_directional_picks(queue)
+
+        assert [candidate["player"] for candidate in selected] == [
+            "Over higher",
+            "Under lower",
+            "Over lower",
+            "Under higher",
+        ]
+
     def test_keeps_all_directional_picks_after_canonical_gate(self):
         queue = [
             _make_cand(player="Strong Over 1", sport="NBA", direction="OVER", conf=85),

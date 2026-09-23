@@ -55,6 +55,7 @@ from engine.player_prop_market import (
 )
 from engine.score_validation import clamp_score
 from engine.strongest_pick import (
+    directional_hit_rate_strength,
     select_strongest_actionable_picks,
 )
 from engine.delivery_evidence import (
@@ -4520,9 +4521,11 @@ def _select_strong_directional_picks(candidates: list[dict]) -> list[dict]:
         directional_strength = (
             confidence if direction == "OVER" else 100.0 - confidence
         )
+        hit_rate_strength = directional_hit_rate_strength(candidate)
         return (
-            -directional_strength,
+            -(hit_rate_strength if hit_rate_strength is not None else -1.0),
             -evidence_count,
+            -directional_strength,
             -_cand_priority(candidate),
             sport,
             player,

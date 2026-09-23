@@ -63,6 +63,59 @@ def _direction(candidate: dict) -> str:
     ).strip().upper()
 
 
+def directional_hit_rate_strength(candidate: dict) -> float | None:
+    """Return the settled hit-rate strength for the candidate's direction.
+
+    Hit rates are stored from the OVER perspective.  Therefore an OVER pick
+    is stronger as its primary-window rate rises, while an UNDER pick is
+    stronger as that same rate falls.
+    """
+    decision = candidate.get("decision")
+    hit_rates = candidate.get("hit_rates") or getattr(decision, "hit_rates", None)
+
+    windows = ("l5", "l10", "l15", "l20", "l30", "season")
+    for window_name in windows:
+        if isinstance(hit_rates, dict):
+            window = hit_rates.get(window_name)
+            games = (
+                window.get("games")
+                if isinstance(window, dict)
+                else hit_rates.get(f"{window_name}_games")
+            )
+            rate = (
+                window.get("hit_rate")
+                if isinstance(window, dict)
+                else hit_rates.get(f"{window_name}_hit_rate")
+            )
+        else:
+            window = getattr(hit_rates, window_name, None)
+            games = getattr(window, "games", None)
+            rate = getattr(window, "hit_rate", None)
+            if rate is None:
+                rate = getattr(decision, f"{window_name}_hit_rate", None)
+            if games is None:
+                games = getattr(decision, f"{window_name}_games", None)
+
+        try:
+            if games is None:
+                games = getattr(decision, f"{window_name}_games", None)
+            if rate is None:
+                rate = getattr(decision, f"{window_name}_hit_rate", None)
+            games_value = float(games)
+            rate_value = float(rate)
+        except (TypeError, ValueError):
+            continue
+        if games_value < 5 or not 0.0 <= rate_value <= 1.0:
+            continue
+        direction = _direction(candidate)
+        if direction == "OVER":
+            return rate_value
+        if direction == "UNDER":
+            return 1.0 - rate_value
+        return None
+    return None
+
+
 def _directional_strength(candidate: dict) -> float | None:
     decision = candidate.get("decision")
     raw_confidence = (
@@ -145,7 +198,10 @@ def is_strong_actionable_pick(
 def _ranking_key(candidate: dict) -> tuple[float, ...]:
     """Evidence-only ordering for already-qualified candidates."""
     evidence, sample_count = _validation_evidence(candidate)
+    hit_rate_strength = directional_hit_rate_strength(candidate)
     return (
+        float(hit_rate_strength is not None),
+        hit_rate_strength if hit_rate_strength is not None else -1.0,
         float(evidence),
         sample_count,
         float(bool(candidate.get("is_meaningful_change"))),
@@ -233,8 +289,13 @@ def select_strongest_actionable_picks(
     if require_strong:
         selected.sort(
             key=lambda candidate: (
-                -(_directional_strength(candidate) or 0.0),
+                -(
+                    directional_hit_rate_strength(candidate)
+                    if directional_hit_rate_strength(candidate) is not None
+                    else -1.0
+                ),
                 -_validation_evidence(candidate)[1],
+                -(_directional_strength(candidate) or 0.0),
                 -float(bool(candidate.get("is_meaningful_change"))),
                 _provider(candidate),
                 _player(candidate),
