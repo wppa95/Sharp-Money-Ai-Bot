@@ -33,6 +33,7 @@ import pytest
 from market_engine import (
     _apply_delivery_diversification,
     _cand_priority,
+    _delivery_sport_priority,
     _limit_sport_delivery_batch,
     _limit_strict_sport_delivery_batch,
     _select_best_per_sport,
@@ -148,7 +149,7 @@ class TestDeliveryDiversification:
 
     def test_sort_by_priority_no_penalty(self):
         """Two candidates in different groups → sorted purely by raw priority."""
-        high = _make_cand(player="A", sport="NBA", stat_type="Points", tier="S")
+        high = _make_cand(player="A", sport="WNBA", stat_type="Points", tier="S")
         low  = _make_cand(player="B", sport="MLB", stat_type="Hits",   tier="A")
         q = [low, high]
         result = _apply_delivery_diversification(q)
@@ -171,8 +172,8 @@ class TestDeliveryDiversification:
         Two B-tier candidates in the same group and one A-tier in a different group.
         After penalty the A-tier unique pick should beat the 2nd same-group B.
         """
-        b1 = _make_cand(player="X", sport="NBA", stat_type="Points", tier="B", conf=70, bq=70, mq=0, is_tier1=False, is_meaningful_change=False)
-        b2 = _make_cand(player="Y", sport="NBA", stat_type="Points", tier="B", conf=65, bq=65, mq=0, is_tier1=False, is_meaningful_change=False)
+        b1 = _make_cand(player="X", sport="WNBA", stat_type="Points", tier="B", conf=70, bq=70, mq=0, is_tier1=False, is_meaningful_change=False)
+        b2 = _make_cand(player="Y", sport="WNBA", stat_type="Points", tier="B", conf=65, bq=65, mq=0, is_tier1=False, is_meaningful_change=False)
         a  = _make_cand(player="Z", sport="MLB", stat_type="Hits",   tier="A", conf=70, bq=70, mq=0, is_tier1=False, is_meaningful_change=False)
         # Tier metadata does not reorder this queue.  Diversification only
         # separates Tier-2 groups and applies the duplicate-group penalty.
@@ -196,8 +197,8 @@ class TestDeliveryDiversification:
         """
         Soft penalty: a very high-BQ S-tier duplicate can still beat a weak unique B-tier.
         """
-        s1 = _make_cand(player="A", sport="NBA", stat_type="Points", tier="S", conf=90, bq=95, is_tier1=False)
-        s2 = _make_cand(player="B", sport="NBA", stat_type="Points", tier="S", conf=88, bq=92, is_tier1=False)
+        s1 = _make_cand(player="A", sport="WNBA", stat_type="Points", tier="S", conf=90, bq=95, is_tier1=False)
+        s2 = _make_cand(player="B", sport="WNBA", stat_type="Points", tier="S", conf=88, bq=92, is_tier1=False)
         b  = _make_cand(player="C", sport="MLB", stat_type="Hits",   tier="B", conf=55, bq=50, is_tier1=False)
         # Tier/quality metadata is ignored.  Tier-2 candidates are ordered by
         # input order, then group diversification penalizes the duplicate.
@@ -225,6 +226,14 @@ class TestDeliveryDiversification:
         result = _apply_delivery_diversification(queue)
 
         assert [candidate["player"] for candidate in result] == ["WNBA", "NFL"]
+
+    @pytest.mark.parametrize("sport", ["MLB", "NBA", "NFL", "NHL"])
+    def test_user_selected_low_priority_sports(self, sport):
+        assert _delivery_sport_priority(sport) == 1
+
+    @pytest.mark.parametrize("sport", ["WNBA", "DOTA", "TENNIS", "CS"])
+    def test_other_sports_are_high_priority(self, sport):
+        assert _delivery_sport_priority(sport) == 0
 
     def test_group_rank_attribute_set(self):
         """After diversification, _group_rank is set on each candidate."""

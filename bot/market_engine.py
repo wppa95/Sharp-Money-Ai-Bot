@@ -4248,12 +4248,21 @@ def _cand_priority(c: dict) -> float:
 
 
 def _delivery_sport_priority(sport: object) -> int:
-    """Return a low-priority rank for NFL and MLB, without disabling either."""
+    """Return a low-priority rank without disabling any eligible sport."""
     return (
         1
-        if str(sport or "").strip().upper() in {"NFL", "MLB", "BASEBALL"}
+        if str(sport or "").strip().upper()
+        in {"MLB", "NBA", "NFL", "NHL", "BASEBALL"}
         else 0
     )
+
+
+def _prioritize_delivery_sports(candidates: list[dict]) -> list[dict]:
+    """Put high-priority sports first while preserving each sport's quota."""
+    candidates.sort(
+        key=lambda candidate: _delivery_sport_priority(candidate.get("sport"))
+    )
+    return candidates
 
 
 _STRICT_SPORT_ALERT_SPORTS = frozenset({"MLB", "NBA", "NFL"})
@@ -4349,8 +4358,8 @@ def _apply_delivery_diversification(queue: list) -> list:
 
     ranked = _rank_group(list(queue))
     # User-facing preference is non-low-priority sports first. Interleave one
-    # low-priority item after every three other sports so NFL/MLB cannot
-    # indefinitely starve high-priority candidates under the delivery cap.
+    # low-priority item after every three other sports so low-priority sports
+    # remain eligible without preceding higher-priority sports.
     non_low_priority = [
         candidate for candidate in ranked
         if _delivery_sport_priority(candidate.get("sport")) == 0
@@ -6929,6 +6938,7 @@ async def underdog_job(context) -> None:
                     for sport in sorted(_delivery_sports)
                 },
             )
+            _prioritize_delivery_sports(_delivery_queue)
             _n_dq_deferred   = 0
             _dq_deferred_log: list[str] = []
             for _dq in _delivery_queue:
@@ -9289,6 +9299,7 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
             _fpr_recent_counts,
             limit=max(0, int(getattr(config, "SPORT_ALERT_LIMIT", 2))),
         )
+        _prioritize_delivery_sports(_fpr_selected)
         _fpr_selected_ids = {id(candidate) for candidate in _fpr_selected}
         for _fpr_candidate in _fpr_delivery_candidates:
             if id(_fpr_candidate) not in _fpr_selected_ids:
