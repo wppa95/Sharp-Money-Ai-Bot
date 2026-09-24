@@ -1,0 +1,376 @@
+Fix and upgrade the existing PropLine integration in V4.
+
+IMPORTANT:
+
+Do NOT perform an audit first.
+Do NOT stop and give me an audit report.
+Implement the fixes directly.
+
+I upgraded to PropLine Pro.
+
+I want V4 to use ALL useful PropLine Pro endpoints available in the current API documentation EXCEPT the single-player stat endpoint because it wastes API credits.
+
+Use this documentation as the API reference:
+
+https://prop-line.com/llms-full.txt
+
+PROP-LINE ENDPOINTS TO INTEGRATE:
+
+1. PLAYER PROP HISTORY
+
+/v1/sports/{sport_key}/players/{player_name}/history
+
+Use for:
+
+* historical props
+* historical lines
+* historical OVER/UNDER results
+* resolved outcomes
+* historical prop evidence
+
+2. PLAYER GAME HISTORY
+
+/v1/sports/{sport_key}/players/{player_name}/games
+
+Use for:
+
+* L5
+* L10
+* L20
+* L50 when available
+* raw game-by-game statistics
+* season history
+* H2H
+* opponent history
+* averages
+* medians
+* consistency
+* distributions
+
+This is the primary raw historical game-data endpoint.
+
+3. PLAYER TRENDS
+
+/v1/sports/{sport_key}/players/{player_name}/trends
+
+Use for:
+
+* L5
+* L10
+* L20
+* L50
+* OVER hit rate
+* UNDER hit rate
+* PUSH
+* streaks
+* average actual
+* recent line
+* trend information
+
+Use market-specific filtering whenever available.
+
+4. EVENT STATS
+
+/v1/sports/{sport_key}/events/{event_id}/stats
+
+Use for:
+
+* raw player statistics
+* final event statistics
+* custom/statistical markets
+* verification when resolved prop information is insufficient
+
+Use event-level requests rather than making separate requests for every player.
+
+5. EVENT RESULTS
+
+/v1/sports/{sport_key}/events/{event_id}/results
+
+Use as the primary PropLine result/grading source.
+
+Use:
+
+* won
+* lost
+* push
+* void
+* actual_value
+* resolved_at
+
+When PropLine has already resolved the exact observed prop, use its resolution instead of unnecessarily calculating the result ourselves.
+
+6. EVENTS
+
+/v1/sports/{sport_key}/events
+
+Integrate/use this endpoint where needed for:
+
+* event discovery
+* event IDs
+* event status
+* scheduled/final events
+* connecting player props to the correct event
+
+7. ODDS / PLAYER PROPS
+
+/v1/sports/{sport_key}/events/{event_id}/odds
+
+Continue using this for live player props.
+
+Use explicit:
+markets=PLAYER_PROPS
+
+and the appropriate bookmaker filters.
+
+Preserve the existing event-scoped architecture.
+
+8. EV
+
+Integrate the PropLine EV endpoint where applicable.
+
+Use it as additional analytical evidence for available player props.
+
+Do NOT make EV a mandatory alert blocker unless the existing V4 logic already requires it.
+
+9. BEST LINE
+
+Integrate the PropLine best-line endpoint where applicable.
+
+Use it to provide additional line/market evidence and comparison data.
+
+Do not replace the existing primary-book source logic.
+
+10. MOVEMENT
+
+Integrate the PropLine movement endpoint.
+
+Persist useful line-movement information into SQLite.
+
+Make it available to the AI analyst as supporting evidence.
+
+11. TRENDS
+
+Integrate the PropLine trends endpoint and persist useful trend information.
+
+Do not repeatedly request identical trend data when it is already cached.
+
+12. RESOLVED PROP EXPORT
+
+Use the Pro-plan resolved-props export where appropriate for historical backfill:
+
+/v1/exports/resolved-props
+
+Use it to fill historical gaps across supported sports when appropriate.
+
+Do not continuously download the entire export.
+
+Use it strategically for backfilling missing historical data.
+
+13. PLAYER GAMES
+
+The player-games endpoint must be fully integrated into the historical evidence system.
+
+This is especially important because some sports may have raw game history even when historical sportsbook-prop history is limited.
+
+CRITICAL EXCLUSION:
+
+DO NOT USE THE SINGLE-PLAYER STAT ENDPOINT.
+
+I specifically do NOT want the single-player stat endpoint integrated because it wastes PropLine API credits.
+
+Do not call it for:
+
+* player history
+* every scan
+* every prop
+* every player
+* grading
+* AI analysis
+
+Use the event-level stats endpoint and player-games endpoint instead.
+
+HISTORICAL DATA ARCHITECTURE:
+
+Build the historical evidence layer as:
+
+PropLine
+├── Player History
+├── Player Games
+├── Player Trends
+├── Event Stats
+├── Event Results
+├── Events
+├── Odds
+├── EV
+├── Best Line
+├── Movement
+├── Trends
+└── Resolved Props Export
+↓
+NORMALIZE
+↓
+SQLite
+↓
+AI ANALYST
+
+The AI analyst should primarily read the stored SQLite evidence instead of repeatedly calling PropLine.
+
+SPORT COVERAGE:
+
+Do NOT limit history to MLB and NFL.
+
+Use the correct PropLine sport keys for every supported sport currently handled by V4.
+
+This includes applicable:
+
+* MLB
+* NFL
+* NBA
+* WNBA
+* NHL
+* soccer
+* tennis
+* golf
+* UFC
+* esports
+* any other supported player-prop sports already configured in V4
+
+Do not assume one sport’s market structure applies to another sport.
+
+DATABASE:
+
+Use the existing SQLite schema wherever possible.
+
+Persist useful information from the new endpoints.
+
+Do not create duplicate tables or duplicate records unnecessarily.
+
+Use stable identifiers whenever PropLine provides them, including:
+
+* player ID
+* outcome ID
+* event ID
+* bookmaker/outcome IDs
+
+Historical data must be reusable by the AI analyst.
+
+CACHE REQUIREMENT:
+
+If the same player/event/history/trend data already exists in SQLite and has not become stale, do not request it again unnecessarily.
+
+The Pro plan gives us more capacity, but we still need efficient API usage.
+
+Use:
+
+* batching
+* event-level requests
+* targeted markets
+* caching
+* stable IDs
+* upserts
+
+Do not burn credits on redundant requests.
+
+GRADING:
+
+PropLine /results should be the primary PropLine resolution source.
+
+Use /stats only when raw final statistics are required.
+
+Do not grade an unfinished event.
+
+Persist:
+
+* resolution
+* actual value
+* resolved timestamp
+* source
+* settlement status
+
+OVER and UNDER must both remain supported.
+
+EXISTING PIPELINE:
+
+Do NOT change the existing pipeline structure:
+
+OBSERVED
+→ NORMALIZED
+→ STORED
+→ EVALUATION_ELIGIBLE
+→ EVALUATED
+→ EVIDENCE_CHECK / HISTORY / HIT RATE CHECK
+→ ANALYZED
+→ DIRECTIONAL
+→ QUALIFIED
+→ ACTIONABLE
+→ ALERT_CREATED
+→ DELIVERY_ELIGIBLE
+→ TELEGRAM_SENT
+→ RESULT
+→ HIT/MISS/PUSH/VOID
+
+Do not add:
+
+* stars
+* tiers
+* Strong Bet
+* score labels
+* new delivery blockers
+* extra schedulers
+* unnecessary queues
+* max_instances
+* coalesce
+
+Do not change existing MLB behavior.
+
+Preserve the existing football restriction.
+
+TELEGRAM:
+
+Telegram commands must continue reading stored SQLite data.
+
+Do not make Telegram commands call PropLine live.
+
+FINAL GOAL:
+
+I want V4 to fully take advantage of my PropLine Pro plan.
+
+Integrate every useful endpoint listed above EXCEPT the single-player stat endpoint.
+
+The final system should provide the AI analyst with:
+
+LIVE PROPS
++
+PLAYER HISTORY
++
+RAW GAME HISTORY
++
+L5/L10/L20/L50
++
+H2H
++
+HIT RATES
++
+OVER/UNDER HISTORY
++
+TRENDS
++
+EVENT STATS
++
+FINAL RESULTS
++
+EV
++
+BEST LINE
++
+LINE MOVEMENT
++
+HISTORICAL RESOLVED PROPS
++
+EVENT INFORMATION
+
+all persisted/cached efficiently in SQLite.
+
+Do not waste API credits on redundant calls.
+
+Implement the fixes directly and keep the existing V4 pipeline intact.
