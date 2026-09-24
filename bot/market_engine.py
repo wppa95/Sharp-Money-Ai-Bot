@@ -8814,6 +8814,11 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                         _fpr_line,
                         source_provider=_fpr_provider,
                         opponent=getattr(_fpr_snap, "opponent", None),
+                        ud_history=(
+                            _fpr_hist
+                            if str(_fpr_provider).strip().lower() == "underdog"
+                            else None
+                        ),
                         ensure_real_results=False,
                     )
                 except Exception:

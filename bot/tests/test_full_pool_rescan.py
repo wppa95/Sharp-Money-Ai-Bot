@@ -347,6 +347,37 @@ class TestFPRJob:
         # prop was already delivered recently.
         db.get_ud_prop_history.assert_awaited()
 
+    async def test_underdog_history_is_attached_to_fpr_history_snapshot(self):
+        """FPR exposes line history as proxy evidence in its history snapshot."""
+        history_rows = [types.SimpleNamespace(line_value=22.5)]
+        snap = _make_snap(player="History Player", sport="NBA")
+        db = _make_db(pool={("History Player", "Points", 22.5): snap})
+        db.get_ud_prop_history = AsyncMock(return_value=history_rows)
+        ctx = _make_context(db)
+        health = _make_health(cursor=0)
+        history_provider = types.SimpleNamespace(
+            get_snapshot=AsyncMock(return_value=None)
+        )
+
+        from market_engine import _full_pool_rescan_job
+
+        with (
+            patch("market_engine.get_health_tracker", return_value=health),
+            patch("market_engine._fetch_and_compute_hit_rates", new=AsyncMock(return_value=None)),
+            patch("market_engine._is_game_live_or_past", return_value=False),
+            patch("market_engine._is_prop_deduped", return_value=True),
+            patch("providers.player_history.get_player_history_provider", return_value=history_provider),
+            patch("engine.ud_scoring.score_ud_prop", return_value=_make_score()),
+            patch("engine.player_validator.validate_player_prop", return_value=_make_validation()),
+            patch("engine.ud_bet_decision.make_ud_bet_decision", return_value=_make_decision()),
+            patch("engine.ud_scoring.compute_market_quality", return_value=MagicMock()),
+            patch("engine.ud_scoring.detect_market_pressure", return_value=MagicMock()),
+        ):
+            await _full_pool_rescan_job(ctx)
+
+        history_provider.get_snapshot.assert_awaited_once()
+        assert history_provider.get_snapshot.await_args.kwargs["ud_history"] == history_rows
+
     async def test_future_props_beyond_24_hours_remain_in_fpr_universe(self):
         """FPR does not treat a legitimate future prop as out of scope."""
         snap = _make_snap(
