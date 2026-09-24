@@ -1,10 +1,10 @@
 ---
-name: History-optional delivery policy
-description: Sport-specific player-history requirements for directional Telegram delivery.
+name: History source coverage policy
+description: Public-first player-history coverage requirements across configured sports.
 ---
 
-User-facing picks require explicit OVER/UNDER direction. MLB, NBA, and WNBA always require qualifying history; other non-football sports may proceed only when no history is available, and any available history still needs five settled results. Football-family sports remain blocked.
+Every configured prop sport should have player history through a public source where available, or an existing authorized provider connection otherwise. Delivery may be blocked only by missing usable history or missing OVER/UNDER direction; Watchlist and Near-Miss labels are not blockers.
 
-**Why:** Primary baseball/basketball markets are expected to have history, while sparse or newly supported sports should not disappear solely because a provider has not returned history yet. Available history must never be silently bypassed.
+**Why:** The user explicitly chose public sources first and expects every configured sport to have a history route, rather than treating missing coverage as an acceptable default.
 
-**How to apply:** Enforce direction and football suppression first. For MLB/NBA/WNBA, require history even when absent. For other non-football sports, apply the existing completed-history provenance/sample gate when a marker exists; otherwise allow direction through downstream freshness, timing, tracking, and deduplication checks.
+**How to apply:** When adding or changing configured sports, verify a public player-results adapter or mapped authorized provider route. If neither is available, ask for access through the secure secrets flow. Keep history and direction as the only candidate blockers; do not block solely on Watchlist or Near-Miss state.

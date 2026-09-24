@@ -72,6 +72,28 @@ def test_wnba_common_v3_gamelog_event_is_parsed():
     assert rows[0].actual_value == 2.0
     assert rows[0].game_date == "2026-08-23"
     assert rows[0].opponent == "LV"
+    assert rows[0].game_id == "401"
+
+
+def test_legacy_flat_gamelog_event_is_parsed_with_game_id():
+    """Older ESPN responses put stat values directly on events[id]."""
+    data = {
+        "categories": [{"labels": ["MIN", "PTS"]}],
+        "events": {
+            "402": {
+                "gameDate": "2026-08-24T01:00:00.000+00:00",
+                "opponent": {"abbreviation": "SEA"},
+                "stats": ["30", "12"],
+            }
+        },
+    }
+    rows = PlayerStatsProvider()._parse_espn_gamelog(
+        data, "Sample Player", "WNBA", "points"
+    )
+    assert len(rows) == 1
+    assert rows[0].actual_value == 12.0
+    assert rows[0].game_id == "402"
+    assert rows[0].opponent == "SEA"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -123,6 +145,14 @@ class TestSoccerStatMap:
 
     def test_get_stat_map_returns_soccer_map(self):
         assert _get_stat_map("SOCCER") is _SOCCER_STAT_MAP
+
+
+@pytest.mark.parametrize(
+    "sport",
+    ["SOCCER", "FIFA", "EPL", "LaLiga", "SerieA", "Bundesliga", "Ligue1", "MLS"],
+)
+def test_soccer_league_aliases_use_soccer_stat_map(sport):
+    assert _get_stat_map(sport) is _SOCCER_STAT_MAP
 
     def test_get_stat_map_soccer_case_insensitive(self):
         assert _get_stat_map("soccer") is _SOCCER_STAT_MAP
@@ -354,6 +384,15 @@ class TestSoccerFetchResults:
 
     _PLAYER = "Harry Kane"
 
+    @pytest.fixture(autouse=True)
+    def _avoid_live_espn_requests(self, monkeypatch):
+        async def no_public_results(_provider, _player_name, _stat_lower):
+            return []
+
+        monkeypatch.setattr(
+            PlayerStatsProvider, "_fetch_espn_soccer", no_public_results
+        )
+
     def _make_fake_result(
         self,
         player: str = "Harry Kane",
@@ -500,6 +539,7 @@ class TestSoccerFetchResults:
             ps_mod._soccer_provider_instance = original
 
         assert results == []
+
 
     def test_unknown_player_returns_empty(self):
         import providers.player_stats as ps_mod
@@ -850,3 +890,115 @@ class TestUnderdogProviderNorms:
     def test_assists_soccer_normalizes(self):
         from providers.underdog_provider import _normalize_stat
         assert _normalize_stat("assists") == "assists"
+
+
+@pytest.mark.parametrize(
+    ("sport", "league_slug"),
+    [
+        ("EPL", "eng.1"),
+        ("LaLiga", "esp.1"),
+        ("SerieA", "ita.1"),
+        ("Bundesliga", "ger.1"),
+        ("Ligue1", "fra.1"),
+        ("MLS", "usa.1"),
+    ],
+)
+def test_configured_soccer_league_uses_public_espn_route(
+    sport, league_slug, monkeypatch
+):
+    provider = PlayerStatsProvider()
+    calls = []
+
+    async def fake_espn(
+        player_name, routed_sport, stat_lower, sport_slug, requested_league
+    ):
+        calls.append(
+            (player_name, routed_sport, stat_lower, sport_slug, requested_league)
+        )
+        return [
+            RawGameResult(
+                player_name=player_name,
+                sport=routed_sport,
+                stat_type=stat_lower,
+                game_date="2026-08-24",
+                actual_value=1.0,
+                opponent="Opponent",
+                source="espn_gamelog",
+            )
+        ]
+
+    monkeypatch.setattr(provider, "_fetch_espn", fake_espn)
+    rows = run(provider.fetch_results("Sample Player", sport, "goals"))
+
+    assert calls == [
+        ("Sample Player", sport.upper(), "goals", "soccer", league_slug)
+    ]
+    assert len(rows) == 1
+    assert rows[0].sport == sport.upper()
+
+
+def test_generic_soccer_prefers_public_espn_before_keyed_provider(monkeypatch):
+    import providers.player_stats as ps_mod
+
+    provider = PlayerStatsProvider()
+    public_row = RawGameResult(
+        player_name="Sample Player",
+        sport="SOCCER",
+        stat_type="goals",
+        game_date="2026-08-24",
+        actual_value=1.0,
+        opponent="Opponent",
+        source="espn_gamelog",
+    )
+    fallback_calls = []
+
+    async def public_fetch(_player_name, _stat_lower):
+        return [public_row]
+
+    async def keyed_fetch(player_name, sport, stat_type):
+        fallback_calls.append((player_name, sport, stat_type))
+        return []
+
+    monkeypatch.setenv("FOOTBALL_DATA_API_KEY", "test-key")
+    monkeypatch.setattr(provider, "_fetch_espn_soccer", public_fetch)
+    monkeypatch.setattr(
+        ps_mod,
+        "_soccer_provider_instance",
+        type("MockSoccerProvider", (), {"fetch_results": staticmethod(keyed_fetch)})(),
+    )
+
+    rows = run(provider.fetch_results("Sample Player", "SOCCER", "goals"))
+    assert rows == [public_row]
+    assert fallback_calls == []
+
+
+def test_fifa_does_not_use_unrelated_espn_club_league_route(monkeypatch):
+    import providers.player_stats as ps_mod
+
+    provider = PlayerStatsProvider()
+    fifa_row = RawGameResult(
+        player_name="Sample Player",
+        sport="FIFA",
+        stat_type="goals",
+        game_date="2026-08-24",
+        actual_value=1.0,
+        opponent="Opponent",
+        source="football_data_org",
+    )
+
+    async def unexpected_espn(*_args, **_kwargs):
+        raise AssertionError("FIFA must not use generic soccer club-league history")
+
+    async def fifa_fetch(player_name, sport, stat_type):
+        return [fifa_row._replace(sport=sport)]
+
+    monkeypatch.setattr(provider, "_fetch_espn_soccer", unexpected_espn)
+    monkeypatch.setattr(
+        ps_mod,
+        "_soccer_provider_instance",
+        type("MockSoccerProvider", (), {"fetch_results": staticmethod(fifa_fetch)})(),
+    )
+
+    rows = run(provider.fetch_results("Sample Player", "FIFA", "goals"))
+    assert len(rows) == 1
+    assert rows[0].sport == "FIFA"

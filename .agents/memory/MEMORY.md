@@ -142,7 +142,7 @@
 - [PropLine market mapping](propline-market-mapping.md) — resolve sport-specific labels before generic aliases; soccer shots and CS2 map ranges must not be misrouted.
 - [PropLine read-only rotation](propline-readonly-rotation.md) — bounded discovery-backed endpoint rotation shares the persistent limiter and checkpoints family/target progress atomically.
 - [Test fixture contracts](test-fixture-contracts.md) — control current-season provider data, patch active-sport config for pacing, and include all six strict history windows.
-- [History-optional delivery](history-optional-delivery.md) — only esports, tennis, and soccer may send without completed player history; all sports still require direction.
+- [History source coverage](history-optional-delivery.md) — every configured sport needs public-first player history or an existing provider route; only missing history/direction may block delivery.
 - [NFL + NBA + MLB green goblin selection](nfl-green-goblin-selection.md) — NFL, NBA, and MLB delivery use only strong directional high-floor markets and choose the lowest qualifying line.
 - [Evidence-bound AI value analysis](ai-value-analysis.md) — explain explicit line differences and directional history; never invent unavailable odds or value.
 - [Underdog event timing](underdog-event-timing.md) — join event metadata only through explicit provider IDs; unknown timing must remain delivery-blocked.

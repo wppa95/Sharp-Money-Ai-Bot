@@ -577,6 +577,17 @@ class TestCompetitionCascade:
 # ─────────────────────────────────────────────────────────────────────────────
 
 class TestSoccerDispatch:
+    @pytest.fixture(autouse=True)
+    def _mock_public_espn_fallback(self, monkeypatch):
+        from providers.player_stats import PlayerStatsProvider
+
+        async def no_results(_provider, _player_name, _stat_lower):
+            return []
+
+        monkeypatch.setattr(
+            PlayerStatsProvider, "_fetch_espn_soccer", no_results
+        )
+
     def test_soccer_routed_to_soccer_provider(self):
         import providers.player_stats as ps_mod
         from providers.player_stats import PlayerStatsProvider

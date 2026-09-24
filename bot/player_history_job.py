@@ -13,14 +13,14 @@ from engine.sport_policy import canonical_sport_key, is_disallowed_football_spor
 
 logger = logging.getLogger(__name__)
 
-# Sports in the supported player-prop universe.  Several of these sports do
-# not have a public PlayerStatsProvider path; they remain here because the
-# scheduled PropLine supplement is their documented history path.
+# Sports in the supported player-prop universe. Every configured default must
+# have either a public PlayerStatsProvider route or a mapped scheduled
+# PropLine history route.
 _SUPPORTED_HISTORY_SPORTS = frozenset({
     "MLB", "NBA", "NFL", "NCAAF", "CFB",
     "WNBA", "NHL", "CS", "DOTA", "TENNIS",
-    "MLS", "NCAAB", "FIFA",
-    "SOCCER",         # Requires FOOTBALL_DATA_API_KEY; returns [] gracefully without it
+    "MLS", "NCAAB", "FIFA", "SOCCER",
+    "EPL", "LALIGA", "SERIEA", "BUNDESLIGA", "LIGUE1", "UCL",
     "LOL", "VAL", "VALORANT",
     "TT", "TABLE TENNIS", "BADMINTON",
     "MMA", "UFC", "GOLF", "PGA",

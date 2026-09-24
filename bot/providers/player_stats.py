@@ -140,6 +140,14 @@ _SOCCER_STAT_MAP: dict[str, Optional[list[str]]] = {
     "clean sheets":      ["CS"],
 }
 
+# Configured soccer league labels with a no-key ESPN gamelog route. UCL and
+# FIFA tournament history remain on PropLine until a league-specific public
+# gamelog route is available; routing them through a club league would mix
+# competitions.
+_ESPN_SOCCER_SPORTS = frozenset({
+    "SOCCER", "EPL", "LALIGA", "SERIEA", "BUNDESLIGA", "LIGUE1", "MLS",
+})
+
 # Leagues probed in priority order when searching for a soccer player by name.
 # We query each league's ESPN athlete-search endpoint until we find a match;
 # the winning (athlete_id, league_slug) pair is cached for the process lifetime.
@@ -354,6 +362,11 @@ _ESPN_ROUTE: dict[str, tuple[str, str]] = {
     "NCAAB":  ("basketball",     "mens-college-basketball"),
     "NCAAF":  ("football",       "college-football"),
     "CFB":    ("football",       "college-football"),   # Underdog identifier for NCAAF
+    "EPL":    ("soccer",         "eng.1"),
+    "LALIGA": ("soccer",         "esp.1"),
+    "SERIEA": ("soccer",         "ita.1"),
+    "BUNDESLIGA": ("soccer",    "ger.1"),
+    "LIGUE1": ("soccer",         "fra.1"),
     "MLS":    ("soccer",         "usa.1"),
 }
 
@@ -459,32 +472,27 @@ class PlayerStatsProvider:
                     player_name, "NHL", stat_type
                 )
             elif sport_upper in ("SOCCER", "FIFA"):
-                # Uses SoccerStatsProvider (football-data.org API).
-                # Requires FOOTBALL_DATA_API_KEY env var (free token at
-                # https://www.football-data.org/client/register).
-                # Returns [] gracefully when the key is absent — same pattern
-                # as the optional PandaScore/CS2 fallback.
-                # NOTE: SOCCER is NOT in the UD_ALERT_SPORTS default because the
-                # free tier has no lineup/appearance data; without it DNPs cannot
-                # be distinguished from zero-stat games, producing invalid hit rates.
-                # Enable manually: UD_ALERT_SPORTS=...,SOCCER + FOOTBALL_DATA_API_KEY.
-                # _fetch_espn_soccer() is also available for ESPN-accessible envs.
-                soccer_results: list[RawGameResult] = []
-                if os.environ.get("FOOTBALL_DATA_API_KEY") or _soccer_provider_instance is not None:
+                # Generic soccer can use public ESPN club-league gamelogs.
+                # FIFA tournament props must not be filled from those unrelated
+                # competitions; they use only the FIFA-preserving provider
+                # alias below or the scheduled PropLine history route.
+                if sport_upper == "SOCCER":
+                    espn_results = await self._fetch_espn_soccer(
+                        player_name, stat_type.lower().strip().replace("_", " ")
+                    )
+                    if espn_results:
+                        return _relabel_results(espn_results, sport_upper)
+
+                if (
+                    os.environ.get("FOOTBALL_DATA_API_KEY")
+                    or _soccer_provider_instance is not None
+                ):
                     soccer_results = await _get_soccer_provider().fetch_results(
                         player_name, sport_upper, stat_type
                     )
-                if soccer_results:
-                    return _relabel_results(soccer_results, sport_upper)
-
-                # ESPN already has a no-key soccer gamelog route.  Use it as a
-                # fallback for FIFA/soccer props instead of returning no
-                # evidence merely because the optional football-data token is
-                # absent or has no coverage for this player.
-                espn_results = await self._fetch_espn_soccer(
-                    player_name, stat_type.lower().strip().replace("_", " ")
-                )
-                return _relabel_results(espn_results, sport_upper)
+                    if soccer_results:
+                        return _relabel_results(soccer_results, sport_upper)
+                return []
             elif sport_upper in _ESPN_ROUTE:
                 sport_slug, league_slug = _ESPN_ROUTE[sport_upper]
                 return await self._fetch_espn(
@@ -739,52 +747,93 @@ class PlayerStatsProvider:
             return results
 
         if not is_nfl:
-                            # Flat sports (WNBA, NBA, CFB, etc.) — adapted for new common/v3 structure
-                    stat_map = _get_stat_map(sport)
-                    target_labels = stat_map.get(stat_lower) if stat_map else None
-                    if target_labels is None:
-                        logger.debug("ESPN %s: no mapping for stat %r", sport, stat_lower)
-                        return []
+            # Flat sports (basketball, soccer, etc.) use common/v3 gamelogs.
+            stat_map = _get_stat_map(sport)
+            target_labels = stat_map.get(stat_lower) if stat_map else None
+            if target_labels is None:
+                logger.debug("ESPN %s: no mapping for stat %r", sport, stat_lower)
+                return []
 
-                    labels = data.get("labels") or []
+            labels = data.get("labels") or []
+            for st in season_types:
+                display = (st.get("displayName") or "").lower()
+                if "preseason" in display or "postseason" in display or "playoff" in display:
+                    continue
 
-                    for st in season_types:
-                        display = (st.get("displayName") or "").lower()
-                        if "preseason" in display or "postseason" in display or "playoff" in display:
+                for cat in (st.get("categories") or []):
+                    for ev in (cat.get("events") or []):
+                        event_id = str(ev.get("eventId") or "")
+                        if regular_ids and event_id not in regular_ids:
                             continue
 
-                        for cat in (st.get("categories") or []):
-                            for ev in (cat.get("events") or []):
-                                event_id = str(ev.get("eventId") or "")
-                                if regular_ids and event_id not in regular_ids:
-                                    continue
+                        flat_stats = ev.get("stats") or []
+                        val = _sum_espn_labels(
+                            labels,
+                            flat_stats,
+                            target_labels,
+                            stat_lower,
+                        )
+                        if val is None:
+                            continue
 
-                                flat_stats = ev.get("stats") or []
-                                val = _sum_espn_labels(
-                                    labels,
-                                    flat_stats,
-                                    target_labels,
-                                    stat_lower,
-                                )
-                                if val is None:
-                                    continue
+                        meta = events_obj.get(event_id) or {}
+                        gd = _event_game_date(meta) or _parse_date(meta.get("gameDate"))
+                        if not gd:
+                            continue
 
-                                meta = events_obj.get(event_id) or {}
-                                gd = _event_game_date(meta) or _parse_date(meta.get("gameDate"))
-                                if not gd:
-                                    continue
+                        results.append(RawGameResult(
+                            player_name=player_name,
+                            sport=sport,
+                            stat_type=stat_lower,
+                            game_date=gd,
+                            actual_value=val,
+                            opponent=_event_opponent(meta),
+                            source="espn_gamelog",
+                            game_id=event_id,
+                        ))
 
-                                opp = _event_opponent(meta)
-
-                                results.append(RawGameResult(
-                                    player_name=player_name,
-                                    sport=sport,
-                                    stat_type=stat_lower,
-                                    game_date=gd,
-                                    actual_value=val,
-                                    opponent=opp,
-                                    source="espn_gamelog",
-                                ))
+            # Older ESPN responses put stats directly on events[id] and labels
+            # on either the response or category object. Support that shape
+            # without duplicating rows from common/v3 responses.
+            if not results:
+                if not labels:
+                    labels = next(
+                        (
+                            cat.get("labels")
+                            for cat in categories
+                            if isinstance(cat, dict) and cat.get("labels")
+                        ),
+                        [],
+                    )
+                for event_id, event in events_obj.items():
+                    event_id = str(event_id)
+                    if event_id not in regular_ids or not isinstance(event, dict):
+                        continue
+                    flat_stats = event.get("stats") or []
+                    if not flat_stats:
+                        continue
+                    event_labels = event.get("labels") or labels
+                    val = _sum_espn_labels(
+                        event_labels,
+                        flat_stats,
+                        target_labels,
+                        stat_lower,
+                    )
+                    if val is None:
+                        continue
+                    gd = _event_game_date(event) or _parse_date(event.get("gameDate"))
+                    if not gd:
+                        continue
+                    results.append(RawGameResult(
+                        player_name=player_name,
+                        sport=sport,
+                        stat_type=stat_lower,
+                        game_date=gd,
+                        actual_value=val,
+                        opponent=_event_opponent(event),
+                        source="espn_gamelog",
+                        game_id=event_id,
+                    ))
 
         logger.debug(
             "ESPN %s: %s / %s → %d game results",
@@ -949,9 +998,7 @@ def _get_stat_map(sport: str) -> Optional[dict]:
         return _NBA_STAT_MAP
     if s == "NHL":
         return _NHL_STAT_MAP
-    if s == "SOCCER":
-        return _SOCCER_STAT_MAP
-    if s == "FIFA":
+    if s in _ESPN_SOCCER_SPORTS or s == "FIFA":
         return _SOCCER_STAT_MAP
     return None
 

@@ -513,6 +513,27 @@ def test_supported_sports_resolve_to_propline_catalog_routes(sport, official):
     assert client.official_sport_for(sport) == official
 
 
+def test_every_configured_sport_has_a_history_route():
+    from config import config
+    from player_history_job import _SUPPORTED_HISTORY_SPORTS
+
+    active_sports = {
+        str(sport or "").strip().upper()
+        for sport in config.active_sports
+        if str(sport or "").strip()
+    }
+    client = PropLineClient(api_key="test-key")
+    missing_from_history_universe = sorted(
+        active_sports - _SUPPORTED_HISTORY_SPORTS
+    )
+    missing_provider_route = sorted(
+        sport for sport in active_sports if not client.official_sport_for(sport)
+    )
+
+    assert not missing_from_history_universe
+    assert not missing_provider_route
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "sport,stat,official_sport,official_market",
