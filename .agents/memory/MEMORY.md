@@ -127,7 +127,7 @@
 - [CLV bulk writes](clv-bulk-writes.md) — bounded CLV batches and no full-history sort before LIMIT keep scheduled CLV work from appearing stuck.
 - [Funnel timing](funnel-timing.md) — report scan age/cadence from observed timestamps, never from the requested report window.
 - [Monitoring cycle budget](cycle-budget-funnel-resilience.md) — optional enrichment must have a hard shared budget so stalled history calls cannot block cycle completion or /funnel.
-- [Direction-only prop delivery](direction-only-delivery.md) — active delivery and selection use direction plus evidence; tier/BQ/MQ/PASS are legacy metadata only.
+- [Direction-only prop delivery](direction-only-delivery.md) — only no history or no OVER/UNDER direction may block; watchlist/near-miss states stay non-blocking.
 - [Sport delivery without quotas](independent-sport-delivery-quotas.md) — keep existing per-pick gates and ranking, but do not cap Telegram sends by sport or rolling count.
 - [PropLine complete-feed ledger](propline-complete-feed-ledger.md) — fetch all active non-football sports, retain immutable normalized observations, and withhold evaluation on partial feeds.
 - [PropLine catalog audit boundary](propline-catalog-audit.md) — catalog drift is separate operational evidence; retain unknown identities and resolve them only when a later complete audit maps them.
