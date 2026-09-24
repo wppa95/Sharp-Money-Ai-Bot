@@ -25,7 +25,7 @@ fully unit-testable without any config import.
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, Tuple
 
 
@@ -51,6 +51,18 @@ _PREGAME_EVENT_STATUSES = frozenset({
 })
 
 
+def _naive_utc(value: Optional[datetime]) -> Optional[datetime]:
+    """Normalize aware timestamps to naive UTC; treat naive values as UTC."""
+    if value is None:
+        return None
+    try:
+        if value.tzinfo is not None and value.utcoffset() is not None:
+            return value.astimezone(timezone.utc).replace(tzinfo=None)
+        return value.replace(tzinfo=None)
+    except (OverflowError, TypeError, ValueError):
+        return None
+
+
 def is_event_pregame(
     game_time: Optional[datetime],
     *,
@@ -70,8 +82,10 @@ def is_event_pregame(
     if game_time is None:
         return False, "Event start/state is unknown"
 
-    now = datetime.utcnow()
-    gt = game_time.replace(tzinfo=None) if game_time.tzinfo is not None else game_time
+    now = _naive_utc(datetime.now(timezone.utc))
+    gt = _naive_utc(game_time)
+    if now is None or gt is None:
+        return False, "Event start/state is unknown"
     try:
         if gt <= now:
             return False, "🔴 Game already in progress"
@@ -89,6 +103,7 @@ def is_game_alertable(
     edge: float,
     game_status: Optional[str] = None,
     require_known: bool = False,
+    now: Optional[datetime] = None,
 ) -> Tuple[bool, str]:
     """
     Decide whether an alert is within the acceptable timing window.
@@ -119,11 +134,14 @@ def is_game_alertable(
                 return False, "Event start/state is unknown"
         return True, ""
 
-    # Normalise to naive UTC
-    now = datetime.utcnow()
-    gt = game_time.replace(tzinfo=None) if game_time.tzinfo is not None else game_time
+    # Normalise both instants to naive UTC. Naive provider timestamps are
+    # already stored as UTC; aware timestamps must be converted, not stripped.
+    now_utc = _naive_utc(now or datetime.now(timezone.utc))
+    gt = _naive_utc(game_time)
+    if now_utc is None or gt is None:
+        return False, "Event start/state is unknown"
 
-    minutes_to_start = (gt - now).total_seconds() / 60.0
+    minutes_to_start = (gt - now_utc).total_seconds() / 60.0
 
     # Game already started
     if minutes_to_start <= 0:
@@ -159,8 +177,10 @@ def format_game_time_label(game_time: Optional[datetime]) -> str:
     if game_time is None:
         return ""
 
-    now = datetime.utcnow()
-    gt = game_time.replace(tzinfo=None) if game_time.tzinfo is not None else game_time
+    now = _naive_utc(datetime.now(timezone.utc))
+    gt = _naive_utc(game_time)
+    if now is None or gt is None:
+        return ""
 
     minutes_to_start = (gt - now).total_seconds() / 60.0
 

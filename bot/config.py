@@ -447,8 +447,13 @@ class Config:
     # Block alerts for games that start sooner than this (minutes).
     # Exception: allows through if edge ≥ URGENT_EDGE_THRESHOLD.
     ALERT_WINDOW_MIN_MINUTES: int = int(os.environ.get("ALERT_WINDOW_MIN_MINUTES", "30"))
-    # Block alerts for games that start later than this (minutes from now).
-    ALERT_WINDOW_MAX_MINUTES: int = int(os.environ.get("ALERT_WINDOW_MAX_MINUTES", "120"))
+    # Keep user-facing alerts within six hours of the scheduled event start.
+    # Lower operational overrides are allowed, but a larger value cannot
+    # expand the product's alert horizon beyond six hours.
+    ALERT_WINDOW_MAX_MINUTES: int = min(
+        360,
+        max(1, int(os.environ.get("ALERT_WINDOW_MAX_MINUTES", "360"))),
+    )
     # Edge % at or above which an alert bypasses the min-minutes gate
     # (i.e. "urgent" edge can fire even if game is <30 min away).
     URGENT_EDGE_THRESHOLD: float = float(os.environ.get("URGENT_EDGE_THRESHOLD", "8.0"))

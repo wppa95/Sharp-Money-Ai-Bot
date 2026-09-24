@@ -1588,6 +1588,7 @@ class AlertDelivery:
         from alert_normalizer import normalize_pp
         from alert_scope_filter import check
         from engine.timing import is_game_alertable
+        from reporting import is_current_reporting_day
 
         if not _is_fresh_delivery_line(getattr(opp.pp_line, "fetched_at", None)):
             logger.debug(
@@ -1609,6 +1610,16 @@ class AlertDelivery:
 
         # 1. Game timing filter
         game_time = getattr(opp.pp_line, "start_time", None)
+        if strict_pregame and not is_current_reporting_day(game_time):
+            return DeliveryResult(
+                sent=False,
+                filtered=True,
+                filtered_reason=(
+                    "Event is not scheduled for the current reporting day"
+                    if game_time is not None
+                    else "Event date is unknown"
+                ),
+            )
         allowed, timing_reason = is_game_alertable(
             game_time,
             min_minutes=config.ALERT_WINDOW_MIN_MINUTES,
@@ -1860,7 +1871,7 @@ class AlertDelivery:
             allowed, timing_reason = is_game_alertable(
                 game_time,
                 min_minutes=0,
-                max_minutes=1440,
+                max_minutes=config.ALERT_WINDOW_MAX_MINUTES,
                 urgent_edge=config.URGENT_EDGE_THRESHOLD,
                 edge=line_change * 2.0,
                 game_status=game_status,

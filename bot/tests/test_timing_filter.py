@@ -62,6 +62,60 @@ class TestGameTooFarOut:
         assert ok is False
 
 
+class TestSixHourAlertHorizon:
+    def test_allows_event_exactly_six_hours_away_with_offset_timestamp(self):
+        now = datetime(2026, 9, 24, 12, 0, tzinfo=timezone.utc)
+        # 1 p.m. CDT is 6 p.m. UTC: exactly six hours after noon UTC.
+        event = datetime(
+            2026, 9, 24, 13, 0, tzinfo=timezone(timedelta(hours=-5))
+        )
+
+        allowed, reason = is_game_alertable(
+            event,
+            min_minutes=0,
+            max_minutes=360,
+            urgent_edge=8.0,
+            edge=5.0,
+            now=now,
+        )
+
+        assert allowed is True
+        assert reason == ""
+
+    def test_blocks_event_more_than_six_hours_away(self):
+        now = datetime(2026, 9, 24, 12, 0, tzinfo=timezone.utc)
+        event = now + timedelta(minutes=361)
+
+        allowed, reason = is_game_alertable(
+            event,
+            min_minutes=0,
+            max_minutes=360,
+            urgent_edge=8.0,
+            edge=99.0,
+            now=now,
+        )
+
+        assert allowed is False
+        assert "window closes at 360m" in reason
+
+    def test_ten_pm_game_is_not_alertable_at_five_am(self):
+        # 5 a.m. CDT = 10:00 UTC; 10 p.m. CDT = 03:00 UTC the next day.
+        now = datetime(2026, 9, 24, 10, 0, tzinfo=timezone.utc)
+        event = datetime(2026, 9, 25, 3, 0, tzinfo=timezone.utc)
+
+        allowed, reason = is_game_alertable(
+            event,
+            min_minutes=0,
+            max_minutes=360,
+            urgent_edge=8.0,
+            edge=99.0,
+            now=now,
+        )
+
+        assert allowed is False
+        assert "window closes at 360m" in reason
+
+
 class TestGameTooClose:
     def test_blocks_below_min_when_not_urgent(self):
         ok, reason = is_game_alertable(_future(15), edge=5.0, **DEFAULT)

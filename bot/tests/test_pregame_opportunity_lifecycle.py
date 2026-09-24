@@ -106,6 +106,7 @@ def test_command_views_reject_unknown_and_started_props():
 async def test_pregame_underdog_prop_can_reach_delivery():
     delivery = _delivery()
     with (
+        patch("reporting.is_current_reporting_day", return_value=True),
         patch("alert_scope_filter.check", return_value=SimpleNamespace(allowed=True)),
         patch(
             "alerts_multiplatform.format_underdog_change_alert",
@@ -141,6 +142,7 @@ async def test_pregame_underdog_prop_can_reach_delivery():
 async def test_pregame_prizepicks_prop_can_reach_delivery():
     delivery = _delivery()
     with (
+        patch("reporting.is_current_reporting_day", return_value=True),
         patch("alert_scope_filter.check", return_value=SimpleNamespace(allowed=True)),
         patch("alerts.format_pp_alert", return_value="<msg>"),
         patch(
@@ -162,6 +164,7 @@ async def test_pregame_prizepicks_prop_can_reach_delivery():
 async def test_scheduled_non_mlb_underdog_prop_can_reach_delivery(sport):
     delivery = _delivery()
     with (
+        patch("reporting.is_current_reporting_day", return_value=True),
         patch("alert_scope_filter.check", return_value=SimpleNamespace(allowed=True)),
         patch(
             "alerts_multiplatform.format_underdog_change_alert",
@@ -280,4 +283,77 @@ async def test_unknown_prizepicks_state_cannot_bypass_pregame_protection():
         )
     assert result.sent is False
     assert "unknown" in result.filtered_reason.lower()
+    broadcast.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_underdog_delivery_blocks_events_beyond_six_hours():
+    delivery = _delivery()
+    game_time = datetime.utcnow() + timedelta(hours=7)
+    with (
+        patch("reporting.is_current_reporting_day", return_value=True),
+        patch("alerts.config.ALERT_WINDOW_MAX_MINUTES", 360),
+        patch("alert_scope_filter.check", return_value=SimpleNamespace(allowed=True)),
+        patch("alerts.broadcast_alert", new_callable=AsyncMock) as broadcast,
+    ):
+        result = await delivery.deliver_underdog(
+            "UD Player",
+            "TEAM",
+            "NBA",
+            "Points",
+            20.5,
+            21.5,
+            game_time=game_time,
+            strict_pregame=True,
+            validation=SimpleNamespace(
+                has_supporting_data=True,
+                data_source="propline",
+                n_real_games=0,
+                n_supplemental_games=5,
+            ),
+            decision=SimpleNamespace(recommendation="OVER", confidence=80),
+        )
+
+    assert result.sent is False
+    assert "window closes at 360m" in result.filtered_reason
+    broadcast.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_prizepicks_delivery_blocks_events_beyond_six_hours():
+    delivery = _delivery()
+    game_time = datetime.utcnow() + timedelta(hours=7)
+    with (
+        patch("reporting.is_current_reporting_day", return_value=True),
+        patch("alerts.config.ALERT_WINDOW_MAX_MINUTES", 360),
+        patch("alert_scope_filter.check", return_value=SimpleNamespace(allowed=True)),
+        patch("alerts.broadcast_alert", new_callable=AsyncMock) as broadcast,
+    ):
+        result = await delivery.deliver_pp(
+            _pp_opportunity(start_time=game_time),
+            strict_pregame=True,
+            evidence_available=True,
+        )
+
+    assert result.sent is False
+    assert "window closes at 360m" in result.filtered_reason
+    broadcast.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_prizepicks_strict_delivery_rejects_event_outside_reporting_day():
+    delivery = _delivery()
+    with (
+        patch("reporting.is_current_reporting_day", return_value=False),
+        patch("alert_scope_filter.check", return_value=SimpleNamespace(allowed=True)),
+        patch("alerts.broadcast_alert", new_callable=AsyncMock) as broadcast,
+    ):
+        result = await delivery.deliver_pp(
+            _pp_opportunity(start_time=_future(minutes=120)),
+            strict_pregame=True,
+            evidence_available=True,
+        )
+
+    assert result.sent is False
+    assert "current reporting day" in result.filtered_reason.lower()
     broadcast.assert_not_awaited()
