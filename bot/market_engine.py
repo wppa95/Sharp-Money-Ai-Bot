@@ -4259,84 +4259,19 @@ def _delivery_sport_priority(sport: object) -> int:
 
 
 def _prioritize_delivery_sports(candidates: list[dict]) -> list[dict]:
-    """Put high-priority sports first while preserving each sport's quota."""
+    """Put high-priority sports first without dropping eligible candidates."""
     candidates.sort(
         key=lambda candidate: _delivery_sport_priority(candidate.get("sport"))
     )
     return candidates
 
 
-_STRICT_SPORT_ALERT_SPORTS = frozenset({"MLB", "NBA", "NFL"})
-
-
-def _limit_strict_sport_delivery_batch(
-    candidates: list[dict],
-    recent_counts: dict[str, int],
-    *,
-    limit: int,
-) -> list[dict]:
-    """Keep the strongest remaining batch for each strict green-goblin sport.
-
-    ``candidates`` is already strongest-first at this point. Non-strict sports
-    pass through untouched; strict sports consume only the remaining slots in
-    the rolling delivery window independently.
-    """
-    remaining = {
-        sport: max(0, int(limit) - int(recent_counts.get(sport, 0) or 0))
-        for sport in _STRICT_SPORT_ALERT_SPORTS
-    }
-    selected: list[dict] = []
-    for candidate in candidates:
-        sport = str(candidate.get("sport") or "").strip().upper()
-        if sport not in _STRICT_SPORT_ALERT_SPORTS:
-            selected.append(candidate)
-            continue
-        if remaining[sport] <= 0:
-            continue
-        remaining[sport] -= 1
-        selected.append(candidate)
-    return selected
-
-
-def _limit_sport_delivery_batch(
-    candidates: list[dict],
-    recent_counts: dict[str, int],
-    *,
-    limit: int,
-) -> list[dict]:
-    """Keep up to ``limit`` strongest remaining picks independently per sport.
-
-    ``candidates`` is already ordered strongest-first within the delivery
-    pipeline. Sports do not compete for these slots: each sport gets its own
-    remaining quota in the rolling window.
-    """
-    sports = {
-        str(candidate.get("sport") or "").strip().upper()
-        for candidate in candidates
-        if str(candidate.get("sport") or "").strip()
-    }
-    remaining = {
-        sport: max(0, int(limit) - int(recent_counts.get(sport, 0) or 0))
-        for sport in sports
-    }
-    selected: list[dict] = []
-    for candidate in candidates:
-        sport = str(candidate.get("sport") or "").strip().upper()
-        if not sport:
-            continue
-        if remaining.get(sport, 0) <= 0:
-            continue
-        remaining[sport] -= 1
-        selected.append(candidate)
-    return selected
-
-
 def _apply_delivery_diversification(queue: list) -> list:
     """
     Rank all candidates by change priority with a soft diversification penalty.
 
-    The delivery loop applies the total-window cap (10 per 5 minutes) via the
-    rate limiter; this function only determines the within-group ordering.
+    No rolling alert-count cap is applied; this function only determines
+    within-group ordering.
 
     Soft group penalty: −300 for the 2nd candidate in the same (sport, stat_type)
     pair, −600 for the 3rd+.  High-BQ duplicates can still outrank weaker unique
@@ -5136,8 +5071,8 @@ async def underdog_job(context) -> None:
     _lifecycle_removed:  list[tuple[str, str, str]] = []   # (player, sport, stat_type) → REMOVED
     # Delivery queue — candidates from all three alert paths (new-prop, line-change,
     # standing) collected during the scan loops and delivered together in ranked
-    # priority order after the standing scan finishes.  Ranked delivery ensures the
-    # best picks get rate-limit slots first when more qualify than the window allows.
+    # priority order after the standing scan finishes. Ranking changes send order,
+    # not candidate eligibility or the number of alerts that can be sent.
     _delivery_queue:     list[dict]                 = []
     _snapshot_intentionally_skipped = 0
     _snapshot_intended = 0
@@ -6863,9 +6798,8 @@ async def underdog_job(context) -> None:
 
         # ── Ranked delivery phase ──────────────────────────────────────────────────
         # All qualified candidates from new-prop, line-change, and standing paths
-        # compete for rate-limit slots in priority order.  Higher-quality picks get
-        # first access; no candidate is hard-rejected — lower-priority ones are deferred
-        # and remain available in /picks and the DB.
+        # are attempted in priority order. Ranking does not impose a rolling send
+        # limit; existing per-candidate delivery gates still apply.
         if chat_ids:
             logger.info(
                 "underdog_job: delivery queue before selection — candidates=%d",
@@ -6880,53 +6814,6 @@ async def underdog_job(context) -> None:
                 require_strong=False,
             )
             _delivery_queue[:] = _select_strong_directional_picks(_delivery_queue)
-            _delivery_sports = {
-                str(candidate.get("sport") or "").strip().upper()
-                for candidate in _delivery_queue
-                if str(candidate.get("sport") or "").strip()
-            }
-            _recent_sport_counts: dict[str, int] = {}
-            _recent_count_reader = getattr(
-                db, "count_recent_telegram_picks_by_sport", None
-            )
-            if callable(_recent_count_reader) and _delivery_sports:
-                try:
-                    _recent_sport_counts = await _recent_count_reader(
-                        _delivery_sports,
-                        window_seconds=getattr(
-                            config,
-                            "SPORT_ALERT_WINDOW_SECONDS",
-                            600,
-                        ),
-                    )
-                except Exception as _sport_count_exc:
-                    logger.warning(
-                        "underdog_job: sport delivery window lookup failed: %s",
-                        type(_sport_count_exc).__name__,
-                    )
-            _delivery_queue[:] = _limit_sport_delivery_batch(
-                _delivery_queue,
-                _recent_sport_counts,
-                limit=max(
-                    0,
-                    int(getattr(config, "SPORT_ALERT_LIMIT", 2)),
-                ),
-            )
-            logger.debug(
-                "underdog_job: per-sport batch limits applied — limit=%d "
-                "window=%ss recent=%s remaining=%s",
-                int(getattr(config, "SPORT_ALERT_LIMIT", 2)),
-                int(getattr(config, "SPORT_ALERT_WINDOW_SECONDS", 600)),
-                _recent_sport_counts,
-                {
-                    sport: sum(
-                        1
-                        for candidate in _delivery_queue
-                        if str(candidate.get("sport") or "").upper() == sport
-                    )
-                    for sport in sorted(_delivery_sports)
-                },
-            )
             _prioritize_delivery_sports(_delivery_queue)
             _n_dq_deferred   = 0
             _dq_deferred_log: list[str] = []
@@ -9265,29 +9152,6 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
             require_strong=False,
         )
         _fpr_selected = _select_strong_directional_picks(_fpr_selected)
-        _fpr_sports = {
-            str(candidate.get("sport") or "").strip().upper()
-            for candidate in _fpr_selected
-            if str(candidate.get("sport") or "").strip()
-        }
-        _fpr_recent_counts: dict[str, int] = {}
-        _fpr_count_reader = getattr(db, "count_recent_telegram_picks_by_sport", None)
-        if callable(_fpr_count_reader) and _fpr_sports:
-            try:
-                _fpr_recent_counts = await _fpr_count_reader(
-                    _fpr_sports,
-                    window_seconds=getattr(config, "SPORT_ALERT_WINDOW_SECONDS", 600),
-                )
-            except Exception as _fpr_count_exc:
-                logger.warning(
-                    "full_pool_rescan: sport delivery window lookup failed: %s",
-                    type(_fpr_count_exc).__name__,
-                )
-        _fpr_selected = _limit_sport_delivery_batch(
-            _fpr_selected,
-            _fpr_recent_counts,
-            limit=max(0, int(getattr(config, "SPORT_ALERT_LIMIT", 2))),
-        )
         _prioritize_delivery_sports(_fpr_selected)
         _fpr_selected_ids = {id(candidate) for candidate in _fpr_selected}
         for _fpr_candidate in _fpr_delivery_candidates:

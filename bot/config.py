@@ -377,23 +377,6 @@ class Config:
     # Default is 0 (unlimited) — the scoring layer is the primary quality gate.
     # Set DAILY_UNDERDOG_LIMIT env var to a positive integer to re-enable.
     DAILY_UNDERDOG_LIMIT: int = int(os.environ.get("DAILY_UNDERDOG_LIMIT", "0"))
-    # Every eligible sport receives its own independent best-pick quota.
-    # Legacy STRICT_* environment names remain accepted for compatibility.
-    SPORT_ALERT_LIMIT: int = int(
-        os.environ.get(
-            "SPORT_ALERT_LIMIT",
-            os.environ.get("STRICT_SPORT_ALERT_LIMIT", "2"),
-        )
-    )
-    SPORT_ALERT_WINDOW_SECONDS: int = int(
-        os.environ.get(
-            "SPORT_ALERT_WINDOW_SECONDS",
-            os.environ.get("STRICT_SPORT_ALERT_WINDOW_SECONDS", "600"),
-        )
-    )
-    STRICT_SPORT_ALERT_LIMIT: int = SPORT_ALERT_LIMIT
-    STRICT_SPORT_ALERT_WINDOW_SECONDS: int = SPORT_ALERT_WINDOW_SECONDS
-
     # ── Per-tier confidence minimums ─────────────────────────────────────────
     # Alerts for each tier only fire when decision.confidence ≥ the minimum
     # for that tier.  Set all to 0 to disable (score-tier gate still applies).

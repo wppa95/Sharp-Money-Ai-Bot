@@ -2451,39 +2451,6 @@ class Database:
             )
             return len(audits)
 
-    async def count_recent_telegram_picks_by_sport(
-        self,
-        sports: Iterable[str],
-        *,
-        window_seconds: int = 1200,
-    ) -> dict[str, int]:
-        """Count successful actionable Telegram picks by sport in a rolling window."""
-        normalized = {
-            str(sport or "").strip().upper()
-            for sport in sports
-            if str(sport or "").strip()
-        }
-        if not normalized:
-            return {}
-        cutoff = datetime.utcnow() - timedelta(seconds=max(0, int(window_seconds)))
-        sport_expr = func.upper(TelegramDeliveryAudit.sport)
-        async with self.session() as s:
-            rows = await s.execute(
-                select(sport_expr, func.count())
-                .where(
-                    TelegramDeliveryAudit.alert_kind == "ACTIONABLE_PICK",
-                    TelegramDeliveryAudit.outcome == "sent",
-                    TelegramDeliveryAudit.attempted_at >= cutoff,
-                    sport_expr.in_(sorted(normalized)),
-                )
-                .group_by(sport_expr)
-            )
-            return {
-                str(sport or "").upper(): int(count or 0)
-                for sport, count in rows.all()
-                if sport
-            }
-
     async def get_directional_performance_summary(self) -> dict:
         """Return compact provider/sport pick performance aggregates.
 

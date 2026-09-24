@@ -34,8 +34,7 @@ from market_engine import (
     _apply_delivery_diversification,
     _cand_priority,
     _delivery_sport_priority,
-    _limit_sport_delivery_batch,
-    _limit_strict_sport_delivery_batch,
+    _prioritize_delivery_sports,
     _select_best_per_sport,
     _select_best_over_under,
     _select_strong_directional_picks,
@@ -266,74 +265,28 @@ class TestDeliveryDiversification:
         assert result[1]["_group_rank"] == 0   # each is first in its own group
 
 
-class TestStrictSportDeliveryBatch:
-    def test_limits_each_strict_sport_independently(self):
+class TestSportDeliveryPrioritization:
+    def test_priority_order_does_not_drop_candidates_or_apply_a_count_cap(self):
         queue = [
-            _make_cand(player=f"MLB-{i}", sport="MLB")
-            for i in range(7)
-        ] + [
-            _make_cand(player=f"NBA-{i}", sport="NBA")
-            for i in range(6)
-        ] + [
             _make_cand(player=f"WNBA-{i}", sport="WNBA")
-            for i in range(8)
-        ]
-
-        result = _limit_strict_sport_delivery_batch(
-            queue,
-            {},
-            limit=5,
-        )
-
-        assert sum(c["sport"] == "MLB" for c in result) == 5
-        assert sum(c["sport"] == "NBA" for c in result) == 5
-        assert sum(c["sport"] == "WNBA" for c in result) == 8
-
-    def test_existing_window_usage_leaves_only_remaining_slots(self):
-        queue = [
+            for i in range(4)
+        ] + [
             _make_cand(player=f"MLB-{i}", sport="MLB")
-            for i in range(5)
-        ] + [
-            _make_cand(player=f"NBA-{i}", sport="NBA")
-            for i in range(5)
-        ] + [
-            _make_cand(player="WNBA", sport="WNBA")
+            for i in range(4)
         ]
 
-        result = _limit_strict_sport_delivery_batch(
-            queue,
-            {"MLB": 3, "NBA": 5},
-            limit=5,
-        )
+        result = _prioritize_delivery_sports(queue)
 
-        assert [c["player"] for c in result] == [
-            "MLB-0",
-            "MLB-1",
+        assert len(result) == 8
+        assert [candidate["sport"] for candidate in result] == [
             "WNBA",
-        ]
-
-
-class TestPerSportDeliveryBatch:
-    def test_two_pick_quota_is_independent_for_each_sport(self):
-        queue = [
-            _make_cand(player="NBA-1", sport="NBA"),
-            _make_cand(player="NBA-2", sport="NBA"),
-            _make_cand(player="NBA-3", sport="NBA"),
-            _make_cand(player="NHL-1", sport="NHL"),
-            _make_cand(player="NHL-2", sport="NHL"),
-            _make_cand(player="NHL-3", sport="NHL"),
-            _make_cand(player="MLB-1", sport="MLB"),
-        ]
-
-        selected = _limit_sport_delivery_batch(
-            queue,
-            {"NBA": 1, "NHL": 2},
-            limit=2,
-        )
-
-        assert [candidate["player"] for candidate in selected] == [
-            "NBA-1",
-            "MLB-1",
+            "WNBA",
+            "WNBA",
+            "WNBA",
+            "MLB",
+            "MLB",
+            "MLB",
+            "MLB",
         ]
 
 

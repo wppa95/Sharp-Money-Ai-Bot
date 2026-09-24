@@ -3,10 +3,10 @@ name: Independent sport delivery quotas
 description: Telegram delivery capacity is allocated independently per eligible sport.
 ---
 
-Each eligible sport receives up to two strongest directional picks per rolling 10-minute window. Sports never share a global delivery pool, and OVER and UNDER count equally.
+There is no rolling per-sport alert-count quota. Every candidate that passes the existing direction, evidence, timing, freshness, and deduplication checks remains eligible for delivery.
 
-MLB, NBA, NFL, and NHL are lower delivery priority; all other eligible sports are sent first when ordering alerts. This ordering does not reduce or remove their independent quota.
+MLB, NBA, NFL, and NHL remain lower delivery priority; other eligible sports are ordered first. This is ranking only and must not suppress candidates or cap sends.
 
-**Why:** The user requires broad sport coverage rather than allowing high-volume sports to consume delivery capacity before other eligible sports can alert.
+**Why:** The previous two-pick rolling window could suppress otherwise eligible candidates after successful sends. The user requested its removal after seeing directional candidates in the funnel without corresponding alerts.
 
-**How to apply:** Preserve football-family Telegram suppression and the existing direction, evidence, freshness, timing, and deduplication safeguards. Apply the quota only after candidate selection and count successful Telegram deliveries by sport.
+**How to apply:** Preserve all per-candidate eligibility and duplicate-alert safeguards. Do not add a rolling per-sport or global count cap unless the user requests one.
