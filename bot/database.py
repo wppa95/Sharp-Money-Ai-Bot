@@ -592,6 +592,45 @@ class EVRecord(Base):
     alert_sent = Column(Boolean, default=False, nullable=False)
 
 
+class PropLineEvidence(Base):
+    """Durable, provider-agnostic evidence for one PropLine endpoint target."""
+
+    __tablename__ = "propline_evidence"
+
+    id              = Column(Integer, primary_key=True, autoincrement=True)
+    family          = Column(String(64), nullable=False)
+    target_key      = Column(String(256), nullable=False)
+    official_sport  = Column(String(64), nullable=False)
+    canonical_sport = Column(String(64), nullable=True, index=True)
+    event_id        = Column(String(256), nullable=True, index=True)
+    player_id       = Column(String(256), nullable=True)
+    player_name     = Column(String(256), nullable=True, index=True)
+    market          = Column(String(128), nullable=True, index=True)
+    outcome_id      = Column(String(256), nullable=True)
+    bookmaker       = Column(String(128), nullable=True)
+    source          = Column(String(128), nullable=True)
+    fetched_at      = Column(DateTime, nullable=False, index=True)
+    expires_at      = Column(DateTime, nullable=True, index=True)
+    complete        = Column(Boolean, nullable=False, default=True)
+    redacted        = Column(Boolean, nullable=False, default=False)
+    payload_json    = Column(Text, nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "family", "official_sport", "target_key",
+            name="uq_propline_evidence_target",
+        ),
+        Index(
+            "ix_propline_evidence_family_sport_target",
+            "family", "official_sport", "target_key",
+        ),
+        Index(
+            "ix_propline_evidence_event_player_market",
+            "event_id", "player_name", "market",
+        ),
+    )
+
+
 # ── Telegram delivery audit ───────────────────────────────────────────────────
 
 class TelegramDeliveryAudit(Base):
@@ -1405,6 +1444,221 @@ class Database:
             _sqlite_session_gate(self._url),
             self._url,
         )
+
+    @staticmethod
+    def _propline_evidence_datetime(value: object) -> datetime | None:
+        """Normalize evidence timestamps to naive UTC for SQLite."""
+        if value is None:
+            return None
+        if isinstance(value, str):
+            try:
+                value = datetime.fromisoformat(value.replace("Z", "+00:00"))
+            except ValueError:
+                return None
+        if not isinstance(value, datetime):
+            return None
+        if value.tzinfo is not None:
+            value = value.astimezone(timezone.utc).replace(tzinfo=None)
+        return value
+
+    @staticmethod
+    def _propline_evidence_value(record: object, name: str, default=None):
+        if isinstance(record, dict):
+            return record.get(name, default)
+        return getattr(record, name, default)
+
+    @staticmethod
+    def _propline_evidence_dict(row: PropLineEvidence) -> dict:
+        try:
+            payload = json.loads(row.payload_json)
+        except (TypeError, ValueError):
+            payload = None
+        return {
+            "family": row.family,
+            "target_key": row.target_key,
+            "official_sport": row.official_sport,
+            "canonical_sport": row.canonical_sport,
+            "event_id": row.event_id,
+            "player_id": row.player_id,
+            "player_name": row.player_name,
+            "market": row.market,
+            "outcome_id": row.outcome_id,
+            "bookmaker": row.bookmaker,
+            "source": row.source,
+            "fetched_at": row.fetched_at,
+            "expires_at": row.expires_at,
+            "complete": bool(row.complete),
+            "redacted": bool(row.redacted),
+            "payload": payload,
+        }
+
+    @_retry_sqlite_write
+    async def upsert_propline_evidence_batch(self, records: "Iterable[object]") -> int:
+        """Upsert complete, non-redacted endpoint evidence in one transaction."""
+        prepared: dict[tuple[str, str, str], dict] = {}
+        for record in records or ():
+            family = str(self._propline_evidence_value(record, "family", "") or "").strip()
+            target_key = str(
+                self._propline_evidence_value(record, "target_key", "") or ""
+            ).strip()
+            official_sport = str(
+                self._propline_evidence_value(record, "official_sport", "") or ""
+            ).strip()
+            if not family or not target_key or not official_sport:
+                continue
+            if not bool(self._propline_evidence_value(record, "complete", False)):
+                continue
+            if bool(self._propline_evidence_value(record, "redacted", False)):
+                continue
+            fetched_at = self._propline_evidence_datetime(
+                self._propline_evidence_value(record, "fetched_at")
+            ) or datetime.utcnow()
+            expires_at = self._propline_evidence_datetime(
+                self._propline_evidence_value(record, "expires_at")
+            )
+            payload = self._propline_evidence_value(record, "payload", None)
+            if payload is None:
+                payload = self._propline_evidence_value(record, "payload_json", {})
+                if isinstance(payload, str):
+                    try:
+                        payload = json.loads(payload)
+                    except (TypeError, ValueError):
+                        payload = {"raw": payload}
+            try:
+                payload_json = json.dumps(
+                    payload, ensure_ascii=False, separators=(",", ":"), default=str
+                )
+            except (TypeError, ValueError):
+                continue
+            values = {
+                "family": family,
+                "target_key": target_key,
+                "official_sport": official_sport,
+                "canonical_sport": self._propline_evidence_value(record, "canonical_sport"),
+                "event_id": self._propline_evidence_value(record, "event_id"),
+                "player_id": self._propline_evidence_value(record, "player_id"),
+                "player_name": self._propline_evidence_value(record, "player_name"),
+                "market": self._propline_evidence_value(record, "market"),
+                "outcome_id": self._propline_evidence_value(record, "outcome_id"),
+                "bookmaker": self._propline_evidence_value(record, "bookmaker"),
+                "source": self._propline_evidence_value(record, "source"),
+                "fetched_at": fetched_at,
+                "expires_at": expires_at,
+                "complete": True,
+                "redacted": False,
+                "payload_json": payload_json,
+            }
+            prepared[(family, official_sport, target_key)] = values
+        if not prepared:
+            return 0
+        from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+        insert_stmt = sqlite_insert(PropLineEvidence).values(list(prepared.values()))
+        stmt = insert_stmt.on_conflict_do_update(
+            index_elements=["family", "official_sport", "target_key"],
+            set_={
+                key: insert_stmt.excluded[key]
+                for key in (
+                    "canonical_sport", "event_id", "player_id", "player_name",
+                    "market", "outcome_id", "bookmaker", "source", "fetched_at",
+                    "expires_at", "complete", "redacted", "payload_json",
+                )
+            },
+        )
+        async with self.session() as s:
+            await s.execute(stmt)
+            await s.commit()
+        return len(prepared)
+
+    async def get_propline_evidence(
+        self,
+        family: str,
+        target_key: str,
+        official_sport: str | None = None,
+        *,
+        fresh_only: bool = False,
+        now: datetime | None = None,
+    ) -> dict | None:
+        filters = [
+            PropLineEvidence.family == str(family),
+            PropLineEvidence.target_key == str(target_key),
+        ]
+        if official_sport is not None:
+            filters.append(PropLineEvidence.official_sport == str(official_sport))
+        if fresh_only:
+            at = self._propline_evidence_datetime(now) or datetime.utcnow()
+            filters.append(
+                or_(
+                    PropLineEvidence.expires_at.is_(None),
+                    PropLineEvidence.expires_at > at,
+                )
+            )
+        async with self.session() as s:
+            result = await s.execute(
+                select(PropLineEvidence)
+                .where(*filters)
+                .order_by(desc(PropLineEvidence.fetched_at))
+                .limit(1)
+            )
+            row = result.scalar_one_or_none()
+        return self._propline_evidence_dict(row) if row else None
+
+    async def get_fresh_propline_evidence_target_keys(
+        self,
+        family: str,
+        target_keys: Iterable[str],
+        official_sport: str | None = None,
+        now: datetime | None = None,
+    ) -> set[str]:
+        keys = {str(key) for key in target_keys if str(key)}
+        if not keys:
+            return set()
+        at = self._propline_evidence_datetime(now) or datetime.utcnow()
+        filters = [
+            PropLineEvidence.family == str(family),
+            PropLineEvidence.target_key.in_(keys),
+            or_(
+                PropLineEvidence.expires_at.is_(None),
+                PropLineEvidence.expires_at > at,
+            ),
+        ]
+        if official_sport is not None:
+            filters.append(PropLineEvidence.official_sport == str(official_sport))
+        async with self.session() as s:
+            result = await s.execute(
+                select(PropLineEvidence.target_key).where(*filters)
+            )
+            return {str(key) for key in result.scalars().all()}
+
+    async def list_propline_evidence(
+        self,
+        *,
+        family: str | None = None,
+        official_sport: str | None = None,
+        canonical_sport: str | None = None,
+        event_id: str | None = None,
+        player_name: str | None = None,
+        market: str | None = None,
+        limit: int = 100,
+    ) -> list[dict]:
+        filters = []
+        for column, value in (
+            (PropLineEvidence.family, family),
+            (PropLineEvidence.official_sport, official_sport),
+            (PropLineEvidence.canonical_sport, canonical_sport),
+            (PropLineEvidence.event_id, event_id),
+            (PropLineEvidence.player_name, player_name),
+            (PropLineEvidence.market, market),
+        ):
+            if value is not None:
+                filters.append(column == value)
+        async with self.session() as s:
+            result = await s.execute(
+                select(PropLineEvidence)
+                .where(*filters)
+                .order_by(desc(PropLineEvidence.fetched_at))
+                .limit(max(0, int(limit)))
+            )
+            return [self._propline_evidence_dict(row) for row in result.scalars().all()]
 
     async def ensure_telegram_commands(
         self,
