@@ -15,11 +15,14 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from player_history_job import (
     _API_CALL_TARGET,
     _SUPPORTED_HISTORY_SPORTS,
+    _completed_propline_game_rows,
     _fair_cycle_targets,
+    _filter_completed_propline_game_payload,
     queue_priority_history_targets,
     _uses_propline_history,
     player_history_collector_job,
 )
+from providers.propline import PropLineReadOnlyTarget
 
 
 def test_fair_cycle_targets_round_robins_all_sports():
@@ -436,6 +439,82 @@ async def test_player_history_collector_does_not_schedule_propline_quota_calls(c
 )
 def test_propline_history_scope_excludes_only_mlb_and_football(sport, expected):
     assert _uses_propline_history(sport) is expected
+
+
+def test_player_games_persist_only_final_identified_rows_and_preserve_zero():
+    target = PropLineReadOnlyTarget(
+        family="player_games",
+        official_sport="basketball_nba",
+        canonical_sport="NBA",
+        player_name="History Player",
+        market="points",
+    )
+    result = SimpleNamespace(
+        payload={
+            "games": [
+                {
+                    "game_id": "game-final-zero",
+                    "status": "Final",
+                    "game_date": "2026-09-20T20:00:00Z",
+                    "stats": {"player_points": 0},
+                },
+                {
+                    "game_id": "game-live",
+                    "status": "In Progress",
+                    "game_date": "2026-09-21T20:00:00Z",
+                    "stats": {"points": 42},
+                },
+                {
+                    "game_id": "game-complete",
+                    "status": "Completed",
+                    "date": "2026-09-22",
+                    "stats": [
+                        {"stat_type": "points", "value": "14"},
+                    ],
+                },
+            ]
+        }
+    )
+
+    persisted_payload = _filter_completed_propline_game_payload(result.payload)
+    rows = _completed_propline_game_rows(target, result)
+
+    assert [game["game_id"] for game in persisted_payload["games"]] == [
+        "game-final-zero",
+        "game-complete",
+    ]
+    assert [(row.game_id, row.actual_value) for row in rows] == [
+        ("game-final-zero", 0.0),
+        ("game-complete", 14.0),
+    ]
+
+
+def test_player_games_never_persist_football_history():
+    target = PropLineReadOnlyTarget(
+        family="player_games",
+        official_sport="football_nfl",
+        canonical_sport="NFL",
+        player_name="Football Player",
+        market="passing_yards",
+    )
+    result = SimpleNamespace(
+        payload=[
+            {
+                "game_id": "nfl-final",
+                "status": "Final",
+                "game_date": "2026-09-20",
+                "actual_value": 250,
+            }
+        ]
+    )
+
+    assert (
+        _filter_completed_propline_game_payload(
+            result.payload, sport="NFL"
+        )
+        is None
+    )
+    assert _completed_propline_game_rows(target, result) == []
 
 
 @pytest.mark.asyncio

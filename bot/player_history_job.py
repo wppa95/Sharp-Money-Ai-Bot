@@ -2,14 +2,16 @@
 from __future__ import annotations
 
 import asyncio
+from copy import deepcopy
 import logging
 import re
 import time
-from dataclasses import replace
+from datetime import datetime, timedelta
+from dataclasses import asdict, is_dataclass, replace
 from types import SimpleNamespace
 from typing import Any
 
-from engine.sport_policy import canonical_sport_key, is_disallowed_football_sport
+from engine.sport_policy import canonical_sport_key, is_football_related_sport
 
 logger = logging.getLogger(__name__)
 
@@ -111,9 +113,9 @@ _PLAYER_HISTORY_PROPLINE_TARGETS_PER_CYCLE = max(
 
 
 def _uses_propline_history(sport: str) -> bool:
-    """Reserve PropLine history calls for non-football and allowed football sports."""
+    """Keep PropLine history calls outside the football-family sport scope."""
     canonical = canonical_sport_key(sport)
-    return not is_disallowed_football_sport(canonical)
+    return not is_football_related_sport(canonical)
 
 
 def _history_sport_order(sport: str) -> tuple[int, str]:
@@ -137,6 +139,141 @@ def _player_history_cadence_budget() -> float:
         float(getattr(_config, "PLAYER_HISTORY_CADENCE_HEADROOM_SECONDS", 15)),
     )
     return max(1.0, interval - headroom)
+
+
+def _propline_value(value: Any, *names: str) -> Any:
+    if isinstance(value, dict):
+        for name in names:
+            candidate = value.get(name)
+            if candidate not in (None, ""):
+                return candidate
+    for name in names:
+        candidate = getattr(value, name, None)
+        if candidate not in (None, ""):
+            return candidate
+    return None
+
+
+def _is_explicit_propline_final(value: Any) -> bool:
+    status = str(
+        _propline_value(value, "status", "state", "game_status") or ""
+    ).strip().lower().replace("-", "_")
+    return status in {
+        "final", "completed", "complete", "settled", "finished", "ended",
+    } or status.startswith("status_final")
+
+
+def _propline_game_records(payload: Any) -> list[Any]:
+    while isinstance(payload, dict):
+        nested = next(
+            (
+                payload[key]
+                for key in ("games", "data", "results", "items")
+                if key in payload
+            ),
+            None,
+        )
+        if nested is None or nested is payload:
+            break
+        payload = nested
+    if isinstance(payload, (list, tuple)):
+        return list(payload)
+    if isinstance(payload, dict) and _propline_value(
+        payload, "status", "state", "game_status"
+    ) is not None:
+        return [payload]
+    return []
+
+
+def _filter_completed_propline_game_payload(
+    payload: Any, *, sport: str = ""
+) -> Any:
+    """Keep only explicitly final player-game rows in persisted raw payloads."""
+    if sport and is_football_related_sport(sport):
+        return None
+    if isinstance(payload, dict):
+        for key in ("games", "data", "results", "items"):
+            if key not in payload:
+                continue
+            filtered = _filter_completed_propline_game_payload(payload[key])
+            if filtered is None:
+                return None
+            result = deepcopy(payload)
+            result[key] = filtered
+            return result
+        return deepcopy(payload) if _is_explicit_propline_final(payload) else None
+    if isinstance(payload, (list, tuple)):
+        rows = [
+            deepcopy(item)
+            for item in payload
+            if _is_explicit_propline_final(item)
+        ]
+        return rows or None
+    return None
+
+
+def _completed_propline_game_rows(target: Any, result: Any) -> list[Any]:
+    """Convert final, identified player-game stats into normal history rows."""
+    if is_football_related_sport(target.canonical_sport):
+        return []
+    from providers.player_stats import RawGameResult
+    from providers.propline import _normalize_stat, _parse_datetime
+
+    rows = []
+    target_stat = _normalize_stat(target.market)
+    for game in _propline_game_records(getattr(result, "payload", None)):
+        if not _is_explicit_propline_final(game):
+            continue
+        game_id = _propline_value(game, "event_id", "game_id", "id")
+        game_date = _parse_datetime(
+            _propline_value(
+                game, "game_date", "date", "start_time", "commence_time"
+            )
+        )
+        actual = _propline_value(game, "actual_value", "value", "stat_value")
+        if actual is None:
+            stats = _propline_value(game, "stats", "statistics", "player_stats")
+            if isinstance(stats, dict):
+                for stat_name, stat_value in stats.items():
+                    if _normalize_stat(stat_name) != target_stat:
+                        continue
+                    if isinstance(stat_value, dict):
+                        actual = _propline_value(
+                            stat_value, "actual_value", "value", "stat_value"
+                        )
+                    else:
+                        actual = stat_value
+                    break
+            elif isinstance(stats, (list, tuple)):
+                for stat_item in stats:
+                    stat_name = _propline_value(
+                        stat_item, "stat_type", "stat", "name", "market"
+                    )
+                    if _normalize_stat(stat_name) != target_stat:
+                        continue
+                    actual = _propline_value(
+                        stat_item, "actual_value", "value", "stat_value"
+                    )
+                    break
+        if game_id is None or game_date is None or actual is None:
+            continue
+        try:
+            actual_value = float(actual)
+        except (TypeError, ValueError):
+            continue
+        rows.append(
+            RawGameResult(
+                player_name=target.player_name,
+                sport=target.canonical_sport,
+                stat_type=target_stat,
+                game_date=game_date.date().isoformat(),
+                actual_value=actual_value,
+                opponent=_propline_value(game, "opponent", "opponent_name"),
+                source="propline_player_games",
+                game_id=str(game_id),
+            )
+        )
+    return rows
 
 
 def _fair_cycle_targets(
@@ -895,7 +1032,48 @@ async def propline_read_only_rotation_job(context) -> None:
             active = await db.get_active_underdog_snapshot_per_prop()
             active_rows = list(active.values()) if hasattr(active, "values") else list(active or [])
 
-        discovered_sports = await client.discover_sports()
+        async def cached_discovery(family: str, target_key: str, official: str):
+            reader = getattr(db, "get_propline_evidence", None)
+            if not asyncio.iscoroutinefunction(reader):
+                return None
+            try:
+                row = await reader(
+                    family, target_key, official, fresh_only=True
+                )
+                return (row or {}).get("payload") if row else None
+            except Exception:
+                return None
+
+        def _json_safe(value):
+            if is_dataclass(value):
+                return asdict(value)
+            if isinstance(value, (list, tuple)):
+                return [_json_safe(item) for item in value]
+            if isinstance(value, dict):
+                return {key: _json_safe(item) for key, item in value.items()}
+            return value
+
+        discovered_sports = await cached_discovery(
+            "discovery_sports", "catalog", "GLOBAL"
+        )
+        sports_from_cache = discovered_sports is not None
+        if discovered_sports is None:
+            discovered_sports = await client.discover_sports()
+            evidence_writer = getattr(db, "upsert_propline_evidence_batch", None)
+            if asyncio.iscoroutinefunction(evidence_writer):
+                await evidence_writer([{
+                    "family": "discovery_sports",
+                    "target_key": "catalog",
+                    "official_sport": "GLOBAL",
+                    "source": "PropLine",
+                    "fetched_at": datetime.utcnow(),
+                    "expires_at": datetime.utcnow() + timedelta(minutes=30),
+                    "complete": not bool(
+                        getattr(client, "sports_discovery_failed", False)
+                    ),
+                    "redacted": False,
+                    "payload": _json_safe(discovered_sports),
+                }])
         if getattr(client, "sports_discovery_failed", False):
             discovery_audit = audit_propline_discovery(
                 None,
@@ -904,7 +1082,7 @@ async def propline_read_only_rotation_job(context) -> None:
             )
         else:
             audit_method = getattr(client, "audit_discovery", None)
-            if callable(audit_method):
+            if not sports_from_cache and callable(audit_method):
                 discovery_audit = audit_method(active_props=active_rows)
             else:
                 discovery_audit = audit_propline_discovery(
@@ -932,16 +1110,35 @@ async def propline_read_only_rotation_job(context) -> None:
                 )
                 if not official_sport:
                     continue
-                try:
-                    events = await discover_events(official_sport)
-                except Exception as exc:  # noqa: BLE001
-                    logger.warning(
-                        "propline_read_only_rotation_job: event discovery "
-                        "failed sport=%s error=%s",
-                        official_sport,
-                        type(exc).__name__,
+                events = await cached_discovery(
+                    "discovery_events", official_sport, official_sport
+                )
+                if events is None:
+                    try:
+                        events = await discover_events(official_sport)
+                    except Exception as exc:  # noqa: BLE001
+                        logger.warning(
+                            "propline_read_only_rotation_job: event discovery "
+                            "failed sport=%s error=%s",
+                            official_sport,
+                            type(exc).__name__,
+                        )
+                        continue
+                    evidence_writer = getattr(
+                        db, "upsert_propline_evidence_batch", None
                     )
-                    continue
+                    if asyncio.iscoroutinefunction(evidence_writer):
+                        await evidence_writer([{
+                            "family": "discovery_events",
+                            "target_key": official_sport,
+                            "official_sport": official_sport,
+                            "source": "PropLine",
+                            "fetched_at": datetime.utcnow(),
+                            "expires_at": datetime.utcnow() + timedelta(minutes=15),
+                            "complete": True,
+                            "redacted": False,
+                            "payload": _json_safe(list(events or ())),
+                        }])
                 if events:
                     events_by_sport[official_sport] = tuple(events)
         targets = build_propline_read_only_targets(
@@ -949,6 +1146,38 @@ async def propline_read_only_rotation_job(context) -> None:
             sports=discovered_sports,
             events_by_sport=events_by_sport,
         )
+
+        # Keep football-family data outside this supplemental evidence lane,
+        # and persist event box scores only after explicit final status.
+        targets = [
+            target
+            for target in targets
+            if not is_football_related_sport(target.canonical_sport)
+            and not (
+                target.family == "event_stats"
+                and not _is_explicit_propline_final(target.event_status)
+            )
+        ]
+        fresh_reader = getattr(
+            db, "get_fresh_propline_evidence_target_keys", None
+        )
+        if asyncio.iscoroutinefunction(fresh_reader):
+            fresh: set[tuple[str, str]] = set()
+            families: dict[str, list[str]] = {}
+            for target in targets:
+                families.setdefault(target.family, []).append(target.identity)
+            for family, keys in families.items():
+                try:
+                    fresh.update(
+                        (family, key)
+                        for key in await fresh_reader(family, keys)
+                    )
+                except Exception:
+                    continue
+            targets = [
+                target for target in targets
+                if (target.family, target.identity) not in fresh
+            ]
 
         # Catalog drift is operational evidence only.  Persist it separately
         # from player history so an unknown identity can never enter scoring or
@@ -992,17 +1221,103 @@ async def propline_read_only_rotation_job(context) -> None:
         discovery_audit_payload["catalog_audit_summary"] = catalog_audit_summary
         discovery_audit_payload["catalog_history"] = catalog_history
 
+        def _evidence_payload(result):
+            payload = getattr(result, "payload", None)
+            if payload is not None:
+                return payload
+            if hasattr(result, "results"):
+                return list(getattr(result, "results", ()) or ())
+            if hasattr(result, "entries"):
+                return list(getattr(result, "entries", ()) or ())
+            if is_dataclass(result):
+                return asdict(result)
+            return result
+
+        def _evidence_record(target, result, *, payload_override=None):
+            fetched = getattr(result, "fetched_at", None) or datetime.utcnow()
+            if target.family == "event_results":
+                outcomes = tuple(getattr(result, "results", ()) or ())
+                fully_settled = bool(outcomes) and all(
+                    getattr(outcome, "is_settled", False) for outcome in outcomes
+                )
+                ttl = timedelta(hours=24) if fully_settled else timedelta(minutes=2)
+            else:
+                ttl = {
+                    "event_stats": timedelta(hours=24),
+                    "player_games": timedelta(hours=12),
+                    "player_history": timedelta(hours=12),
+                    "player_trends": timedelta(hours=1),
+                    "event_markets": timedelta(minutes=30),
+                    "event_odds_history": timedelta(minutes=15),
+                    "event_movement": timedelta(minutes=5),
+                    "event_best_line": timedelta(minutes=5),
+                    "event_ev": timedelta(minutes=5),
+                    "scores": timedelta(minutes=3),
+                }.get(target.family, timedelta(minutes=15))
+            return {
+                "family": target.family,
+                "target_key": target.identity,
+                "official_sport": target.official_sport,
+                "canonical_sport": target.canonical_sport,
+                "event_id": target.event_id or None,
+                "player_id": target.player_id or None,
+                "player_name": target.player_name or None,
+                "market": target.market or None,
+                "bookmaker": target.bookmaker or None,
+                "source": "PropLine",
+                "fetched_at": fetched,
+                "expires_at": fetched + ttl,
+                "complete": True,
+                "redacted": False,
+                "payload": _json_safe(
+                    _evidence_payload(result)
+                    if payload_override is None
+                    else payload_override
+                ),
+            }
+
         async def persist(target, result):
-            if target.family != "event_results":
+            if is_football_related_sport(target.canonical_sport):
                 return False
+            evidence_writer = getattr(db, "upsert_propline_evidence_batch", None)
+            completed_payload = None
+            if target.family == "player_games":
+                completed_payload = _filter_completed_propline_game_payload(
+                    getattr(result, "payload", None),
+                    sport=target.canonical_sport,
+                )
+            if asyncio.iscoroutinefunction(evidence_writer):
+                if target.family != "player_games" or completed_payload is not None:
+                    await evidence_writer(
+                        [
+                            _evidence_record(
+                                target,
+                                result,
+                                payload_override=completed_payload,
+                            )
+                        ]
+                    )
+
+            if target.family != "event_results":
+                if target.family == "player_games":
+                    rows = _completed_propline_game_rows(target, result)
+                    if rows:
+                        writer = getattr(db, "upsert_player_results_bulk", None)
+                        if callable(writer):
+                            await writer(rows)
+                        else:
+                            for row in rows:
+                                await db.upsert_player_result(row)
+                return True
             rows = [
-                row
-                for row in propline_result_rows(getattr(result, "results", ()))
+                row for row in propline_result_rows(
+                    getattr(result, "results", ())
+                )
                 if str(getattr(row, "source", "") or "")
                 != "propline_event_results_void"
             ]
             if not rows:
-                return False
+                return True
             writer = getattr(db, "upsert_player_results_bulk", None)
             if callable(writer):
                 await writer(rows)

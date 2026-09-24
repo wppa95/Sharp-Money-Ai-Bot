@@ -24,7 +24,7 @@ import sqlite3
 import time
 from collections import deque
 from dataclasses import dataclass, replace
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Awaitable, Callable, Iterable, Optional
 from urllib.parse import quote
 from pathlib import Path
@@ -342,6 +342,11 @@ _DEFAULT_PROPLINE_REQUEST_BUDGET = PropLineRequestBudget(
 # Feed and endpoint calls spend one subscription quota, not two independent
 # 25,000-call pools.
 _DEFAULT_PROPLINE_ENDPOINT_REQUEST_BUDGET = _DEFAULT_PROPLINE_REQUEST_BUDGET
+_DEFAULT_PROPLINE_EXPORT_REQUEST_BUDGET = PropLineRequestBudget(
+    50,
+    day_factory=lambda: f"resolved-export:{datetime.utcnow().date().isoformat()}",
+    ledger_path=_DEFAULT_PROPLINE_BUDGET_LEDGER_PATH,
+)
 
 
 def _propline_request_kind(url: str) -> str:
@@ -3317,6 +3322,7 @@ class PropLineClient:
         request_limiter: Optional[PropLineRequestLimiter] = None,
         endpoint_request_budget: Optional[PropLineRequestBudget] = None,
         endpoint_request_limiter: Optional[PropLineRequestLimiter] = None,
+        export_request_budget: Optional[PropLineRequestBudget] = None,
     ) -> None:
         self.api_key = api_key if api_key is not None else os.getenv("PROPLINE_API_KEY", "")
         self.api_url = (
@@ -3347,6 +3353,9 @@ class PropLineClient:
         self.endpoint_request_budget = (
             endpoint_request_budget
             or _DEFAULT_PROPLINE_ENDPOINT_REQUEST_BUDGET
+        )
+        self.export_request_budget = (
+            export_request_budget or _DEFAULT_PROPLINE_EXPORT_REQUEST_BUDGET
         )
         self._request_day = datetime.utcnow().date()
         self._request_count = 0
@@ -4065,6 +4074,22 @@ class PropLineClient:
                 None, fetched_at, error="PropLine export requires sport",
                 failure_kind="configuration",
             )
+        lookback_start = datetime.utcnow() - timedelta(days=90)
+        start = _parse_datetime(since) if _clean(since) else lookback_start
+        end = _parse_datetime(until) if _clean(until) else datetime.utcnow()
+        if (
+            start is None
+            or end is None
+            or start < lookback_start
+            or start > end
+            or end > datetime.utcnow()
+        ):
+            return PropLineEndpointResult(
+                None,
+                fetched_at,
+                error="PropLine resolved export date range must be valid and within 90 days",
+                failure_kind="configuration",
+            )
         day = datetime.utcnow().date()
         if getattr(self, "_export_day", None) != day:
             self._export_day, self._export_calls = day, 0
@@ -4079,6 +4104,14 @@ class PropLineClient:
             return PropLineEndpointResult(
                 None, fetched_at, error=str(exc), failure_kind="configuration"
             )
+        if not self.export_request_budget.reserve():
+            return PropLineEndpointResult(
+                None,
+                fetched_at,
+                error="PropLine resolved-props export daily budget exhausted",
+                failure_kind="quota",
+            )
+        self._export_calls += 1
         params = {"sport": sport}
         for key, value in (
             ("market", market), ("bookmaker", bookmaker),
@@ -4095,7 +4128,6 @@ class PropLineClient:
                     timeout_seconds=120.0,
                     max_stream_bytes=100_000_000,
                 )
-                self._export_calls += 1
             except PropLineRateLimitError as exc:
                 return PropLineEndpointResult(
                     None, fetched_at, endpoint=endpoint, error=str(exc),
@@ -5551,6 +5583,13 @@ PROPLINE_READ_ONLY_FAMILIES = (
     "event_results",
     "event_stats",
     "event_markets",
+    "player_games",
+    "player_history",
+    "player_trends",
+    "event_odds_history",
+    "event_movement",
+    "event_best_line",
+    "event_ev",
     "scores",
 )
 
@@ -5563,9 +5602,11 @@ class PropLineReadOnlyTarget:
     official_sport: str
     canonical_sport: str = ""
     player_name: str = ""
+    player_id: str = ""
     market: str = ""
     official_market: str = ""
     event_id: str = ""
+    event_status: str = ""
     bookmaker: str = "prizepicks"
 
     @property
@@ -5575,7 +5616,7 @@ class PropLineReadOnlyTarget:
                 self.family,
                 self.official_sport,
                 self.canonical_sport,
-                self.player_name,
+                self.player_id or self.player_name,
                 self.market,
                 self.official_market,
                 self.event_id,
@@ -5630,6 +5671,38 @@ def _read_only_input(value: Any, *names: str) -> str:
     return ""
 
 
+def _read_only_active(value: Any) -> bool:
+    """Return false only for an explicitly inactive source row."""
+    if isinstance(value, dict):
+        if "active" in value and (
+            value["active"] is False
+            or _clean(value["active"]).lower() in {"false", "0", "no"}
+        ):
+            return False
+        status = _clean(_first(value, "status", "state")).lower()
+    else:
+        active = getattr(value, "active", None)
+        if active is False or _clean(active).lower() in {"false", "0", "no"}:
+            return False
+        status = _clean(getattr(value, "status", "") or getattr(value, "state", "")).lower()
+    return status not in {"inactive", "retired", "closed", "settled", "expired"}
+
+
+def _read_only_bookmaker(value: Any, default: str) -> str:
+    raw = _read_only_input(
+        value, "bookmaker_key", "source_bookmaker", "bookmaker", "provider"
+    )
+    normalized = raw.lower().replace("_", "").replace("-", "").replace(" ", "")
+    aliases = {
+        "prizepick": "prizepicks",
+        "prizepicks": "prizepicks",
+        "draftkings": "draftkings",
+        "fanduel": "fanduel",
+        "underdog": "underdog",
+    }
+    return aliases.get(normalized, raw.lower() or _clean(default).lower() or "prizepicks")
+
+
 def build_propline_read_only_targets(
     active_props: Iterable[Any] = (),
     *,
@@ -5667,11 +5740,17 @@ def build_propline_read_only_targets(
     def add(family: str, official: str, canonical: str, **kwargs: str) -> None:
         if family not in PROPLINE_READ_ONLY_FAMILIES or not official:
             return
+        target_bookmaker = kwargs.pop("bookmaker", None)
+        if family in {"event_results", "event_markets"}:
+            # These event-level endpoints are not market-filtered. Keep one
+            # request per event/bookmaker instead of one per active market.
+            kwargs.pop("market", None)
+            kwargs.pop("official_market", None)
         target = PropLineReadOnlyTarget(
             family=family,
             official_sport=official,
             canonical_sport=canonical,
-            bookmaker=_clean(bookmaker).lower() or "prizepicks",
+            bookmaker=target_bookmaker or _clean(bookmaker).lower() or "prizepicks",
             **kwargs,
         )
         targets[target.identity] = target
@@ -5682,6 +5761,8 @@ def build_propline_read_only_targets(
         add("scores", official, canonical)
 
     for prop in active_props:
+        if not _read_only_active(prop):
+            continue
         canonical = _normalize_sport(
             _read_only_input(prop, "sport", "sport_key", "league")
         )
@@ -5691,14 +5772,39 @@ def build_propline_read_only_targets(
             _read_only_input(prop, "stat_type", "market", "market_key", "stat")
         )
         official_market = official_player_market_for(market, sport=canonical)
+        player_id = _read_only_input(prop, "player_id", "athlete_id", "player_id")
+        source_bookmaker = _read_only_bookmaker(prop, bookmaker)
         event_id = _read_only_input(
             prop, "event_id", "event_id", "game_id", "match_id"
         )
         if not official:
             continue
+        # A player target is useful only when PropLine has an official market
+        # for this sport.  In particular, never turn a display label into a
+        # guessed single-player endpoint request.
+        if player and official_market:
+            for family in ("player_games", "player_history", "player_trends"):
+                add(
+                    family,
+                    official,
+                    canonical,
+                    player_name=player,
+                    player_id=player_id,
+                    market=market,
+                    official_market=official_market,
+                    bookmaker=source_bookmaker,
+                )
         if event_id:
-            for family in ("event_results", "event_stats", "event_markets"):
-                add(family, official, canonical, event_id=event_id, market=market)
+            for family in (
+                "event_results", "event_stats", "event_markets",
+                "event_odds_history", "event_movement", "event_best_line",
+                "event_ev",
+            ):
+                add(
+                    family, official, canonical, event_id=event_id, market=market,
+                    official_market=official_market or "",
+                    bookmaker=source_bookmaker,
+                )
 
     for requested_sport, events in (events_by_sport or {}).items():
         requested = _normalize_sport(requested_sport)
@@ -5728,8 +5834,20 @@ def build_propline_read_only_targets(
                 or event_sport.lower() != official.lower()
             ):
                 continue
-            for family in ("event_results", "event_stats", "event_markets"):
-                add(family, official, canonical, event_id=event_id)
+            for family in (
+                "event_results", "event_stats", "event_markets",
+                "event_odds_history", "event_movement", "event_best_line",
+                "event_ev",
+            ):
+                add(
+                    family,
+                    official,
+                    canonical,
+                    event_id=event_id,
+                    event_status=_read_only_input(
+                        event, "status", "state", "event_status"
+                    ),
+                )
 
     return sorted(
         targets.values(),
@@ -5810,12 +5928,16 @@ class PropLineReadOnlyRotation:
 
     async def _fetch(self, target: PropLineReadOnlyTarget) -> Any:
         method_name = {
-            "event_results": "fetch_event_results",
-            "event_stats": "fetch_event_stats",
-            "event_markets": "fetch_event_markets",
             "player_games": "fetch_player_games",
             "player_history": "fetch_player_history",
             "player_trends": "fetch_player_trends",
+            "event_results": "fetch_event_results",
+            "event_stats": "fetch_event_stats",
+            "event_markets": "fetch_event_markets",
+            "event_odds_history": "fetch_event_odds_history",
+            "event_movement": "fetch_event_movement",
+            "event_best_line": "fetch_event_best_line",
+            "event_ev": "fetch_event_ev",
             "scores": "fetch_scores",
         }[target.family]
         method = getattr(self.client, method_name, None)
@@ -5833,6 +5955,18 @@ class PropLineReadOnlyRotation:
             )
         if target.family == "event_markets":
             return await method(target.official_sport, target.event)
+        if target.family == "event_odds_history":
+            return await method(
+                target.official_sport,
+                target.event,
+                markets=target.official_market or target.market,
+            )
+        if target.family in {"event_movement", "event_best_line", "event_ev"}:
+            return await method(
+                target.official_sport,
+                target.event,
+                markets=target.official_market or target.market,
+            )
         if target.family == "player_games":
             return await method(
                 target.official_sport,
@@ -5943,8 +6077,18 @@ class PropLineReadOnlyRotation:
                         for evidence in getattr(result, "results", ())
                     )
                 ):
-                    pending += 1
                     reason = "no_explicit_settlement"
+                    # The complete response is still useful for SQLite-backed
+                    # inspection and can be refreshed quickly while outcomes
+                    # remain unresolved. The persistence callback must keep
+                    # this separate from settled PlayerGameResult rows.
+                    if persist is not None:
+                        persisted_value = await persist(target, result)
+                        if persisted_value is not False:
+                            persisted += 1
+                        else:
+                            reason = "read_only_report_only"
+                    pending += 1
                 else:
                     completed += 1
                     status = "completed"

@@ -51,12 +51,20 @@ def test_targets_use_discovered_official_aliases_only():
         target.family
         for target in targets
         if target.player_name
-    } == set()
+    } == {"player_games", "player_history", "player_trends"}
     assert {
         target.family
         for target in targets
         if target.event_id
-    } == {"event_results", "event_stats", "event_markets"}
+    } == {
+        "event_results",
+        "event_stats",
+        "event_markets",
+        "event_odds_history",
+        "event_movement",
+        "event_best_line",
+        "event_ev",
+    }
 
 
 def test_propline_result_rows_preserves_explicit_void_as_private_marker():
@@ -198,8 +206,15 @@ def test_targets_include_officially_discovered_events_without_prop_event_ids():
         "event_results",
         "event_stats",
         "event_markets",
+        "event_odds_history",
+        "event_movement",
+        "event_best_line",
+        "event_ev",
     }
     assert {target.event_id for target in event_targets} == {"discovered-event"}
+    assert {
+        target.event_status for target in event_targets
+    } == {""}
 
 
 def test_event_targets_reject_guessed_or_cross_sport_event_ids():
@@ -222,7 +237,146 @@ def test_event_targets_reject_guessed_or_cross_sport_event_ids():
         ("event_results", "accepted-event"),
         ("event_stats", "accepted-event"),
         ("event_markets", "accepted-event"),
+        ("event_odds_history", "accepted-event"),
+        ("event_movement", "accepted-event"),
+        ("event_best_line", "accepted-event"),
+        ("event_ev", "accepted-event"),
     }
+
+
+def test_player_target_identity_prefers_provider_player_id_and_dedupes():
+    targets = build_propline_read_only_targets(
+        [
+            SimpleNamespace(
+                sport="NBA",
+                player_name="A. Player",
+                player_id="player-7",
+                stat_type="Points",
+                provider="Underdog",
+            ),
+            SimpleNamespace(
+                sport="NBA",
+                player_name="A Player",
+                player_id="player-7",
+                stat_type="Points",
+                provider="Underdog",
+            ),
+        ],
+        sports=[PropLineSport("basketball_nba", "NBA", "NBA")],
+    )
+
+    player_targets = [target for target in targets if target.family.startswith("player_")]
+    assert len(player_targets) == 3
+    assert {target.player_id for target in player_targets} == {"player-7"}
+    assert {target.bookmaker for target in player_targets} == {"underdog"}
+    assert all("player-7" in target.identity for target in player_targets)
+
+
+def test_unmapped_player_market_is_not_requested():
+    targets = build_propline_read_only_targets(
+        [
+            SimpleNamespace(
+                sport="NBA",
+                player_name="A Player",
+                stat_type="Unmapped Stat",
+            )
+        ],
+        sports=[PropLineSport("basketball_nba", "NBA", "NBA")],
+    )
+
+    assert not any(target.family.startswith("player_") for target in targets)
+
+
+def test_event_level_results_and_markets_dedupe_across_prop_markets():
+    targets = build_propline_read_only_targets(
+        [
+            SimpleNamespace(
+                sport="NBA",
+                player_name="A Player",
+                stat_type="Points",
+                event_id="event-1",
+                provider="PrizePicks",
+            ),
+            SimpleNamespace(
+                sport="NBA",
+                player_name="B Player",
+                stat_type="Rebounds",
+                event_id="event-1",
+                provider="PrizePicks",
+            ),
+        ],
+        sports=[PropLineSport("basketball_nba", "NBA", "NBA")],
+    )
+
+    event_targets = [target for target in targets if target.event_id == "event-1"]
+    assert sum(target.family == "event_results" for target in event_targets) == 1
+    assert sum(target.family == "event_markets" for target in event_targets) == 1
+    assert sum(target.family == "event_stats" for target in event_targets) == 2
+
+
+def test_fetch_uses_documented_endpoints_and_never_single_player_stats(tmp_path):
+    class EndpointClient:
+        def __init__(self):
+            self.calls = []
+
+        def __getattr__(self, name):
+            if name == "fetch_single_player_stats":
+                raise AssertionError("excluded single-player stats endpoint used")
+            if not name.startswith("fetch_"):
+                raise AttributeError(name)
+
+            async def call(*args, **kwargs):
+                self.calls.append((name, args, kwargs))
+                return SimpleNamespace(
+                    succeeded=True, complete=True, redacted=False, payload={}
+                )
+
+            return call
+
+    targets = build_propline_read_only_targets(
+        [
+            SimpleNamespace(
+                sport="NBA",
+                player_name="A Player",
+                player_id="player-1",
+                stat_type="Points",
+                event_id="event-1",
+                provider="PrizePicks",
+            )
+        ],
+        sports=[PropLineSport("basketball_nba", "NBA", "NBA")],
+    )
+    client = EndpointClient()
+    rotation = PropLineReadOnlyRotation(
+        client,
+        state_path=str(tmp_path / "rotation.sqlite3"),
+        max_requests_per_cycle=12,
+    )
+
+    async def fetch_all():
+        for target in targets:
+            await rotation._fetch(target)
+
+    asyncio.run(fetch_all())
+    calls = {name: kwargs for name, _args, kwargs in client.calls}
+
+    assert set(calls) >= {
+        "fetch_player_games",
+        "fetch_player_history",
+        "fetch_player_trends",
+        "fetch_event_results",
+        "fetch_event_stats",
+        "fetch_event_markets",
+        "fetch_event_odds_history",
+        "fetch_event_movement",
+        "fetch_event_best_line",
+        "fetch_event_ev",
+        "fetch_scores",
+    }
+    assert "markets" not in calls["fetch_event_results"]
+    assert calls["fetch_event_stats"]["stat_type"] == "points"
+    assert calls["fetch_player_history"]["limit"] == 100
+    assert calls["fetch_player_history"]["bookmaker"] == "prizepicks"
 
 
 class _RotationClient:

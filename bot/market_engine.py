@@ -1506,14 +1506,14 @@ async def propline_request_scan_job(context) -> None:
             return False
         from engine.sport_policy import (
             canonical_sport_key,
-            is_disallowed_football_sport,
+            is_football_related_sport,
         )
 
         discovered_sports = await _get_prizepicks_scan_sports(provider)
         sports = tuple(
             sport
             for sport in discovered_sports
-            if not is_disallowed_football_sport(sport)
+            if not is_football_related_sport(sport)
         )
         if not sports:
             logger.info(

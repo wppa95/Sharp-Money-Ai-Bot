@@ -793,6 +793,65 @@ def test_resolved_export_uses_bounded_long_timeout():
     assert timeout.total == 120
 
 
+def test_resolved_export_rejects_lookback_older_than_90_days():
+    session = _Session(_Response(200, "player_name,market\n"))
+    client = PropLineClient(
+        api_key="test-only-key",
+        session=session,
+        min_request_interval=0,
+        export_request_budget=PropLineRequestBudget(limit=50),
+    )
+    too_old = (datetime.utcnow() - timedelta(days=91)).isoformat()
+
+    result = asyncio.run(
+        client.fetch_resolved_props_export(
+            sport="basketball_nba", since=too_old
+        )
+    )
+
+    assert result.succeeded is False
+    assert result.failure_kind == "configuration"
+    assert session.calls == []
+
+
+def test_resolved_export_daily_cap_is_shared_across_client_instances(tmp_path):
+    ledger = str(tmp_path / "export-budget.sqlite3")
+
+    def budget():
+        return PropLineRequestBudget(
+            limit=1,
+            day_factory=lambda: "resolved-export-test-day",
+            ledger_path=ledger,
+        )
+
+    first_session = _Session(_Response(200, "player_name,market\n"))
+    second_session = _Session(_Response(200, "player_name,market\n"))
+    first_client = PropLineClient(
+        api_key="test-only-key",
+        session=first_session,
+        min_request_interval=0,
+        export_request_budget=budget(),
+    )
+    second_client = PropLineClient(
+        api_key="test-only-key",
+        session=second_session,
+        min_request_interval=0,
+        export_request_budget=budget(),
+    )
+
+    first = asyncio.run(
+        first_client.fetch_resolved_props_export(sport="basketball_nba")
+    )
+    second = asyncio.run(
+        second_client.fetch_resolved_props_export(sport="basketball_nba")
+    )
+
+    assert first.succeeded is True
+    assert second.failure_kind == "quota"
+    assert len(first_session.calls) == 1
+    assert second_session.calls == []
+
+
 def test_hobby_sgp_and_clv_actions_are_posted_without_touching_polling_models():
     session = _Session(_Response(200, {"quoted": True, "clv_pct": 4.2}))
     client = PropLineClient(
