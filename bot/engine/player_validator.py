@@ -107,6 +107,7 @@ def validate_player_prop(
     *,
     min_samples: int = 5,
     history_snap: Optional["PlayerHistorySnapshot"] = None,
+    completed_hit_rates: Optional[object] = None,
 ) -> PlayerPropValidation:
     n_proxy = len(history)
 
@@ -141,6 +142,51 @@ def validate_player_prop(
     l5_rate = l10_rate = l20_rate = l30_rate = None
     n_history = 0
 
+    # Large live feeds skip constructing a PlayerHistorySnapshot for every
+    # candidate, but still compute hit rates from the bulk-loaded completed
+    # result cache. Preserve that trusted provenance in validation so the
+    # delivery gate does not mistake a skipped snapshot for missing evidence.
+    result_source = str(
+        getattr(completed_hit_rates, "data_source", "") or ""
+    ).lower().strip()
+    try:
+        result_total = int(getattr(completed_hit_rates, "total_games", 0) or 0)
+    except (TypeError, ValueError):
+        result_total = 0
+    try:
+        result_supplemental = int(
+            getattr(completed_hit_rates, "n_supplemental_games", 0) or 0
+        )
+    except (TypeError, ValueError):
+        result_supplemental = 0
+    result_supplemental = min(max(0, result_supplemental), max(0, result_total))
+    result_has_provenance = bool(
+        completed_hit_rates is not None
+        and getattr(completed_hit_rates, "has_real_data", False)
+        and result_total > 0
+        and result_source
+        in {
+            "primary",
+            "real",
+            "propline",
+            "primary+propline",
+            "real+propline",
+        }
+    )
+
+    def _completed_rate(window_name: str) -> Optional[float]:
+        window = getattr(completed_hit_rates, window_name, None)
+        if window is None:
+            return None
+        try:
+            games = int(getattr(window, "games", 0) or 0)
+            rate = float(getattr(window, "hit_rate", None))
+        except (TypeError, ValueError):
+            return None
+        if games < _MIN_WINDOW or not 0.0 <= rate <= 1.0:
+            return None
+        return rate
+
     has_snapshot_evidence = bool(
         history_snap is not None
         and (
@@ -164,6 +210,26 @@ def validate_player_prop(
         l30_rate = history_snap.preferred_l30()
         season_hr = history_snap.season_hit_rate()
         h2h_hr = history_snap.h2h_hit_rate()
+        n_history = n_real + n_supplemental
+    elif result_has_provenance:
+        if result_source == "propline":
+            n_supplemental = result_total
+            data_source = "propline"
+        else:
+            n_supplemental = result_supplemental
+            n_real = result_total - n_supplemental
+            data_source = (
+                "real+propline" if n_supplemental else "real"
+            )
+        supplemental_sources = tuple(
+            getattr(completed_hit_rates, "supplemental_sources", ()) or ()
+        )
+        l5_rate = _completed_rate("l5")
+        l10_rate = _completed_rate("l10")
+        l20_rate = _completed_rate("l20")
+        l30_rate = _completed_rate("l30")
+        season_hr = _completed_rate("season")
+        h2h_hr = _completed_rate("h2h")
         n_history = n_real + n_supplemental
     elif n_proxy > 0:
         data_source = "proxy"

@@ -5578,30 +5578,6 @@ async def underdog_job(context) -> None:
                         )
                     except Exception:
                         _hist_snap = None
-                validation = validate_player_prop(
-                    player_name  = player,
-                    stat_type    = stat_type,
-                    current_line = line_val,
-                    history      = np_history,
-                    min_samples  = config.UD_VALIDATION_MIN_SAMPLES,
-                    history_snap = _hist_snap,
-                )
-                # Immediate criteria controls whether a new prop gets remote
-                # history fetched in this pass.  It is not a Telegram
-                # qualification gate; the shared delivery gate below owns that.
-                np_immediate = (
-                    (line_val <= config.UD_NEW_PROP_IMMEDIATE_LINE_THRESHOLD
-                     and stat_type in config.UD_PRIORITY_STAT_CATEGORIES)
-                    or score.stars >= config.UD_NON_STRICT_MIN_STARS
-                )
-                # Do not block evaluation when evidence is missing.  The
-                # validation result remains attached to the opportunity and
-                # direction is resolved for every active prop.
-                if np_immediate and not validation.has_supporting_data:
-                    logger.debug(
-                        "UD new-prop has no supporting evidence yet: %s | %s | %s",
-                        player, stat_type, validation.reason,
-                    )
                 # Fetch real game results — required before any directional pick.
                 # Also fetch for np_immediate props (e.g. 0.5-line priority stats)
                 # even when they score PASS tier (no prev_line → low movement score).
@@ -5615,6 +5591,34 @@ async def underdog_job(context) -> None:
                     ),
                     "new-prop hit rates",
                 )
+                validation = validate_player_prop(
+                    player_name  = player,
+                    stat_type    = stat_type,
+                    current_line = line_val,
+                    history      = np_history,
+                    min_samples  = config.UD_VALIDATION_MIN_SAMPLES,
+                    history_snap = _hist_snap,
+                    # In large-feed mode the per-prop PlayerHistorySnapshot is
+                    # intentionally skipped; only these rates from the
+                    # successful bulk cache read may establish completed-game
+                    # evidence. Smaller paths retain the snapshot provenance
+                    # boundary and cannot be rescued by decision metadata.
+                    completed_hit_rates=(
+                        hit_rates if _large_new_prop_feed else None
+                    ),
+                )
+                # Immediate criteria is informational; it does not relax the
+                # shared evidence and direction requirements for Telegram.
+                np_immediate = (
+                    (line_val <= config.UD_NEW_PROP_IMMEDIATE_LINE_THRESHOLD
+                     and stat_type in config.UD_PRIORITY_STAT_CATEGORIES)
+                    or score.stars >= config.UD_NON_STRICT_MIN_STARS
+                )
+                if np_immediate and not validation.has_supporting_data:
+                    logger.debug(
+                        "UD new-prop has no supporting evidence yet: %s | %s | %s",
+                        player, stat_type, validation.reason,
+                    )
                 decision = make_ud_bet_decision(
                     score        = score,
                     validation   = validation,

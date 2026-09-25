@@ -21,6 +21,12 @@ Live scan history snapshots must remain cache/DB-only even when the cache is emp
 
 **How to apply:** Pass `ensure_real_results=False` to scan-time snapshots and `allow_remote=False` to scan-time hit-rate computation. Keep primary-provider collection and grading evidence batched/bulk-persisted; do not schedule any singular PropLine player-history family or per-opportunity settlement lookup.
 
+Large-feed scans may skip per-prop history snapshot construction only if bulk-loaded completed results still populate the candidate's provenance-bearing validation. A default empty validation record must not mask those results, and decision metadata must not be used to override proxy-only validation.
+
+**Why:** The delivery gate correctly treats an attached validation object as authoritative; leaving it empty while separately computing trusted bulk hit rates silently blocks otherwise evidence-backed candidates.
+
+**How to apply:** For the full-feed path, translate only the typed hit-rate result from the completed-results cache into validation evidence. Preserve the existing source and minimum-sample checks; never infer completed history from confidence or serialized decision fields.
+
 Production writes emitted by a live scan must be serialized outside the scan coroutine, drained during graceful shutdown, and discarded when an event loop is replaced.
 
 **Why:** SQLite persistence can outlive the monitoring work, but asyncio queues and tasks belong to the loop that created them; carrying them across loops risks stale tasks and lost shutdown writes.

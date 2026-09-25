@@ -504,6 +504,30 @@ async def test_validation_json_stored_with_history():
 
 
 @pytest.mark.asyncio
+async def test_large_new_prop_feed_persists_completed_hit_rate_validation():
+    """A large feed must retain trusted hit-rate evidence for its live target."""
+    import json
+
+    target = _snap("Aaron Judge", "Home Runs", 0.5, sport="MLB")
+    filler = [
+        _snap(f"Removed Player {index}", "Home Runs", 0.5, removed=True)
+        for index in range(1000)
+    ]
+    db = _make_db(known_keys=set())
+    hit_rates = _make_hit_rates()
+
+    await _run_job([target, *filler], db, hit_rates=hit_rates)
+
+    records = db.save_underdog_snapshots_bulk.call_args[0][0]
+    record = next(r for r in records if r.player_name == "Aaron Judge")
+    parsed = json.loads(record.validation_json)
+    assert parsed["has_data"] is True
+    assert parsed["src"] == "real"
+    assert parsed["n_real"] == 50
+    assert parsed["season"] == pytest.approx(0.7)
+
+
+@pytest.mark.asyncio
 async def test_half_line_non_priority_stat_goes_to_digest():
     """0.5 line with a non-priority stat (e.g. Walks) goes to digest, not immediate alert."""
     # "Walks" is not in UD_PRIORITY_STAT_CATEGORIES
