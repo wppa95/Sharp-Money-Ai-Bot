@@ -179,9 +179,18 @@ def _resolve_event(
         if metadata is not None:
             canonical_id = _event_id(metadata) or candidate_id
             return canonical_id, metadata
-    for source in nested_sources + sources:
+    for source in nested_sources:
         if _event_time(source) is not None or _event_status(source) or _event_label(source):
             return _event_id(source) or (candidate_ids[0] if candidate_ids else ""), (
+                source if isinstance(source, dict) else {}
+            )
+    # A projection's own status commonly describes line availability
+    # ("active"), not event state. Only accept a direct schedule timestamp
+    # from projection sources when it is explicitly present; never promote the
+    # projection's line ID into a game ID because of that availability status.
+    for source in sources:
+        if _event_time(source) is not None:
+            return candidate_ids[0] if candidate_ids else "", (
                 source if isinstance(source, dict) else {}
             )
     return (candidate_ids[0] if candidate_ids else ""), {}

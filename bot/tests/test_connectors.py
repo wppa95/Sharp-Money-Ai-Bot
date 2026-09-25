@@ -336,6 +336,40 @@ class TestUnderdogConnector:
         assert snapshots[0].game_time == datetime(2026, 9, 26, 7, 50)
         assert snapshots[0].provider_status == "scheduled"
 
+    def test_nhl_series_without_event_record_has_no_guessed_start(self):
+        payload = {
+            "over_under_lines": [{
+                "id": "nhl-series-prop-1",
+                "stat_value": 0.5,
+                "status": "active",
+                "over_under": {
+                    "appearance_stat": {
+                        "appearance_id": "nhl-series-appearance-1",
+                        "display_stat": "Goals",
+                    },
+                },
+            }],
+            "appearances": [{
+                "id": "nhl-series-appearance-1",
+                "player_id": "nhl-player-1",
+                "match_id": 1300,
+                "match_type": "Series",
+            }],
+            "players": [{
+                "id": "nhl-player-1",
+                "first_name": "Hockey",
+                "last_name": "Player",
+                "sport_id": "nhl",
+            }],
+            "games": [],
+            "solo_games": [],
+        }
+
+        projection = UnderdogConnector()._parse(payload)[0]
+
+        assert projection.game_id == "1300"
+        assert projection.game_time is None
+
     @pytest.mark.asyncio
     async def test_fetch_returns_pickem_snapshots(self):
         c = self._make_connector()
