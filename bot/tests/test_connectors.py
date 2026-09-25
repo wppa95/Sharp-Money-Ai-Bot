@@ -80,8 +80,8 @@ ODDS_API_RESPONSE = [
 #   - appearance_stat lives inside line["over_under"], not on the line directly
 #   - appearances is a top-level array; appearance_stat.appearance_id → appearances[].id
 #   - players carry team_id (UUID string) instead of team: {alias}
-#   - match_id in test uses the same string as the game id so game_time resolves;
-#     in production match_id is an integer and game ids are UUIDs, so game_time=None
+#   - the baseline fixture uses a matching game ID; production can expose numeric
+#     match_id values that resolve through the top-level solo_games collection.
 UNDERDOG_API_RESPONSE = {
     "over_under_lines": [
         {
@@ -292,6 +292,49 @@ class TestUnderdogConnector:
         assert projection.game_id == "event-stable-1"
         assert projection.game_time == datetime(2026, 9, 16, 0, 0)
         assert projection.provider_status == "SCHEDULED"
+
+    @pytest.mark.asyncio
+    async def test_tennis_solo_game_schedule_flows_into_snapshot(self):
+        payload = {
+            "over_under_lines": [{
+                "id": "tennis-prop-1",
+                "stat_value": 1.5,
+                "over_under": {
+                    "appearance_stat": {
+                        "appearance_id": "tennis-appearance-1",
+                        "display_stat": "Aces",
+                    },
+                },
+            }],
+            "appearances": [{
+                "id": "tennis-appearance-1",
+                "player_id": "tennis-player-1",
+                "match_id": 310428,
+            }],
+            "players": [{
+                "id": "tennis-player-1",
+                "first_name": "Tennis",
+                "last_name": "Player",
+                "sport_id": "tennis",
+            }],
+            "solo_games": [{
+                "id": 310428,
+                "scheduled_at": "2026-09-26T07:50:00Z",
+                "status": "scheduled",
+                "type": "SoloGame",
+                "sport_id": "TENNIS",
+            }],
+        }
+        connector = UnderdogConnector(active_sports=["TENNIS"])
+        projection = connector._parse(payload)[0]
+        connector._fetch_projections = AsyncMock(return_value=[projection])
+
+        snapshots = await connector.fetch()
+
+        assert len(snapshots) == 1
+        assert snapshots[0].event == "310428"
+        assert snapshots[0].game_time == datetime(2026, 9, 26, 7, 50)
+        assert snapshots[0].provider_status == "scheduled"
 
     @pytest.mark.asyncio
     async def test_fetch_returns_pickem_snapshots(self):

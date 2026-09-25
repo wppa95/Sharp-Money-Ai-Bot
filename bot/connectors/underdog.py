@@ -144,7 +144,7 @@ def _event_label(record: object) -> str:
 def _build_event_lookup(data: dict) -> dict[str, dict]:
     """Index explicit provider event records without guessing from teams."""
     lookup: dict[str, dict] = {}
-    for key in ("games", "matches", "events", "fixtures"):
+    for key in ("games", "matches", "events", "fixtures", "solo_games"):
         for record in _records(data.get(key, [])):
             for raw_id in _EVENT_ID_KEYS:
                 value = record.get(raw_id)
@@ -437,8 +437,9 @@ class UnderdogConnector(BaseConnector):
             array; ``appearance_stat.appearance_id`` → ``appearances[].id``.
           - Players carry ``team_id`` (UUID string) instead of ``team: {alias}``.
           - Event metadata has appeared under ``games``, ``matches``, ``events``,
-            and ``fixtures`` with several equivalent ID/time/status field names.
-            Join only on explicit provider IDs; never infer an event from teams.
+            ``fixtures``, and ``solo_games`` with several equivalent
+            ID/time/status field names. Join only on explicit provider IDs;
+            never infer an event from teams.
         """
         projections: list[UnderdogProjection] = []
 
