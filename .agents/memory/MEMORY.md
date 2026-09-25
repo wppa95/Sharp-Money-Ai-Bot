@@ -126,7 +126,7 @@
 - [Sport delivery without quotas](independent-sport-delivery-quotas.md) — keep existing per-pick gates and ranking, but do not cap Telegram sends by sport or rolling count.
 - [PropLine complete-feed ledger](propline-complete-feed-ledger.md) — fetch all active non-football sports, retain immutable normalized observations, and withhold evaluation on partial feeds.
 - [PropLine catalog audit boundary](propline-catalog-audit.md) — catalog drift is separate operational evidence; retain unknown identities and resolve them only when a later complete audit maps them.
-- [Opportunity event identity](opportunity-event-identity.md) — preserve Underdog event IDs through opportunity writes; keep historical repairs out of startup-critical migrations.
+- [Opportunity identity and FPR delivery](opportunity-event-identity.md) — keep source IDs stable and persist the directional opportunity before Telegram under the exact ID checked at delivery.
 - [History coverage boundaries](history-coverage-boundaries.md) — batch full-book provider work; report empty sport coverage separately from errors and deadlines.
 - [Odds API player-prop feed](odds-player-prop-feed.md) — sportsbook props supplement the canonical Underdog workflow; h2h/totals polling is retired.
 - [Provider-aware prop ledger](provider-aware-prop-ledger.md) — every supported feed keeps source identity across observation, history, tracking, grading, and reports; sportsbook rows never enter the Underdog alert universe.

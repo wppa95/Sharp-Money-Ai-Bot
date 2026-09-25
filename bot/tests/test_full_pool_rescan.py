@@ -448,6 +448,87 @@ class TestFPRJob:
         db.log_prop_opportunity.assert_awaited_once()
         delivery.assert_not_called()
 
+    async def test_directional_opportunity_is_persisted_before_delivery(
+        self,
+        monkeypatch,
+    ):
+        """FPR's durable delivery gate sees the exact opportunity source ID."""
+        snap = _make_snap(
+            player="CS Player",
+            sport="CS",
+            stat="Kills",
+            line=18.5,
+            ext_id="fpr-cs-line-1",
+            game_time=datetime.datetime.utcnow() + datetime.timedelta(hours=1),
+        )
+        snap.provider = "Underdog"
+        db = _make_db(pool={("CS Player", "Kills", 18.5): snap})
+        ctx = _make_context(db)
+        health = _make_health(cursor=0)
+        persisted_ids: set[str] = set()
+        events: list[tuple[str, str]] = []
+
+        async def persist_opportunities(rows):
+            for row in rows:
+                source_id = str(row["external_id"])
+                persisted_ids.add(source_id)
+                events.append(("persist", source_id))
+            return len(rows)
+
+        async def deliver(**kwargs):
+            source_id = str(kwargs["source_id"])
+            events.append(("deliver", source_id))
+            return types.SimpleNamespace(
+                sent=source_id in persisted_ids,
+                authoritative_recorded=True,
+            )
+
+        db.log_prop_opportunity_bulk = AsyncMock(
+            side_effect=persist_opportunities
+        )
+        delivery_mock = MagicMock()
+        delivery_mock.deliver_underdog = AsyncMock(side_effect=deliver)
+        decision = types.SimpleNamespace(
+            recommendation="OVER",
+            confidence=75,
+            decision_tier="A",
+            evidence=None,
+        )
+        monkeypatch.setenv("ALLOWED_USER_IDS", "123")
+
+        from market_engine import _full_pool_rescan_job
+
+        with (
+            patch("market_engine.get_health_tracker", return_value=health),
+            patch(
+                "market_engine._fetch_and_compute_hit_rates",
+                new=AsyncMock(return_value=None),
+            ),
+            patch("market_engine._is_game_live_or_past", return_value=False),
+            patch(
+                "market_engine._try_claim_delivery_slot",
+                new=AsyncMock(return_value=True),
+            ),
+            patch("market_engine._has_delivery_evidence", return_value=True),
+            patch("market_engine.AlertDelivery", return_value=delivery_mock),
+            patch("engine.ud_scoring.score_ud_prop", return_value=_make_score()),
+            patch("engine.player_validator.validate_player_prop", return_value=None),
+            patch("engine.ud_bet_decision.make_ud_bet_decision", return_value=decision),
+            patch("engine.ud_scoring.compute_market_quality", return_value=MagicMock()),
+            patch("engine.ud_scoring.detect_market_pressure", return_value=MagicMock()),
+        ):
+            await _full_pool_rescan_job(ctx)
+
+        assert events == [
+            ("persist", "fpr-cs-line-1"),
+            ("deliver", "fpr-cs-line-1"),
+        ]
+        db.mark_opportunity_alert_sent.assert_awaited_once_with(
+            "fpr-cs-line-1",
+            "Kills",
+            provider="Underdog",
+        )
+
     async def test_fpr_filters_futures_but_keeps_football(self, monkeypatch):
         """FPR excludes non-player futures but evaluates gridiron normally."""
         soccer = _make_snap(

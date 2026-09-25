@@ -9,6 +9,12 @@ Underdog opportunity writes must derive event identity from the snapshot's suppo
 
 **How to apply:** Keep event identity separate from team/provider labels. Use exact event/date reconciliation for settlement; historical player/stat rows can explain evidence coverage but must never be used as a guessed settlement.
 
+Directional opportunity rows used by Telegram must be persisted before send under the same provider source ID passed to the durable delivery-state check and alert-sent update. Keep `:line=<threshold>` identities confined to the tracking ledger unless lookup and send-bookkeeping paths consistently use that identity.
+
+**Why:** The full-pool delivery path previously wrote opportunities after sending and line-qualified their IDs, so the final durable gate could not find an eligible directional row.
+
+**How to apply:** For every delivery path, verify source-ID equality and persistence order across tracking, opportunity logging, delivery-state lookup, and alert-sent bookkeeping. Keep delivery fail-closed when the required opportunity write fails.
+
 Large append-only snapshot repairs must remain explicit maintenance operations rather than startup migrations.
 
 **Why:** A correlated repair over the live snapshot ledger delayed bot startup and blocked health readiness.

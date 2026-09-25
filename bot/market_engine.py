@@ -8898,7 +8898,7 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                 # remains a transient evaluation result.
                 if getattr(_fpr_dec, "recommendation", None) in ("OVER", "UNDER"):
                     _fpr_opportunity_rows.append({
-                        "external_id": f"{_fpr_ext_id}:{_fpr_line:g}",
+                        "external_id": _fpr_ext_id,
                         "player_name": _fpr_player,
                         "team": getattr(_fpr_snap, "team", "") or "",
                         "sport": _fpr_sport,
@@ -9149,6 +9149,39 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                         str(_fpr_candidate_exc),
                     )
 
+        # Telegram's durable delivery gate requires the directional opportunity
+        # to exist under the same provider source ID passed to delivery. Persist
+        # this batch before attempting any selected candidate.
+        _fpr_opportunity_write_ok = True
+        if _fpr_opportunity_rows:
+            _fpr_bulk_opportunity = getattr(db, "log_prop_opportunity_bulk", None)
+            if asyncio.iscoroutinefunction(_fpr_bulk_opportunity):
+                try:
+                    await _fpr_bulk_opportunity(_fpr_opportunity_rows)
+                except Exception as _fpr_bulk_log_exc:
+                    _fpr_opportunity_write_ok = False
+                    logger.error(
+                        "full_pool_rescan: bulk opportunity write failed; "
+                        "blocking delivery: %s",
+                        type(_fpr_bulk_log_exc).__name__,
+                    )
+            else:
+                # Compatibility path for lightweight test doubles and older
+                # database objects that do not expose the bulk method.
+                for _fpr_row in _fpr_opportunity_rows:
+                    try:
+                        await db.log_prop_opportunity(**_fpr_row)
+                    except Exception as _fpr_log_exc:
+                        _fpr_opportunity_write_ok = False
+                        logger.error(
+                            "full_pool_rescan: opportunity write failed; "
+                            "blocking delivery: %s",
+                            type(_fpr_log_exc).__name__,
+                        )
+        if not _fpr_opportunity_write_ok:
+            fpr_not_delivered += len(_fpr_delivery_candidates)
+            _fpr_delivery_candidates.clear()
+
         # Selection happens only after the complete qualified batch has been
         # evaluated.  This prevents a stronger later-processed prop from
         # losing to an earlier weaker prop for the same provider/player.
@@ -9229,28 +9262,6 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                             or ""
                         ),
                     )
-
-        if _fpr_opportunity_rows:
-            _fpr_bulk_opportunity = getattr(db, "log_prop_opportunity_bulk", None)
-            if asyncio.iscoroutinefunction(_fpr_bulk_opportunity):
-                try:
-                    await _fpr_bulk_opportunity(_fpr_opportunity_rows)
-                except Exception as _fpr_bulk_log_exc:
-                    logger.warning(
-                        "full_pool_rescan: bulk opportunity write failed: %s",
-                        _fpr_bulk_log_exc,
-                    )
-            else:
-                # Compatibility path for lightweight test doubles and older
-                # database objects that do not expose the bulk method.
-                for _fpr_row in _fpr_opportunity_rows:
-                    try:
-                        await db.log_prop_opportunity(**_fpr_row)
-                    except Exception as _fpr_log_exc:
-                        logger.debug(
-                            "full_pool_rescan: opportunity log failed: %s",
-                            _fpr_log_exc,
-                        )
 
         # ── Advance cursor; increment rotation when pool is fully covered ──────
         if rotation_complete:

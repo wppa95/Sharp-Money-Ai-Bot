@@ -21,7 +21,7 @@ async def db():
 
 
 def _future_game() -> datetime:
-    return datetime.utcnow() + timedelta(hours=3)
+    return datetime.utcnow() + timedelta(hours=1)
 
 
 async def _track_and_log(db: Database, *, external_id: str = "funnel-prop") -> None:
