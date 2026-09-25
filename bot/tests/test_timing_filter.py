@@ -62,18 +62,18 @@ class TestGameTooFarOut:
         assert ok is False
 
 
-class TestSixHourAlertHorizon:
-    def test_allows_event_exactly_six_hours_away_with_offset_timestamp(self):
+class TestTwoHourAlertHorizon:
+    def test_allows_event_exactly_two_hours_away_with_offset_timestamp(self):
         now = datetime(2026, 9, 24, 12, 0, tzinfo=timezone.utc)
-        # 1 p.m. CDT is 6 p.m. UTC: exactly six hours after noon UTC.
+        # 9 a.m. CDT is 2 p.m. UTC: exactly two hours after noon UTC.
         event = datetime(
-            2026, 9, 24, 13, 0, tzinfo=timezone(timedelta(hours=-5))
+            2026, 9, 24, 9, 0, tzinfo=timezone(timedelta(hours=-5))
         )
 
         allowed, reason = is_game_alertable(
             event,
             min_minutes=0,
-            max_minutes=360,
+            max_minutes=120,
             urgent_edge=8.0,
             edge=5.0,
             now=now,
@@ -82,21 +82,21 @@ class TestSixHourAlertHorizon:
         assert allowed is True
         assert reason == ""
 
-    def test_blocks_event_more_than_six_hours_away(self):
+    def test_blocks_event_more_than_two_hours_away(self):
         now = datetime(2026, 9, 24, 12, 0, tzinfo=timezone.utc)
-        event = now + timedelta(minutes=361)
+        event = now + timedelta(minutes=121)
 
         allowed, reason = is_game_alertable(
             event,
             min_minutes=0,
-            max_minutes=360,
+            max_minutes=120,
             urgent_edge=8.0,
             edge=99.0,
             now=now,
         )
 
         assert allowed is False
-        assert "window closes at 360m" in reason
+        assert "window closes at 120m" in reason
 
     def test_ten_pm_game_is_not_alertable_at_five_am(self):
         # 5 a.m. CDT = 10:00 UTC; 10 p.m. CDT = 03:00 UTC the next day.
@@ -106,14 +106,14 @@ class TestSixHourAlertHorizon:
         allowed, reason = is_game_alertable(
             event,
             min_minutes=0,
-            max_minutes=360,
+            max_minutes=120,
             urgent_edge=8.0,
             edge=99.0,
             now=now,
         )
 
         assert allowed is False
-        assert "window closes at 360m" in reason
+        assert "window closes at 120m" in reason
 
 
 class TestGameTooClose:

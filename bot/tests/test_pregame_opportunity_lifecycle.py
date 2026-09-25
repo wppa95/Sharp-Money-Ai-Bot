@@ -287,12 +287,12 @@ async def test_unknown_prizepicks_state_cannot_bypass_pregame_protection():
 
 
 @pytest.mark.asyncio
-async def test_underdog_delivery_blocks_events_beyond_six_hours():
+async def test_underdog_delivery_blocks_events_beyond_two_hours():
     delivery = _delivery()
-    game_time = datetime.utcnow() + timedelta(hours=7)
+    game_time = datetime.utcnow() + timedelta(hours=3)
     with (
         patch("reporting.is_current_reporting_day", return_value=True),
-        patch("alerts.config.ALERT_WINDOW_MAX_MINUTES", 360),
+        patch("alerts.config.ALERT_WINDOW_MAX_MINUTES", 120),
         patch("alert_scope_filter.check", return_value=SimpleNamespace(allowed=True)),
         patch("alerts.broadcast_alert", new_callable=AsyncMock) as broadcast,
     ):
@@ -315,17 +315,17 @@ async def test_underdog_delivery_blocks_events_beyond_six_hours():
         )
 
     assert result.sent is False
-    assert "window closes at 360m" in result.filtered_reason
+    assert "window closes at 120m" in result.filtered_reason
     broadcast.assert_not_awaited()
 
 
 @pytest.mark.asyncio
-async def test_prizepicks_delivery_blocks_events_beyond_six_hours():
+async def test_prizepicks_delivery_blocks_events_beyond_two_hours():
     delivery = _delivery()
-    game_time = datetime.utcnow() + timedelta(hours=7)
+    game_time = datetime.utcnow() + timedelta(hours=3)
     with (
         patch("reporting.is_current_reporting_day", return_value=True),
-        patch("alerts.config.ALERT_WINDOW_MAX_MINUTES", 360),
+        patch("alerts.config.ALERT_WINDOW_MAX_MINUTES", 120),
         patch("alert_scope_filter.check", return_value=SimpleNamespace(allowed=True)),
         patch("alerts.broadcast_alert", new_callable=AsyncMock) as broadcast,
     ):
@@ -336,7 +336,7 @@ async def test_prizepicks_delivery_blocks_events_beyond_six_hours():
         )
 
     assert result.sent is False
-    assert "window closes at 360m" in result.filtered_reason
+    assert "window closes at 120m" in result.filtered_reason
     broadcast.assert_not_awaited()
 
 
