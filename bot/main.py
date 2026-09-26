@@ -1400,6 +1400,24 @@ async def _grade_opportunities_job(context) -> None:
                 for row in _stored_grade_results.get(_key, [])
             )
 
+        def _has_explicit_propline_event_settlement(opp) -> bool:
+            """Only an event-scoped PropLine result is reusable as settlement."""
+            event_id = str(getattr(opp, "game_id", "") or "").strip()
+            if not event_id:
+                return False
+            key = (
+                str(opp.player_name),
+                str(opp.sport),
+                str(opp.stat_type or "").lower().strip(),
+            )
+            return any(
+                str(getattr(row, "game_id", "") or "").strip() == event_id
+                and str(getattr(row, "source", "") or "").lower().startswith(
+                    ("propline_history", "propline_event_results")
+                )
+                for row in _stored_grade_results.get(key, [])
+            )
+
         # ── Proactively fetch player results so grading works without /backfill ──
         # The grader previously only looked up pre-existing PlayerResult rows.
         # Props removed from Underdog before the game finished would never get
@@ -1527,14 +1545,20 @@ async def _grade_opportunities_job(context) -> None:
 
         if _propline_history is not None and pending:
             _propline_targets: list = []
-            _propline_keys: set[tuple[str, str, str]] = set()
+            _propline_keys: set[tuple[str, str, str, str]] = set()
             for _gopp in pending:
-                if _has_stored_grade_result(_gopp):
+                if _has_explicit_propline_event_settlement(_gopp):
                     continue
                 _gkey = (
                     str(_gopp.player_name),
                     str(_gopp.sport).upper(),
                     str(_gopp.stat_type or "").lower().strip(),
+                    str(getattr(_gopp, "game_id", "") or "").strip()
+                    or (
+                        _gopp.game_time.strftime("%Y-%m-%d")
+                        if getattr(_gopp, "game_time", None)
+                        else ""
+                    ),
                 )
                 if _gkey in _propline_keys:
                     continue
@@ -1783,20 +1807,28 @@ async def _grade_opportunities_job(context) -> None:
                 )
             )
             _is_void_settlement = (
-                result_row is None
-                and _void_row is not None
+                _void_row is not None
                 and (
                     not game_date
                     or str(getattr(_void_row, "game_date", "") or "")
                     in _game_dates
                 )
             )
+            if _is_void_settlement:
+                # An explicit provider void outranks any numeric player-history
+                # row for the same event.
+                result_row = None
             # Some PropLine projections have a stable event identity but no
             # game timestamp. Once the official result has been persisted,
             # reconcile by that identity instead of leaving the row pending
             # forever. This remains strict: no date and no game_id still
             # cannot be graded safely.
-            if result_row is None and not game_date and getattr(opp, "game_id", ""):
+            if (
+                result_row is None
+                and not _is_void_settlement
+                and not game_date
+                and getattr(opp, "game_id", "")
+            ):
                 result_row = await db.get_game_result_for_grading(
                     opp.player_name,
                     opp.sport,
@@ -1824,7 +1856,7 @@ async def _grade_opportunities_job(context) -> None:
                 actual = 0.0
                 outcome = "VOID"
                 error_type = None
-                _void_source = str(getattr(result_row, "source", "") or "").lower()
+                _void_source = str(getattr(_void_row, "source", "") or "").lower()
                 _void_code = (
                     "GAME_INTERRUPTED"
                     if "interrupt" in _void_source
@@ -1839,7 +1871,7 @@ async def _grade_opportunities_job(context) -> None:
                             "result": outcome,
                             "actual_value": actual,
                             "error_type": error_type,
-                            "void_reason": f"{_void_code}: PropLine settlement",
+                            "void_reason": f"PropLine {_void_code}",
                         }
                     )
                 graded += 1
@@ -1937,15 +1969,15 @@ async def _grade_opportunities_job(context) -> None:
             if recommendation is None:
                 _tracked_grades.append((opp.id, outcome, actual))
             else:
-                _opportunity_grades.append(
-                    {
-                        "id": opp.id,
-                        "result": outcome,
-                        "actual_value": actual,
-                        "error_type": error_type,
-                        "void_reason": settlement_reason,
-                    }
-                )
+                _grade_row = {
+                    "id": opp.id,
+                    "result": outcome,
+                    "actual_value": actual,
+                    "error_type": error_type,
+                }
+                if settlement_reason:
+                    _grade_row["void_reason"] = settlement_reason
+                _opportunity_grades.append(_grade_row)
             graded += 1
 
         # Keep the expensive per-row settlement lookups above, but commit each

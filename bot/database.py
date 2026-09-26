@@ -657,6 +657,7 @@ class TelegramDeliveryAudit(Base):
     outcome           = Column(String(24), nullable=False)  # sent|failed|rate_limited
     recipients_sent   = Column(Integer, nullable=False, default=0)
     recipients_failed = Column(Integer, nullable=False, default=0)
+    evidence_snapshot_json = Column(Text, nullable=True)
     attempted_at      = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
 
     __table_args__ = (
@@ -1427,6 +1428,9 @@ class Database:
         await self._migrate_prop_opportunity_log_v6()
         await self._migrate_prop_opportunity_log_v7()
         await self._migrate_telegram_delivery_audit_v1()
+        # v2 reads mapped audit rows, so ensure any newer mapped columns exist
+        # before that ORM query runs against an older database file.
+        await self._migrate_telegram_delivery_audit_v3()
         await self._migrate_telegram_delivery_audit_v2()
         await self._migrate_slip_journal_leg_v1()
         await self._migrate_scan_cycle_log_v1()
@@ -2010,6 +2014,17 @@ class Database:
                     "Telegram delivery uniqueness index unavailable: %s",
                     type(exc).__name__,
                 )
+
+    async def _migrate_telegram_delivery_audit_v3(self) -> None:
+        """Add immutable send-time evidence provenance (idempotent)."""
+        async with self._engine.begin() as conn:
+            try:
+                await conn.execute(text(
+                    "ALTER TABLE telegram_delivery_audit "
+                    "ADD COLUMN evidence_snapshot_json TEXT"
+                ))
+            except Exception:
+                pass
 
     async def save_pp_line(self, record: "PrizePicksRecord") -> "PrizePicksRecord":
         async with self.session() as s:
@@ -3143,6 +3158,7 @@ class Database:
         recipients_sent: int,
         recipients_failed: int,
         attempted_at: Optional[datetime] = None,
+        evidence_snapshot: Optional[dict] = None,
     ) -> bool:
         """Atomically persist a confirmed PLAY and mark its exact opportunity.
 
@@ -3184,6 +3200,10 @@ class Database:
                 recipients_sent=int(recipients_sent or 0),
                 recipients_failed=int(recipients_failed or 0),
                 attempted_at=attempted_at or datetime.utcnow(),
+                evidence_snapshot_json=(
+                    json.dumps(evidence_snapshot, sort_keys=True, separators=(",", ":"))
+                    if evidence_snapshot is not None else None
+                ),
             ).prefix_with("OR IGNORE")
             await s.execute(stmt)
             audit = (

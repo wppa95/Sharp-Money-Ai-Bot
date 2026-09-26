@@ -56,6 +56,8 @@ from engine.player_prop_market import (
 from engine.score_validation import clamp_score
 from engine.strongest_pick import (
     directional_hit_rate_strength,
+    evidence_profile,
+    rank_qualified_actionable_picks,
     select_strongest_actionable_picks,
 )
 from engine.delivery_evidence import (
@@ -6810,15 +6812,16 @@ async def underdog_job(context) -> None:
                 len(_delivery_queue),
             )
         if _delivery_queue and chat_ids:
-            _delivery_queue[:] = select_strongest_actionable_picks(
-                _delivery_queue,
-                # Evidence was already required at collection and is checked
-                # again by AlertDelivery.  Do not add strong-mode's stricter
-                # six-window filter here; five-plus real samples are valid.
-                require_strong=False,
-            )
             _delivery_queue[:] = _select_strong_directional_picks(_delivery_queue)
             _prioritize_delivery_sports(_delivery_queue)
+            # Rank all eligible sends for presentation. Do not collapse to one
+            # candidate per player or impose a delivery cap; existing final
+            # gates and identity deduplication remain responsible for safety.
+            _delivery_queue[:] = rank_qualified_actionable_picks(_delivery_queue)
+            _delivery_total = len(_delivery_queue)
+            for _delivery_rank, _ranked in enumerate(_delivery_queue, 1):
+                _ranked["_delivery_rank"] = _delivery_rank
+                _ranked["_delivery_total"] = _delivery_total
             _n_dq_deferred   = 0
             _dq_deferred_log: list[str] = []
             for _dq in _delivery_queue:
@@ -6839,6 +6842,31 @@ async def underdog_job(context) -> None:
                 _dq_prev      = _dq.get("prev_line")
                 _dq_is_reent  = _dq.get("is_reentry", False)
                 _dq_is_new    = (_dq_path == "new" or _dq_is_reent)
+                _dq_profile   = evidence_profile({
+                    "validation": _dq_val,
+                    "decision": _dq_dec,
+                    "direction": getattr(_dq_dec, "recommendation", ""),
+                    "sport": _dq_sport,
+                    "hit_rates": getattr(_dq_dec, "hit_rates", None),
+                })
+                _dq_snapshot = {
+                    "schema_version": 1,
+                    "rank": _dq.get("_delivery_rank"),
+                    "total": _dq.get("_delivery_total"),
+                    **_dq_profile,
+                    "line": _dq_line_val,
+                }
+                _window_snapshot = {}
+                for _window in ("l5", "l10", "l15", "l20", "l30", "season"):
+                    _window_obj = getattr(_dq_val, _window, None)
+                    if _window_obj is None:
+                        _window_obj = getattr(_dq_dec, _window, None)
+                    if _window_obj is not None:
+                        _window_snapshot[_window] = {
+                            "games": getattr(_window_obj, "games", None),
+                            "hit_rate": getattr(_window_obj, "hit_rate", None),
+                        }
+                _dq_snapshot["windows"] = _window_snapshot
 
                 # ── Tier delivery gate backstop ───────────────────────────────
                 # Belt-and-suspenders: any candidate that slipped through the
@@ -6924,6 +6952,9 @@ async def underdog_job(context) -> None:
                         ),
                         standing            = (_dq_path == "standing"),
                         strict_pregame      = True,
+                        delivery_rank       = _dq.get("_delivery_rank"),
+                        delivery_total     = _dq.get("_delivery_total"),
+                        evidence_snapshot  = _dq_snapshot,
                     )
                 except Exception as _dq_delivery_exc:
                     _release_prop_delivery_claim(

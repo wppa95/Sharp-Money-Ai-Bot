@@ -101,7 +101,10 @@ async def test_alert_delivery_blocks_already_delivered_funnel_row(db):
         n_supplemental_games=10,
     )
 
-    with patch("alert_scope_filter.check", return_value=SimpleNamespace(allowed=True)):
+    with (
+        patch("alert_scope_filter.check", return_value=SimpleNamespace(allowed=True)),
+        patch("reporting.is_current_reporting_day", return_value=True),
+    ):
         result = await delivery.deliver_underdog(
             player_name="Funnel Player",
             team="TST",

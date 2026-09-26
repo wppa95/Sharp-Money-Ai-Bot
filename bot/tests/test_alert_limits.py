@@ -386,10 +386,10 @@ async def test_underdog_removal_skips_timing_filter():
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "sport",
-    ["CFB", "NCAAF", "NFL", "CFL", "RUGBY_UNION", "AFL", "college_football"],
+    ["NCAAF", "CFL", "RUGBY_UNION", "AFL", "college_football"],
 )
-async def test_underdog_football_family_is_never_delivered(sport):
-    """Football and related sports remain non-actionable for Telegram."""
+async def test_disallowed_football_family_is_never_delivered(sport):
+    """Only the product-approved NFL/CFB labels reach normal delivery gates."""
     db = _make_db()
     delivery = _make_delivery(db)
 

@@ -38,8 +38,8 @@ class TestSettlementFlag:
 # ── detect_void ───────────────────────────────────────────────────────────────
 
 class TestDetectVoid:
-    def test_zero_actual_with_positive_line_is_void(self):
-        assert detect_void(0.0, 25.5) is True
+    def test_zero_actual_with_positive_line_is_not_assumed_void(self):
+        assert detect_void(0.0, 25.5) is False
 
     def test_zero_actual_zero_line_not_void(self):
         # line < 0.5 → not a meaningful void signal
@@ -130,9 +130,9 @@ class TestCheckSettlement:
         assert flag.code == "VOID"
         assert flag.is_learnable is False
 
-    def test_zero_actual_large_line_returns_void(self):
+    def test_zero_actual_large_line_is_not_assumed_void(self):
         flag = check_settlement(0.0, 25.5)
-        assert flag.code == "VOID"
+        assert flag.code == "UNUSUAL_RESULT"
         assert flag.is_learnable is False
 
     def test_clean_result_returns_clean(self):

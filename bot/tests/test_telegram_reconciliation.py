@@ -195,6 +195,8 @@ async def _deliver_traceable_play(db, *, source_id: str, event_id: str, path: st
 
 @pytest.mark.asyncio
 async def test_successful_play_persists_exact_source_and_event_and_marks_opportunity(db):
+    import json
+
     from alerts import DeliveryResult
     from database import PropOpportunityLog, TelegramDeliveryAudit
     from sqlalchemy import select
@@ -229,6 +231,10 @@ async def test_successful_play_persists_exact_source_and_event_and_marks_opportu
     assert audit.delivery_path == "line_change"
     assert audit.alert_kind == "ACTIONABLE_PICK"
     assert audit.outcome == "sent"
+    evidence = json.loads(audit.evidence_snapshot_json)
+    assert evidence["schema_version"] == 1
+    assert evidence["source"] == "propline"
+    assert evidence["sample_count"] == 5
     assert opportunity.alert_sent is True
     report = await db.get_telegram_reconciliation(since_hours=24)
     ud = report["by_provider"]["Underdog"]

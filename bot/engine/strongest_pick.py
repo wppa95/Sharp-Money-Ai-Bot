@@ -19,6 +19,100 @@ from engine.delivery_evidence import (
 _PRIMARY_PROVIDERS = {"prizepicks", "underdog"}
 
 
+def evidence_profile(candidate: dict) -> dict:
+    """Return a truthful, presentation-safe evidence description.
+
+    This intentionally does not turn confidence or model scores into evidence.
+    """
+    validation = candidate.get("validation")
+    decision = candidate.get("decision")
+
+    def _value(obj, name, default=None):
+        if isinstance(obj, dict):
+            return obj.get(name, default)
+        return getattr(obj, name, default)
+
+    sources = (
+        _value(validation, "data_source"),
+        candidate.get("evidence_source"),
+        _value(decision, "evidence_source"),
+    )
+    source = next(
+        (
+            str(value).strip().lower()
+            for value in sources
+            if value is not None
+            and str(value).strip().lower()
+            not in {
+                "", "none", "unavailable", "proxy", "model_proxy",
+                "no_data", "no history", "missing",
+            }
+        ),
+        next(
+            (
+                str(value).strip().lower()
+                for value in sources
+                if value is not None and str(value).strip()
+            ),
+            "unavailable",
+        ),
+    )
+    real = int(_number(_value(validation, "n_real_games", 0)))
+    supplemental = int(_number(_value(validation, "n_supplemental_games", 0)))
+    if (
+        source in {"composite", "primary+supplemental", "real+propline", "primary+propline"}
+        or ("propline" in source and ("real" in source or "primary" in source))
+    ):
+        label, source_label = "composite evidence", "composite"
+    elif source in {
+        "primary", "player_game_results", "completed_results",
+        "completed_result", "settled_results", "real",
+    }:
+        label, source_label = "completed primary game results", "primary"
+    elif source in {"propline", "prop_line", "supplemental", "propline_history"}:
+        label, source_label = "PropLine supplemental/settled evidence", "propline"
+    elif source in {
+        "historical_average", "average", "historical-average",
+        "historical average",
+    }:
+        label, source_label = "historical-average fallback", "historical_average"
+    elif source in {"proxy", "model_proxy"}:
+        label, source_label = "proxy", "proxy"
+    else:
+        label, source_label = "unavailable", "unavailable"
+    direction = _direction(candidate)
+    history = candidate.get("hit_rates") or decision
+    trusted_sample_count = (
+        supplemental
+        if source_label == "propline"
+        else (
+            real
+            if source_label == "primary"
+            else real + supplemental
+            if source_label == "composite"
+            else 0
+        )
+    )
+    strong = bool(
+        direction in {"OVER", "UNDER"}
+        and not is_history_optional_sport(_sport(candidate))
+        and has_strong_directional_history(
+            history, direction
+        )
+        and trusted_sample_count >= 5
+        and source_label in {"primary", "propline", "composite"}
+    )
+    return {
+        "class": "STRONG" if strong else ("HISTORICAL-AVERAGE FALLBACK" if source_label == "historical_average" else "QUALIFIED"),
+        "source": source_label,
+        "source_label": label,
+        "real_samples": real,
+        "supplemental_samples": supplemental,
+        "sample_count": trusted_sample_count,
+        "direction": direction,
+    }
+
+
 def _number(value, default: float = 0.0) -> float:
     try:
         return float(value) if value is not None else default
@@ -293,3 +387,39 @@ def select_strongest_actionable_picks(
             )
         )
     return selected
+
+
+def rank_qualified_actionable_picks(candidates: Iterable[dict]) -> list[dict]:
+    """Rank every already-qualified candidate without filtering or capping.
+
+    Strong, source-backed directional history leads. Existing input order is
+    the final tie-break so callers can preserve product-level sport priority.
+    """
+    indexed = [
+        (index, candidate)
+        for index, candidate in enumerate(candidates)
+        if isinstance(candidate, dict)
+    ]
+
+    def _rank(item: tuple[int, dict]):
+        index, candidate = item
+        profile = evidence_profile(candidate)
+        direction_strength = directional_hit_rate_strength(candidate)
+        source_rank = {
+            "primary": 0,
+            "composite": 1,
+            "propline": 2,
+            "historical_average": 3,
+            "proxy": 4,
+            "unavailable": 5,
+        }.get(profile["source"], 6)
+        return (
+            0 if profile["class"] == "STRONG" else 1,
+            -(direction_strength if direction_strength is not None else -1.0),
+            -int(profile["sample_count"]),
+            source_rank,
+            index,
+        )
+
+    indexed.sort(key=_rank)
+    return [candidate for _index, candidate in indexed]

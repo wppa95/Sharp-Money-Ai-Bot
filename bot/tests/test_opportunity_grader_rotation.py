@@ -340,7 +340,19 @@ async def test_grader_closes_explicit_propline_void_without_numeric_history():
     db.get_pending_opportunities = AsyncMock(return_value=[row])
     db.get_player_results_bulk = AsyncMock(return_value={})
     db.upsert_player_results_bulk = AsyncMock()
-    db.get_game_results_for_grading_bulk = AsyncMock(return_value={})
+    db.get_game_results_for_grading_bulk = AsyncMock(
+        return_value={
+            32: (
+                SimpleNamespace(
+                    actual_value=2.0,
+                    game_date="2026-09-22",
+                    source="player_stats",
+                    game_id="tennis-event-32",
+                ),
+                "2026-09-22",
+            )
+        }
+    )
     db.grade_opportunities_bulk = AsyncMock()
     health = _Health()
     stats_provider = MagicMock()

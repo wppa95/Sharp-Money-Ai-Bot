@@ -2,7 +2,11 @@ from types import SimpleNamespace
 
 import pytest
 
-from engine.strongest_pick import select_strongest_actionable_picks
+from engine.strongest_pick import (
+    evidence_profile,
+    rank_qualified_actionable_picks,
+    select_strongest_actionable_picks,
+)
 
 
 def _candidate(
@@ -181,6 +185,80 @@ def _decision_with_windows(direction: str, rates: list[float]):
             f"{prefix}_under": games - over,
         })
     return SimpleNamespace(recommendation=direction, confidence=85, **windows)
+
+
+def test_evidence_profile_uses_validation_data_source_and_trusted_samples():
+    candidate = _candidate(
+        "Underdog",
+        "Evidence Player",
+        "Hits",
+        evidence_count=0,
+    )
+    candidate["sport"] = "MLB"
+    candidate["decision"] = _decision_with_windows(
+        "OVER", [0.8, 0.8, 0.8, 0.8, 0.8, 0.8]
+    )
+    candidate["validation"] = SimpleNamespace(
+        has_supporting_data=True,
+        data_source="primary",
+        n_real_games=10,
+        n_supplemental_games=0,
+    )
+
+    profile = evidence_profile(candidate)
+
+    assert profile["class"] == "STRONG"
+    assert profile["source"] == "primary"
+    assert profile["sample_count"] == 10
+
+
+def test_historical_average_is_never_labeled_strong():
+    candidate = _candidate("Underdog", "Fallback Player", "Hits")
+    candidate["sport"] = "MLB"
+    candidate["decision"] = _decision_with_windows(
+        "OVER", [0.8, 0.8, 0.8, 0.8, 0.8, 0.8]
+    )
+    candidate["validation"] = SimpleNamespace(
+        has_supporting_data=False,
+        data_source="historical_average",
+        n_real_games=0,
+        n_supplemental_games=0,
+    )
+
+    profile = evidence_profile(candidate)
+
+    assert profile["class"] == "HISTORICAL-AVERAGE FALLBACK"
+    assert profile["source"] == "historical_average"
+
+
+def test_global_delivery_ranking_keeps_all_candidates_and_puts_strong_first():
+    stronger = _candidate("Underdog", "Same Player", "Hits")
+    stronger["sport"] = "MLB"
+    stronger["decision"] = _decision_with_windows(
+        "OVER", [0.8, 0.8, 0.8, 0.8, 0.8, 0.8]
+    )
+    stronger["validation"] = SimpleNamespace(
+        has_supporting_data=True,
+        data_source="primary",
+        n_real_games=10,
+        n_supplemental_games=0,
+    )
+    weaker = _candidate("Underdog", "Same Player", "Runs")
+    weaker["sport"] = "MLB"
+    weaker["decision"] = _decision_with_windows(
+        "OVER", [0.6, 0.6, 0.6, 0.6, 0.6, 0.6]
+    )
+    weaker["validation"] = SimpleNamespace(
+        has_supporting_data=True,
+        data_source="primary",
+        n_real_games=10,
+        n_supplemental_games=0,
+    )
+
+    ranked = rank_qualified_actionable_picks([weaker, stronger])
+
+    assert ranked == [stronger, weaker]
+    assert len(ranked) == 2
 
 
 def test_strong_mode_excludes_mediocre_directional_history():

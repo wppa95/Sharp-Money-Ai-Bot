@@ -105,15 +105,12 @@ def detect_void(
     """
     Return True when the actual value strongly suggests the result was voided.
 
-    Void conditions:
-    1. actual == 0.0 and line > 0.5 — player almost certainly did not play.
-    2. abs(actual - line) < _VOID_EPSILON — result suspiciously equal to the line
-       (platform may have settled at the line due to voiding).
+    A zero actual is not enough to prove non-participation. The remaining
+    equality check is only a diagnostic; the grader preserves equality as PUSH.
     """
-    if actual == 0.0 and line >= 0.5:
-        return True
-    # Only flag "actual equals line" as suspicious for meaningful lines (≥ 0.5).
-    # A line of 0.0 is degenerate / unmeasured — not a void signal.
+    # A zero stat can be a valid completed result. Only an explicit provider
+    # settlement may establish non-participation; this heuristic cannot.
+    # Equality remains suspicious, while the grader preserves it as a PUSH.
     if line >= 0.5 and abs(actual - line) < _VOID_EPSILON:
         return True
     return False

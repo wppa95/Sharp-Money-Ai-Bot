@@ -43,6 +43,7 @@ from engine.delivery_evidence import (
     is_history_optional_sport,
     serialized_evidence_supports_delivery,
 )
+from engine.strongest_pick import evidence_profile
 from engine.sport_policy import is_disallowed_football_sport
 from models import EVOpportunity, Recommendation, SteamAlert
 
@@ -658,6 +659,18 @@ def is_telegram_suppressed_sport(sport: Optional[str]) -> bool:
     return is_disallowed_football_sport(sport)
 
 
+def _is_gridiron_sport(sport: Optional[str]) -> bool:
+    """Identify gridiron football labels whose evidence must be non-PropLine."""
+    normalized = re.sub(r"[^a-z0-9]", "", str(sport or "").lower())
+    return (
+        normalized in {
+            "nfl", "cfb", "ncaaf", "ncaafb", "collegefootball",
+            "americanfootball", "football", "gridiron",
+        }
+        or normalized.startswith("americanfootball")
+    )
+
+
 def _has_strong_underdog_evidence(
     score: object = None,
     validation: object = None,
@@ -669,7 +682,9 @@ def _has_strong_underdog_evidence(
 
     History remains useful context in the rendered alert, but it is not a
     prerequisite for delivery under the active direction-first policy.
-    Football-family sports are blocked separately by the Telegram boundary.
+    Disallowed football-family sports are blocked separately. NFL/CFB may use
+    their normal delivery path, but PropLine-only evidence is never sufficient
+    for gridiron picks.
     """
     decision_direction = str(
         (
@@ -684,6 +699,26 @@ def _has_strong_underdog_evidence(
         return False
     if not history_is_available(validation, decision, intelligence_trace):
         return is_history_optional_sport(sport)
+
+    if _is_gridiron_sport(sport):
+        source_values = []
+        for value in (validation, decision, intelligence_trace):
+            if isinstance(value, dict):
+                source_values.extend(
+                    value.get(key)
+                    for key in ("data_source", "evidence_source", "source")
+                )
+            elif value is not None:
+                source_values.extend(
+                    getattr(value, key, None)
+                    for key in ("data_source", "evidence_source", "source")
+                )
+        if any(
+            "propline" in str(source_value or "").lower()
+            or "prop_line" in str(source_value or "").lower()
+            for source_value in source_values
+        ):
+            return False
 
     history_values = (
         (validation,)
@@ -1329,6 +1364,7 @@ class AlertDelivery:
         outcome: str,
         recipients_sent: int,
         recipients_failed: int,
+        evidence_snapshot: Optional[dict] = None,
     ) -> bool:
         """Persist delivery accounting and report authoritative PLAY success."""
         if (
@@ -1349,6 +1385,7 @@ class AlertDelivery:
                         line_value=line_value,
                         recipients_sent=recipients_sent,
                         recipients_failed=recipients_failed,
+                        evidence_snapshot=evidence_snapshot,
                     )
                     if inspect.isawaitable(result):
                         result = await result
@@ -1645,7 +1682,7 @@ class AlertDelivery:
         _pp_direction = str(getattr(opp, "best_side", "") or "").strip().upper()
         # PrizePicks uses the same direction-first policy as Underdog. The
         # sport boundary above still blocks football-family markets.
-        if not _directional_evidence_gate(_pp_direction, True):
+        if not _directional_evidence_gate(_pp_direction, evidence_available):
             return DeliveryResult(
                 sent=False,
                 filtered=True,
@@ -1702,6 +1739,28 @@ class AlertDelivery:
                 direction=_pp_direction,
                 line_value=_pp_line_value,
             )
+        _pp_profile = evidence_profile({
+            "validation": getattr(opp, "validation", None),
+            "evidence_source": (
+                getattr(opp, "evidence_source", None)
+                or getattr(score, "evidence_source", None)
+            ),
+            "decision": (
+                getattr(opp, "decision", None)
+                or getattr(score, "decision", None)
+            ),
+            "hit_rates": getattr(opp, "hit_rates", None),
+            "direction": _pp_direction,
+            "sport": _pp_sport,
+        })
+        _pp_evidence_snapshot = {
+            "schema_version": 1,
+            "rank": None,
+            "total": None,
+            **_pp_profile,
+            "line": _pp_line_value,
+            "evidence_available": bool(evidence_available),
+        }
         _audit_ok = await self._audit_telegram_attempt(
             provider="PrizePicks",
             alert_kind="ACTIONABLE_PICK",
@@ -1719,6 +1778,7 @@ class AlertDelivery:
             outcome="sent" if alert_sent else "failed",
             recipients_sent=counts["sent"],
             recipients_failed=counts["failed"],
+            evidence_snapshot=_pp_evidence_snapshot,
         )
         if (
             alert_sent
@@ -1783,6 +1843,9 @@ class AlertDelivery:
         source_id: Optional[str] = None,
         event_id: Optional[str] = None,
         delivery_path: Optional[str] = None,
+        delivery_rank: Optional[int] = None,
+        delivery_total: Optional[int] = None,
+        evidence_snapshot: Optional[dict] = None,
     ) -> "DeliveryResult":
         """
         Full Underdog prop alert pipeline:
@@ -2047,6 +2110,18 @@ class AlertDelivery:
                     market_confirmation=market_confirmation,
                     source=source,
                 )
+            if delivery_rank is not None and delivery_total is not None:
+                profile = evidence_profile({
+                    "validation": validation, "decision": decision,
+                    "direction": _direction, "sport": sport,
+                })
+                badge = (
+                    f"🏷️ <b>Rank:</b> #{delivery_rank} of {delivery_total} "
+                    f"· <b>{escape(profile['class'])}</b>\n"
+                    f"   {escape(profile['source_label'])} · "
+                    f"{profile['sample_count']} samples\n\n"
+                )
+                message = badge + message
         except Exception:
             logger.exception(
                 "Underdog alert formatter failed; using delivery fallback: "
@@ -2113,6 +2188,21 @@ class AlertDelivery:
             else "MARKET_MOVE" if market_move_only
             else "ACTIONABLE_PICK"
         )
+        if evidence_snapshot is None:
+            _ud_profile = evidence_profile({
+                "validation": validation,
+                "decision": decision,
+                "direction": _direction,
+                "sport": sport,
+            })
+            evidence_snapshot = {
+                "schema_version": 1,
+                "rank": delivery_rank,
+                "total": delivery_total,
+                **_ud_profile,
+                "line": _ud_line_value,
+            }
+
         _audit_ok = await self._audit_telegram_attempt(
             provider=source,
             alert_kind=_alert_kind,
@@ -2133,6 +2223,7 @@ class AlertDelivery:
             outcome="sent" if alert_sent else "failed",
             recipients_sent=counts["sent"],
             recipients_failed=counts["failed"],
+            evidence_snapshot=evidence_snapshot,
         )
         if (
             alert_sent
