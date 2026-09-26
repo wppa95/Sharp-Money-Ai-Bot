@@ -465,7 +465,13 @@ class TestDeliverUnderdog:
         assert "History:</b>\n   N/A" not in sent_messages[0]
 
     @pytest.mark.asyncio
-    @pytest.mark.parametrize("sport", ["NFL", "CFB"])
+    @pytest.mark.parametrize(
+        "sport",
+        [
+            "NFL", "CFB", "NCAAF", "CFL", "AFL", "RUGBY",
+            "NBA", "WNBA", "NHL", "SOCCER", "TENNIS", "DOTA",
+        ],
+    )
     @pytest.mark.parametrize(
         ("data_source", "n_real_games", "n_supplemental_games"),
         [("real+propline", 3, 2), ("propline", 0, 5)],
@@ -507,8 +513,8 @@ class TestDeliverUnderdog:
         "sport",
         ["NCAAF", "CFL", "AFL", "RUGBY"],
     )
-    async def test_disallowed_football_aliases_remain_suppressed(self, sport):
-        """Disallowed football-family sports never reach Telegram."""
+    async def test_other_football_family_sports_can_deliver(self, sport):
+        """Valid completed-history picks are not blocked by football labels."""
         mock_bot = MagicMock()
         mock_bot.send_message = AsyncMock(return_value=MagicMock())
         delivery = AlertDelivery(_make_db_mock(), mock_bot, [1])
@@ -530,8 +536,8 @@ class TestDeliverUnderdog:
             decision=SimpleNamespace(recommendation="OVER", confidence=75),
         )
 
-        assert result.sent is False
-        assert mock_bot.send_message.await_count == 0
+        assert result.sent is True
+        assert mock_bot.send_message.await_count == 1
 
     @pytest.mark.asyncio
     async def test_non_strong_moneyline_is_filtered_before_formatting(self):

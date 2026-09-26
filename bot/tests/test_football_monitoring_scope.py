@@ -70,7 +70,7 @@ def test_supported_non_football_sports_remain_allowed(sport):
 
 
 @pytest.mark.parametrize("sport", ["NFL", "football_nfl", "CFB"])
-def test_nfl_and_college_football_are_the_only_allowed_football_sports(sport):
+def test_nfl_and_college_football_remain_classified_as_allowed(sport):
     assert is_disallowed_football_sport(sport) is False
     assert is_telegram_suppressed_sport(sport) is False
 
@@ -91,9 +91,9 @@ def test_nfl_and_college_football_are_the_only_allowed_football_sports(sport):
         "gridiron",
     ],
 )
-def test_other_football_family_sports_remain_suppressed(sport):
+def test_other_football_family_classification_does_not_suppress_telegram(sport):
     assert is_disallowed_football_sport(sport) is True
-    assert is_telegram_suppressed_sport(sport) is True
+    assert is_telegram_suppressed_sport(sport) is False
 
 
 @pytest.mark.parametrize(

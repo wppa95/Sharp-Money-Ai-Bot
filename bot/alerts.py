@@ -44,7 +44,6 @@ from engine.delivery_evidence import (
     serialized_evidence_supports_delivery,
 )
 from engine.strongest_pick import evidence_profile
-from engine.sport_policy import is_disallowed_football_sport
 from models import EVOpportunity, Recommendation, SteamAlert
 
 if TYPE_CHECKING:
@@ -650,25 +649,8 @@ def format_start_message() -> str:
 
 
 def is_telegram_suppressed_sport(sport: Optional[str]) -> bool:
-    """Return whether a sport is blocked from user-facing Telegram alerts.
-
-    NFL and college football are allowed. Other football-family markets remain
-    valid provider observations for persistence and historical diagnostics, but
-    are not part of the product's actionable alert universe.
-    """
-    return is_disallowed_football_sport(sport)
-
-
-def _is_gridiron_sport(sport: Optional[str]) -> bool:
-    """Identify gridiron football labels whose evidence must be non-PropLine."""
-    normalized = re.sub(r"[^a-z0-9]", "", str(sport or "").lower())
-    return (
-        normalized in {
-            "nfl", "cfb", "ncaaf", "ncaafb", "collegefootball",
-            "americanfootball", "football", "gridiron",
-        }
-        or normalized.startswith("americanfootball")
-    )
+    """No supported sport is excluded solely by its sport label."""
+    return False
 
 
 def _has_strong_underdog_evidence(
@@ -682,9 +664,7 @@ def _has_strong_underdog_evidence(
 
     History remains useful context in the rendered alert, but it is not a
     prerequisite for history-optional sports under the active direction-first
-    policy. NFL/CFB are eligible and use the same completed-history source and
-    sample rules as other sports; other disallowed football-family sports are
-    blocked separately.
+    policy. Every supported sport uses the same source and sample rules.
     """
     decision_direction = str(
         (
@@ -695,17 +675,8 @@ def _has_strong_underdog_evidence(
     ).upper()
     if decision_direction not in {"OVER", "UNDER"}:
         return False
-    if is_telegram_suppressed_sport(sport):
-        return False
     if not history_is_available(validation, decision, intelligence_trace):
         return is_history_optional_sport(sport)
-
-    if _is_gridiron_sport(sport):
-        return history_supports_delivery(
-            validation,
-            decision,
-            intelligence_trace,
-        )
 
     history_values = (
         (validation,)
@@ -1960,6 +1931,18 @@ class AlertDelivery:
         # Every prop Telegram path uses the same canonical gate. Market
         # movement, removal, new-prop, and moneyline labels are monitoring
         # context; none is an actionable direction/evidence substitute.
+        _normalized_market_label = re.sub(
+            r"[^a-z0-9]+",
+            "",
+            str(stat_type or "").casefold(),
+        )
+        if is_moneyline or _normalized_market_label in {"moneyline", "h2h"}:
+            return DeliveryResult(
+                sent=False,
+                filtered=True,
+                filtered_reason="Non-player market is not Telegram actionable",
+            )
+
         _direction = str(getattr(decision, "recommendation", "") or "").upper()
         evidence_available = _has_strong_underdog_evidence(
             score=score,

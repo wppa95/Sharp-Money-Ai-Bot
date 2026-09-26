@@ -219,7 +219,10 @@ def test_primary_history_without_propline_is_telegram_deliverable():
     ) is False
 
 
-@pytest.mark.parametrize("sport", ["NFL", "CFB"])
+@pytest.mark.parametrize(
+    "sport",
+    ["NFL", "CFB", "NCAAF", "CFL", "AFL", "RUGBY"],
+)
 def test_gridiron_allows_mixed_primary_and_propline_results(sport):
     validation = SimpleNamespace(
         has_supporting_data=True,
@@ -241,7 +244,10 @@ def test_gridiron_allows_mixed_primary_and_propline_results(sport):
     ) is True
 
 
-@pytest.mark.parametrize("sport", ["NFL", "CFB"])
+@pytest.mark.parametrize(
+    "sport",
+    ["NFL", "CFB", "NCAAF", "CFL", "AFL", "RUGBY"],
+)
 def test_gridiron_accepts_sufficient_settled_propline_history(sport):
     validation = SimpleNamespace(
         has_supporting_data=True,
@@ -263,7 +269,10 @@ def test_gridiron_accepts_sufficient_settled_propline_history(sport):
     ) is True
 
 
-@pytest.mark.parametrize("sport", ["NFL", "CFB"])
+@pytest.mark.parametrize(
+    "sport",
+    ["NFL", "CFB", "NCAAF", "CFL", "AFL", "RUGBY"],
+)
 def test_gridiron_rejects_insufficient_propline_history(sport):
     validation = SimpleNamespace(
         has_supporting_data=True,
