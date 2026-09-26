@@ -333,7 +333,7 @@ class Config:
     #   NPB/KBO — no accessible public per-game stat API
     UD_ALERT_SPORTS_RAW: str = os.environ.get(
         "UD_ALERT_SPORTS",
-        "MLB,WNBA,NFL,CFB,NBA,DOTA,TENNIS,CS,NHL,LOL,MMA,UFC,GOLF,"
+        "MLB,WNBA,NFL,CFB,NCAAF,NBA,NCAAB,DOTA,TENNIS,CS,NHL,LOL,MMA,UFC,GOLF,"
         "SOCCER,EPL,LALIGA,SERIEA,BUNDESLIGA,LIGUE1,MLS,UCL,FIFA,"
         "VAL,VALORANT,TT,BADMINTON",
     )

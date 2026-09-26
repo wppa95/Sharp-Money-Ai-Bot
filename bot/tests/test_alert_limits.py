@@ -386,10 +386,10 @@ async def test_underdog_removal_skips_timing_filter():
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "sport",
-    ["NCAAF", "CFL", "RUGBY_UNION", "AFL", "college_football"],
+    ["CFL", "RUGBY_UNION", "AFL", "college_football"],
 )
 async def test_disallowed_football_family_is_not_delivered(sport):
-    """Only NFL/CFB football-family labels may reach normal delivery gates."""
+    """Only NFL/CFB labels and their active aliases may reach delivery."""
     db = _make_db()
     delivery = _make_delivery(db)
 
@@ -400,6 +400,11 @@ async def test_disallowed_football_family_is_not_delivered(sport):
         "Points",
         25.5,
         26.0,
+        validation=SimpleNamespace(
+            has_supporting_data=True,
+            data_source="primary",
+            n_real_games=5,
+        ),
         decision=SimpleNamespace(recommendation="OVER"),
     )
 
@@ -407,6 +412,30 @@ async def test_disallowed_football_family_is_not_delivered(sport):
     assert result.filtered is True
     assert "football-related" in result.filtered_reason.lower()
     delivery._bot.send_message.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_ncaaf_alias_is_delivered_as_active_cfb_scope():
+    db = _make_db()
+    delivery = _make_delivery(db)
+
+    result = await delivery.deliver_underdog(
+        "Football Player",
+        "TeamA",
+        "NCAAF",
+        "Points",
+        25.5,
+        26.0,
+        validation=SimpleNamespace(
+            has_supporting_data=True,
+            data_source="primary",
+            n_real_games=5,
+        ),
+        decision=SimpleNamespace(recommendation="OVER"),
+    )
+
+    assert result.sent is True
+    delivery._bot.send_message.assert_awaited()
 
 
 # ── S-tier does not consume A/B cap budget ────────────────────────────────────

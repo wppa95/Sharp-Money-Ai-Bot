@@ -64,7 +64,7 @@
 - [Tier-1 direction gate (Weak direction fix)](tier1-direction-gate.md) — sport= param on make_ud_bet_decision; Tier-1 uses _B_RATE_TIER1=0.55, Tier-2/empty uses _B_RATE=0.60; all 8 call sites pass sport=.
 - [Cold-start scheduler stall](cold-start-scheduler-stall.md) — live cold-start Underdog cycles can remain in DB state restoration for many minutes while player-history/FPR work overlaps; measure restore separately before optimizing.
 - [Monitoring baseline August 2026](monitoring-baseline-aug2026.md) — three post-restore cycles show database pool reads dominate; OpenDota needs more samples before provider optimization.
-- [Telegram sport scope](strict-tier1-telegram.md) — only NFL/CFB are allowed football families; supported non-football sports stay eligible under evidence and safety gates.
+- [Telegram sport scope](strict-tier1-telegram.md) — NFL/CFB are the only football scopes; accept NCAAF only as an explicit active-CFB provider alias.
 - [Unified prop tracking](unified-prop-tracking.md) — persistent monitoring rows are independent of delivery; retired Watchlist/Near-Miss labels must not drive rotation or reports.
 - [Unified monitoring universe](unified-monitoring-universe.md) — every active prop line is continuously scannable; delivery eligibility never creates a rotation or tracking queue.
 - [Directional persistence policy](pass-watchlist-persistence.md) — PASS/no-direction/watchlist are transient scan results; only OVER/UNDER evaluations are persisted.
@@ -122,7 +122,7 @@
 - [CLV bulk writes](clv-bulk-writes.md) — bounded CLV batches and no full-history sort before LIMIT keep scheduled CLV work from appearing stuck.
 - [Funnel timing](funnel-timing.md) — report scan age/cadence from observed timestamps, never from the requested report window.
 - [Monitoring cycle budget](cycle-budget-funnel-resilience.md) — optional enrichment must have a hard shared budget so stalled history calls cannot block cycle completion or /funnel.
-- [Direction-only prop delivery](direction-only-delivery.md) — only no history or no OVER/UNDER direction may block; watchlist/near-miss states stay non-blocking.
+- [Direction-only prop delivery](direction-only-delivery.md) — no usable history or no OVER/UNDER direction blocks alerts; watchlist/near-miss states stay non-blocking.
 - [Sport delivery without quotas](independent-sport-delivery-quotas.md) — keep existing per-pick gates and ranking, but do not cap Telegram sends by sport or rolling count.
 - [PropLine complete-feed ledger](propline-complete-feed-ledger.md) — fetch all active non-football sports, retain immutable normalized observations, and withhold evaluation on partial feeds.
 - [PropLine catalog audit boundary](propline-catalog-audit.md) — catalog drift is separate operational evidence; retain unknown identities and resolve them only when a later complete audit maps them.

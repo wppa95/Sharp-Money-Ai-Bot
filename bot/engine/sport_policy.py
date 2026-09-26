@@ -38,6 +38,10 @@ _ALLOWED_FOOTBALL_ALIASES = frozenset(
         "AMERICANFOOTBALL_NFL",
         "AMERICAN_FOOTBALL_NFL",
         "CFB",
+        "NCAAF",
+        "FOOTBALL_NCAAF",
+        "AMERICANFOOTBALL_NCAAF",
+        "AMERICAN_FOOTBALL_NCAAF",
     }
 )
 

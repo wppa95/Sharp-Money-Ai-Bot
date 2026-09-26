@@ -27,17 +27,18 @@ _STRICT_HISTORY_SPORTS = frozenset({"MLB", "NFL", "NBA", "WNBA"})
 
 
 def is_history_optional_sport(sport: Any) -> bool:
-    """Return whether direction alone may qualify delivery for *sport*.
+    """Return whether *sport* skips the stricter history-quality checks.
 
     NFL, NBA, MLB, and WNBA are strict-history sports. Other sports may be
-    delivered from a directional decision before completed player-game history
-    is available, but any history that is present must still pass qualification.
-    The caller still enforces direction, freshness, timing, and deduplication.
+    delivered after common completed-history qualification without the
+    additional strict-sport checks. This never makes missing history optional:
+    every user-facing alert still needs five usable completed or settled
+    results and an OVER/UNDER direction.
 
     This is deliberately based on the strict set rather than a hand-maintained
     list of aliases. The feed contains additional active sports (for example
-    CFB, NHL, FIFA, and KBO), and omitting one from an optional-sport allowlist
-    silently turns it into tracking-only data.
+    CFB, NHL, and FIFA), and omitting one from an optional-sport allowlist
+    silently changes its additional quality checks.
     """
     normalized = " ".join(
         str(sport or "").strip().upper().replace("_", " ").replace("-", " ").split()
@@ -402,12 +403,11 @@ def has_directional_history_fields(value: Any) -> bool:
 
 
 def history_is_available(*values: Any) -> bool:
-    """Return whether any payload says that history/evidence was available.
+    """Return whether any payload marks that history/evidence was available.
 
-    This is intentionally different from ``history_supports_delivery``.
-    Direction-only delivery is allowed only when the candidate has no history
-    to validate.  Once a provider, sample count, or history window is present,
-    the normal completed-history qualification must still pass.
+    This is intentionally different from ``history_supports_delivery``: a
+    marker is not proof of usable completed history. Delivery callers must
+    reject missing history and then validate its source and sample count.
     """
 
     source_keys = _SOURCE_KEYS

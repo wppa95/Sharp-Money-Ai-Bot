@@ -461,16 +461,62 @@ def test_documented_markets_have_propline_history_keys(stat, market, sport):
         ("NHL", "first period scorer", "player_first_period_goal"),
         ("TENNIS", "double faults", "player_double_faults"),
         ("TENNIS", "breakpoints won", "player_break_points_won"),
+        ("TENNIS", "sets won", "player_sets_won"),
         ("TENNIS", "total games", "total_games"),
         ("UFC", "significant strikes", "player_significant_strikes"),
+        ("MMA", "takedowns", "player_takedowns"),
+        ("UFC", "fight time (mins)", "fight_time_minutes"),
         ("SOCCER", "shots", "player_shots"),
         ("SOCCER", "shots on target", "player_shots_on_target"),
         ("SOCCER", "goals + assists", "goal_or_assist"),
         ("SOCCER", "goal or assist", "goal_or_assist"),
+        ("UCL", "shots", "player_shots"),
     ],
 )
 def test_propline_documented_non_mlb_market_routes(sport, stat, market):
     assert official_player_market_for(stat, sport=sport) == market
+
+
+@pytest.mark.parametrize(
+    "sport,stat",
+    [
+        ("KBO", "strikeouts"),
+        ("NPB", "strikeouts"),
+        ("GOLF", "points"),
+        ("PGA Tour", "points"),
+        ("UFC", "points"),
+        ("MMA", "points"),
+        ("SOCCER", "points"),
+        ("TENNIS", "points"),
+        ("LOL", "kills"),
+        ("VALORANT", "kills"),
+        ("DOTA 2", "fantasy points"),
+        ("BOXING", "significant strikes"),
+        ("TABLE TENNIS", "points"),
+    ],
+)
+def test_unsupported_sport_stat_pairs_do_not_use_generic_market_fallback(
+    sport, stat
+):
+    assert official_player_market_for(stat, sport=sport) is None
+
+
+@pytest.mark.parametrize(
+    "sport,market",
+    [
+        ("KBO", "player_strikeouts"),
+        ("NPB", "player_strikeouts"),
+        ("GOLF", "player_points"),
+        ("UFC", "player_points"),
+        ("UCL", "player_assists"),
+        ("DOTA 2", "player_kills"),
+        ("LOL", "player_kills"),
+        ("VALORANT", "player_kills"),
+        ("CS2", "player_kills"),
+    ],
+)
+def test_raw_official_market_keys_are_still_sport_scoped(sport, market):
+    assert official_player_market_for(market, sport=sport) is None
 
 
 @pytest.mark.parametrize("sport", ["CS", "DOTA", "LOL", "VAL"])

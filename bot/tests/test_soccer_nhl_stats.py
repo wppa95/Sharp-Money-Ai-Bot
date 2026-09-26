@@ -848,7 +848,10 @@ class TestConfigSportsInclusion:
     def test_existing_sports_still_present(self):
         import config as cfg
         c = cfg.Config()
-        for sport in ("MLB", "WNBA", "NFL", "NBA", "DOTA", "TENNIS", "CS"):
+        for sport in (
+            "MLB", "WNBA", "NFL", "CFB", "NCAAF", "NBA", "NCAAB",
+            "DOTA", "TENNIS", "CS",
+        ):
             assert sport in c.ud_alert_sports, f"{sport} missing from UD_ALERT_SPORTS"
 
     def test_requested_supported_sports_in_default_alert_scope(self):

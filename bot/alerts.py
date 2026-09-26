@@ -663,9 +663,9 @@ def _has_strong_underdog_evidence(
 ) -> bool:
     """Apply the terminal direction/sport rule without importing market_engine.
 
-    History remains useful context in the rendered alert, but it is not a
-    prerequisite for history-optional sports under the active direction-first
-    policy. Every supported sport uses the same source and sample rules.
+    A direction alone is not delivery evidence. Every sport needs completed
+    primary-player history or explicitly settled PropLine results; history-
+    optional sports skip only the stricter quality checks after that proof.
     """
     decision_direction = str(
         (
@@ -677,7 +677,7 @@ def _has_strong_underdog_evidence(
     if decision_direction not in {"OVER", "UNDER"}:
         return False
     if not history_is_available(validation, decision, intelligence_trace):
-        return is_history_optional_sport(sport)
+        return False
 
     history_values = (
         (validation,)

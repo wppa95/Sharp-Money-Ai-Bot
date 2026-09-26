@@ -246,7 +246,7 @@ def test_gridiron_allows_mixed_primary_and_propline_results(sport):
 
 @pytest.mark.parametrize(
     "sport",
-    ["NFL", "CFB"],
+    ["NFL", "CFB", "NCAAF"],
 )
 def test_gridiron_accepts_sufficient_settled_propline_history(sport):
     validation = SimpleNamespace(
@@ -296,7 +296,7 @@ def test_gridiron_rejects_insufficient_propline_history(sport):
 
 @pytest.mark.parametrize(
     "sport",
-    ["NCAAF", "CFL", "AFL", "RUGBY", "RUGBY_UNION", "college_football"],
+    ["CFL", "AFL", "RUGBY", "RUGBY_UNION", "college_football"],
 )
 def test_other_football_families_are_blocked_even_with_settled_history(sport):
     validation = SimpleNamespace(
@@ -366,7 +366,7 @@ def test_historical_average_evidence_source_without_windows_is_not_deliverable()
     "sport",
     ["CS", "LOL", "DOTA", "VALORANT", "TENNIS", "SOCCER", "FIFA"],
 )
-def test_all_nonfootball_sports_require_direction_but_not_history(sport):
+def test_nonfootball_sports_require_direction_and_completed_history(sport):
     no_history = SimpleNamespace(
         recommendation="OVER",
         evidence_source=None,
@@ -375,10 +375,24 @@ def test_all_nonfootball_sports_require_direction_but_not_history(sport):
     assert market_engine._has_delivery_evidence(
         sport=sport,
         decision=no_history,
-    ) is True
+    ) is False
     assert _has_strong_underdog_evidence(
         sport=sport,
         decision=no_history,
+    ) is False
+
+    completed_history = SimpleNamespace(
+        recommendation="OVER",
+        evidence_source="primary",
+        n_real_games=5,
+    )
+    assert market_engine._has_delivery_evidence(
+        sport=sport,
+        decision=completed_history,
+    ) is True
+    assert _has_strong_underdog_evidence(
+        sport=sport,
+        decision=completed_history,
     ) is True
 
     no_direction = SimpleNamespace(
@@ -396,7 +410,7 @@ def test_all_nonfootball_sports_require_direction_but_not_history(sport):
 
 
 @pytest.mark.parametrize("sport", ["MLB", "NBA", "NFL"])
-def test_football_remains_blocked_but_other_sports_need_only_direction(sport):
+def test_historical_average_is_not_delivery_evidence_for_strict_sports(sport):
     validation = SimpleNamespace(
         has_supporting_data=True,
         data_source="historical_average",

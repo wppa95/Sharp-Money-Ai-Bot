@@ -4003,12 +4003,11 @@ def _has_delivery_evidence(
 ) -> bool:
     """Return whether a directional candidate may enter Telegram delivery.
 
-    The active product rule is direction-first: every eligible sport may enter
-    the delivery queue with a valid OVER/UNDER recommendation. Disallowed
-    football-family sports are suppressed here and again by ``AlertDelivery``;
-    NFL and CFB remain eligible under the normal evidence rules. Other safety
-    checks (freshness, timing, tracking, deduplication, and transport) remain
-    downstream.
+    A valid OVER/UNDER recommendation is necessary but not sufficient: every
+    candidate also needs completed primary-player results or explicitly
+    settled PropLine history. Disallowed football-family sports are suppressed
+    here and again by ``AlertDelivery``. Other safety checks (freshness, timing,
+    tracking, deduplication, and transport) remain downstream.
     """
     if is_disallowed_football_sport(sport):
         return False
@@ -4025,7 +4024,7 @@ def _has_delivery_evidence(
     if direction not in {"OVER", "UNDER"}:
         return False
     if not history_is_available(validation, decision, intelligence_trace):
-        return is_history_optional_sport(sport)
+        return False
 
     history_values = (
         (validation,)

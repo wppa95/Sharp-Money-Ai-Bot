@@ -516,7 +516,7 @@ class TestDeliverUnderdog:
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
         "sport",
-        ["NCAAF", "CFL", "AFL", "RUGBY"],
+        ["CFL", "AFL", "RUGBY"],
     )
     async def test_other_football_family_sports_are_blocked(self, sport):
         """Settled history does not override the football-family scope."""

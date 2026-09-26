@@ -182,14 +182,29 @@ _SPORT_NORMALIZATION = {
     "BASEBALL MLB": "MLB",
     "BASKETBALL": "NBA",
     "BASKETBALL NBA": "NBA",
+    "BASKETBALL NCAAB": "NCAAB",
     "FOOTBALL": "NFL",
     "FOOTBALL NFL": "NFL",
+    "FOOTBALL NCAAF": "NCAAF",
     "AMERICAN FOOTBALL": "NFL",
+    "AMERICAN FOOTBALL NCAAF": "NCAAF",
     "HOCKEY": "NHL",
     "HOCKEY NHL": "NHL",
     "WOMENS BASKETBALL": "WNBA",
     "WOMEN'S BASKETBALL": "WNBA",
     "BASKETBALL WNBA": "WNBA",
+    "DOTA 2": "DOTA",
+    "CS2": "CS",
+    "COUNTER STRIKE": "CS",
+    "COUNTER STRIKE 2": "CS",
+    "LEAGUE OF LEGENDS": "LOL",
+    "VALORANT": "VAL",
+    "PGA": "GOLF",
+    "PGA TOUR": "GOLF",
+    "TABLE TENNIS": "TT",
+    "KBO LEAGUE": "KBO",
+    "JAPANESE NPB": "NPB",
+    "FIFA WORLD CUP": "FIFA",
 }
 
 _OVER_UNDER = {"OVER", "UNDER"}
@@ -2368,12 +2383,29 @@ _SPORT_STAT_TO_OFFICIAL_MARKET = {
         "first goal scorer": "player_first_goal",
         "first period scorer": "player_first_period_goal",
     },
+    "UFC": {
+        "significant strikes": "player_significant_strikes",
+        "takedowns": "player_takedowns",
+        "fight time (mins)": "fight_time_minutes",
+        "fight time minutes": "fight_time_minutes",
+    },
+    "MMA": {
+        "significant strikes": "player_significant_strikes",
+        "takedowns": "player_takedowns",
+        "fight time (mins)": "fight_time_minutes",
+        "fight time minutes": "fight_time_minutes",
+    },
     "TENNIS": {
         "aces": "player_aces",
         "double faults": "player_double_faults",
         "break points won": "player_break_points_won",
         "breakpoints won": "player_break_points_won",
         "games won": "player_games_won",
+        "sets won": "player_sets_won",
+        "games played": "player_games_played",
+        "sets played": "player_sets_played",
+        "tiebreakers played": "player_tiebreakers_played",
+        "tie breakers played": "player_tiebreakers_played",
         "total games": "total_games",
         "total tiebreaks": "total_tiebreaks",
         "total sets": "total_sets",
@@ -2435,6 +2467,13 @@ _SPORT_STAT_TO_OFFICIAL_MARKET = {
         "shots on target": "player_shots_on_target",
         "goals + assists": "goal_or_assist",
     },
+    "UCL": {
+        "goals": "anytime_goal_scorer",
+        "goal or assist": "goal_or_assist",
+        "shots": "player_shots",
+        "shots on target": "player_shots_on_target",
+        "goals + assists": "goal_or_assist",
+    },
     "FIFA": {
         "goals": "anytime_goal_scorer",
         "goal or assist": "goal_or_assist",
@@ -2444,7 +2483,21 @@ _SPORT_STAT_TO_OFFICIAL_MARKET = {
     },
 }
 _SPORTS_WITHOUT_GRADED_PLAYER_MARKETS = frozenset(
-    {"DOTA", "LOL", "VAL", "VALORANT", "ESPORTS"}
+    {
+        "DOTA",
+        "LOL",
+        "VAL",
+        "ESPORTS",
+        "GOLF",
+        "KBO",
+        "NPB",
+        "BOXING",
+        "TT",
+        "BADMINTON",
+    }
+)
+_SPORTS_ALLOWING_GENERIC_MARKET_FALLBACK = frozenset(
+    {"MLB", "NBA", "WNBA", "NHL", "NFL", "CFB", "NCAAF", "NCAAB"}
 )
 
 
@@ -2464,15 +2517,23 @@ def official_player_market_for(
     raw_candidate = re.sub(
         r"\s+", " ", candidate.replace("_", " ")
     )
-    if candidate.startswith("player_") and candidate in _OFFICIAL_MARKETS:
-        return candidate
     normalized = _normalize_stat(stat_type)
     sport_key = _normalize_sport(sport)
+    sport_mapping = _SPORT_STAT_TO_OFFICIAL_MARKET.get(sport_key, {})
+    if candidate.startswith("player_") and candidate in _OFFICIAL_MARKETS:
+        if sport_key in _SPORTS_WITHOUT_GRADED_PLAYER_MARKETS:
+            return None
+        if (
+            sport_key not in _SPORTS_ALLOWING_GENERIC_MARKET_FALLBACK
+            and candidate not in sport_mapping.values()
+        ):
+            return None
+        return candidate
     # Resolve sport-specific labels before generic normalization collapses
     # them into a different sport's equivalent stat.
     if sport_key in {
         "SOCCER", "EPL", "LALIGA", "SERIEA", "BUNDESLIGA", "LIGUE1",
-        "MLS", "FIFA",
+        "MLS", "UCL", "FIFA",
     }:
         if raw_candidate == "shots":
             return "player_shots"
@@ -2495,7 +2556,6 @@ def official_player_market_for(
         # CS2 is the only esports title with documented graded player props,
         # and its graded catalog is limited to map 1-2 kills/headshots.
         return None
-    sport_mapping = _SPORT_STAT_TO_OFFICIAL_MARKET.get(sport_key, {})
     sport_market = sport_mapping.get(normalized)
     if sport_market in _OFFICIAL_MARKETS or sport_market in {
         "anytime_goal_scorer",
@@ -2505,6 +2565,8 @@ def official_player_market_for(
         "total_sets",
     }:
         return sport_market
+    if sport_key not in _SPORTS_ALLOWING_GENERIC_MARKET_FALLBACK:
+        return None
     return _STAT_TO_OFFICIAL_MARKET.get(normalized)
 
 _CANONICAL_TO_OFFICIAL_SPORT = {
