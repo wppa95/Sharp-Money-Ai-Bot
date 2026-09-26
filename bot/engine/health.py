@@ -116,6 +116,9 @@ _RUNTIME_SESSION_KEYS = frozenset({
     "fpr_stats",
     "last_fpr_run",
     "last_fpr_run_ts",
+    "process_pid",
+    "process_started_at",
+    "process_started_at_ts",
 })
 
 # Maps the shutdown reason written by the previous session to the startup
@@ -162,6 +165,54 @@ def _secs_to_duration(secs: Optional[float]) -> str:
     hrs = mins // 60
     rem = mins % 60
     return f"{hrs}h {rem}m"
+
+
+def _previous_session_snapshot(state: dict) -> dict:
+    """Return a bounded, diagnostic-only copy of the prior live session.
+
+    This is deliberately a snapshot, not a resume record.  Keep only status
+    and timestamps that help explain an interrupted session; provider/job
+    payloads can be large and may contain credentials or feed data.
+    """
+    job_fields = (
+        "last_run", "last_run_ts", "last_fail", "last_fail_ts",
+        "last_error", "fail_streak", "running",
+    )
+    provider_fields = (
+        "last_fetch", "last_fetch_ts", "last_error", "last_error_ts",
+        "last_db_write", "last_db_write_ts", "last_db_write_operation",
+    )
+    jobs = {}
+    for name, value in (state.get("jobs") or {}).items():
+        if isinstance(value, dict):
+            jobs[str(name)[:64]] = {
+                key: value[key] for key in job_fields if key in value
+            }
+    providers = {}
+    for name, value in (state.get("providers") or {}).items():
+        if isinstance(value, dict):
+            providers[str(name)[:64]] = {
+                key: value[key] for key in provider_fields if key in value
+            }
+    return {
+        "pid": state.get("process_pid"),
+        "started_at": state.get("process_started_at"),
+        "started_at_ts": state.get("process_started_at_ts"),
+        "last_heartbeat": state.get("heartbeat"),
+        "last_heartbeat_ts": state.get("heartbeat_ts"),
+        "last_scan_checkpoint": state.get("last_scan_checkpoint_at"),
+        "last_scan_checkpoint_ts": state.get("last_scan_checkpoint_ts"),
+        "last_job_started": state.get("last_job_started"),
+        "last_job_started_at": state.get("last_job_started_at"),
+        "last_db_write": state.get("last_db_write"),
+        "last_db_write_ts": state.get("last_db_write_ts"),
+        "last_db_operation": state.get("last_db_operation"),
+        "last_pipeline_fail": state.get("last_pipeline_fail"),
+        "last_error": state.get("last_error"),
+        "last_error_ts": state.get("last_error_ts"),
+        "jobs": jobs,
+        "providers": providers,
+    }
 
 
 class HealthTracker:
@@ -278,6 +329,13 @@ class HealthTracker:
                 "reason":        startup_reason,
                 "shutdown_at":   shutdown_at,
                 "session_secs":  session_secs,
+                # Diagnostic evidence only.  A missing shutdown reason means
+                # the exit cause is unavailable (for example SIGKILL/OOM);
+                # do not infer a more specific cause here.
+                "previous_session": _previous_session_snapshot(self._state),
+                "exit_cause": (
+                    str(pending) if pending is not None else "not_recorded"
+                ),
             })
             if len(history) > _RESTART_HISTORY_LIMIT:
                 self._state["restart_history"] = history[-_RESTART_HISTORY_LIMIT:]
@@ -298,6 +356,9 @@ class HealthTracker:
             # deliberately discarded rather than retained as a resume source.
             for key in _RUNTIME_SESSION_KEYS:
                 self._state.pop(key, None)
+            self._state["process_pid"] = os.getpid()
+            self._state["process_started_at"] = now_iso
+            self._state["process_started_at_ts"] = now_ts
 
             self._save()
 

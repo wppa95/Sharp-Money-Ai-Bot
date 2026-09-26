@@ -199,6 +199,43 @@ class TestHistory:
         ht.record_startup()
         assert len(ht.restart_history()) <= 20
 
+    def test_previous_session_snapshot_captures_diagnostics_before_reset(
+        self, tmp_path: Path
+    ) -> None:
+        ht = _fresh(tmp_path)
+        ht.record_startup()
+        ht.update_heartbeat()
+        ht.record_scan_checkpoint()
+        ht.record_job_started("scan")
+        ht.record_job_run("scan")
+        ht.record_startup()  # no shutdown: cause is intentionally unavailable
+
+        entry = ht.restart_history()[-1]
+        snapshot = entry["previous_session"]
+        assert snapshot["pid"] is not None
+        assert snapshot["started_at"] is not None
+        assert snapshot["last_heartbeat"] is not None
+        assert snapshot["last_scan_checkpoint"] is not None
+        assert "scan" in snapshot["jobs"]
+        assert entry["exit_cause"] == "not_recorded"
+        # Runtime state is not resumed into the new session.
+        assert "jobs" not in ht._state
+        assert "heartbeat" not in ht._state
+        assert "last_scan_checkpoint_ts" not in ht._state
+
+    def test_snapshot_preserves_write_and_provider_status(self, tmp_path: Path) -> None:
+        ht = _fresh(tmp_path)
+        ht.record_startup()
+        ht.record_database_write("scan")
+        ht.record_provider_database_write("Underdog", "normalize")
+        ht.record_shutdown("clean_shutdown")
+        ht.record_startup()
+
+        snapshot = ht.restart_history()[-1]["previous_session"]
+        assert snapshot["last_db_operation"] == "scan"
+        assert snapshot["providers"]["Underdog"]["last_db_write_operation"] == "normalize"
+        assert ht.last_startup_reason() == "clean_restart"
+
 
 # ── was_unexpected_exit ───────────────────────────────────────────────────────
 

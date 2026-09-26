@@ -851,19 +851,24 @@ async def cmd_rollups(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             tg_h    = tg_perf["hit"]
             tg_m    = tg_perf["miss"]
             tg_p    = tg_perf["push"]
+            tg_v    = tg_perf.get("void", 0)
             tg_pend = tg_perf["pending"]
             tg_hr   = tg_perf["hit_rate"]
             tg_lines.append(f"  Total: <b>{tg_total}</b>")
-            tg_lines.append(f"  ✅ Hits: {tg_h}   ❌ Misses: {tg_m}   🟡 Pushes: {tg_p}   ⏳ Pending: {tg_pend}")
+            tg_lines.append(f"  ✅ Hits: {tg_h}   ❌ Misses: {tg_m}   🟡 Pushes: {tg_p}   🚫 Void/other: {tg_v}   ⏳ Pending: {tg_pend}")
             if tg_perf["graded"] > 0:
-                tg_lines.append(f"  Hit Rate: <b>{tg_hr}%</b>")
+                tg_lines.append(
+                    f"  Hit Rate: <b>{tg_hr}%</b> "
+                    f"(HIT / (HIT + MISS), n={tg_perf.get('denominator', tg_h + tg_m)})"
+                )
             for source, source_perf in sorted(tg_perf.get("by_provider", {}).items()):
                 if str(source).strip().lower() != "underdog":
                     continue
                 tg_lines.append(
                     f"  <b>{_html.escape(source)}:</b> "
                     f"{source_perf['hit']}H-{source_perf['miss']}M-"
-                    f"{source_perf['push']}P · {source_perf['pending']} pending"
+                    f"{source_perf['push']}P · {source_perf.get('void', 0)} void · "
+                    f"{source_perf['pending']} pending"
                 )
         tg_lines.append("")
         if not rollups_available:
@@ -913,7 +918,10 @@ async def cmd_rollups(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         def _result_row(k: str, v: dict) -> str:
             w, l, p = v.get("W", 0), v.get("L", 0), v.get("P", 0)
             pct = v.get("win_pct", 0.0)
-            return f"  <b>{k}:</b>  {w}W-{l}L-{p}P  ({pct:.1f}%)"
+            return (
+                f"  <b>{k}:</b>  {w}W-{l}L-{p}P  "
+                f"({pct:.1f}%, n={v.get('denominator', w + l)})"
+            )
 
         # Extend the Telegram-picks header block with the overall grading section.
         lines = tg_lines + [
@@ -1485,7 +1493,8 @@ async def _send_performance_by_sport(
             lines.append(
                 f"<b>{_html.escape(str(sport))}</b> · {directional} picks\n"
                 f"  ✅ {hit}H  ❌ {miss}M  ➖ {push}P · "
-                f"{pending} pending · hit rate {rate}{extra}\n"
+                f"{pending} pending · hit rate {rate} "
+                f"(HIT/(HIT+MISS), n={valid}){extra}\n"
                 f"  CLV H/M/P: {_format_clv('clv_hit_avg')} / "
                 f"{_format_clv('clv_miss_avg')} / {_format_clv('clv_push_avg')} "
                 f"· {clv_count} samples · {clv_coverage_text}"

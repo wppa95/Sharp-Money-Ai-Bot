@@ -1824,6 +1824,12 @@ async def _grade_opportunities_job(context) -> None:
                 actual = 0.0
                 outcome = "VOID"
                 error_type = None
+                _void_source = str(getattr(result_row, "source", "") or "").lower()
+                _void_code = (
+                    "GAME_INTERRUPTED"
+                    if "interrupt" in _void_source
+                    else "VOID"
+                )
                 if getattr(opp, "recommendation", None) is None:
                     _tracked_grades.append((opp.id, outcome, actual))
                 else:
@@ -1833,7 +1839,7 @@ async def _grade_opportunities_job(context) -> None:
                             "result": outcome,
                             "actual_value": actual,
                             "error_type": error_type,
-                            "void_reason": "PropLine VOID",
+                            "void_reason": f"{_void_code}: PropLine settlement",
                         }
                     )
                 graded += 1
@@ -1858,6 +1864,40 @@ async def _grade_opportunities_job(context) -> None:
             actual = result_row.actual_value
             line   = opp.line_value
             recommendation = getattr(opp, "recommendation", None)
+
+            # Settlement is a safety boundary, not a learning classifier.
+            # Check it before calculating direction or calling classify_miss so
+            # voids/outliers can never enter the model denominator.
+            from engine.settlement import (
+                check_settlement,
+                override_miss_type_for_settlement,
+            )
+            settlement_flag = check_settlement(
+                actual=actual,
+                line=line,
+                provider=getattr(opp, "provider", None) or "Underdog",
+                stat_type=getattr(opp, "stat_type", None) or "",
+                game_time=getattr(opp, "game_time", None),
+            )
+            settlement_code = settlement_flag.code
+            settlement_reason = (
+                f"{settlement_code}: {settlement_flag.description}"
+                if settlement_code != "CLEAN"
+                else None
+            )
+            # Equality is a legitimate PUSH for a recorded stat; the
+            # settlement detector also flags equality as suspicious for
+            # standalone consumers, so preserve the grading contract here.
+            if settlement_code == "VOID" and abs(actual - line) >= 0.01:
+                outcome = "VOID"
+                error_type = "Settlement"
+                _opportunity_grades.append({
+                    "id": opp.id, "result": outcome,
+                    "actual_value": actual, "error_type": error_type,
+                    "void_reason": settlement_reason,
+                })
+                graded += 1
+                continue
 
             # Direction-aware grading: HIT means the bet won.
             #   OVER recommendation → won if actual > line
@@ -1889,6 +1929,11 @@ async def _grade_opportunities_job(context) -> None:
                     actual_value   = actual,
                     line_value     = opp.line_value,
                 )
+                error_type = override_miss_type_for_settlement(
+                    settlement_flag, error_type
+                )
+            elif settlement_code == "UNUSUAL_RESULT":
+                error_type = "Settlement"
             if recommendation is None:
                 _tracked_grades.append((opp.id, outcome, actual))
             else:
@@ -1898,6 +1943,7 @@ async def _grade_opportunities_job(context) -> None:
                         "result": outcome,
                         "actual_value": actual,
                         "error_type": error_type,
+                        "void_reason": settlement_reason,
                     }
                 )
             graded += 1

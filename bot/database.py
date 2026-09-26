@@ -2784,6 +2784,9 @@ class Database:
                 "directional": 0,
                 "pending": 0,
                 "resolved": 0,
+                "graded": 0,
+                "denominator": 0,
+                "hit_rate": 0.0,
                 "hit": 0,
                 "miss": 0,
                 "push": 0,
@@ -2807,6 +2810,7 @@ class Database:
                 row["pending"] += count
             elif outcome in {"HIT", "MISS", "PUSH"}:
                 row["resolved"] += count
+                row["graded"] += count
                 if outcome == "PUSH":
                     row["push"] += count
                 elif (recommendation == "OVER" and outcome == "HIT") or (
@@ -2943,6 +2947,22 @@ class Database:
                     clv_sample_count / (row["hit"] + row["miss"] + row["push"]) * 100
                     if (row["hit"] + row["miss"] + row["push"])
                     else None
+                )
+        # One performance contract for every consumer: pushes are displayed
+        # separately and excluded from the HIT/(HIT+MISS) denominator.
+        for target in (by_sport, by_provider):
+            for row in target.values():
+                row["denominator"] = row["hit"] + row["miss"]
+                row["hit_rate"] = (
+                    round(row["hit"] / row["denominator"] * 100, 1)
+                    if row["denominator"] else 0.0
+                )
+        for direction_rows in by_sport_direction.values():
+            for row in direction_rows.values():
+                row["denominator"] = row["hit"] + row["miss"]
+                row["hit_rate"] = (
+                    round(row["hit"] / row["denominator"] * 100, 1)
+                    if row["denominator"] else 0.0
                 )
         return {
             "by_sport": by_sport,
@@ -9605,32 +9625,37 @@ class Database:
         hit     = buckets.get("HIT",  0)
         miss    = buckets.get("MISS", 0)
         push    = buckets.get("PUSH", 0)
-        # Treat VOID/CANCELLED/INJURY_VOID/GAME_INTERRUPTED as still-pending for display
-        pending = sum(
-            n for k, n in buckets.items()
-            if k not in ("HIT", "MISS", "PUSH")
-        )
+        _void_codes = {"VOID", "CANCELLED", "INJURY_VOID", "GAME_INTERRUPTED",
+                       "UNRESOLVED", "OUTLIER", "PLATFORM_DIFF"}
+        void = sum(n for k, n in buckets.items() if k in _void_codes)
+        pending = sum(n for k, n in buckets.items()
+                      if k not in ("HIT", "MISS", "PUSH") and k not in _void_codes)
         graded  = hit + miss + push
-        total   = graded + pending
-        hit_rate = round(hit / graded * 100, 1) if graded > 0 else 0.0
+        denominator = hit + miss
+        total   = graded + pending + void
+        hit_rate = round(hit / denominator * 100, 1) if denominator > 0 else 0.0
         def _provider_summary(source_buckets: dict) -> dict:
             source_hit = source_buckets.get("HIT", 0)
             source_miss = source_buckets.get("MISS", 0)
             source_push = source_buckets.get("PUSH", 0)
             source_pending = sum(
                 n for k, n in source_buckets.items()
-                if k not in ("HIT", "MISS", "PUSH")
+                if k not in ("HIT", "MISS", "PUSH") and k not in _void_codes
             )
+            source_void = sum(n for k, n in source_buckets.items() if k in _void_codes)
             source_graded = source_hit + source_miss + source_push
+            source_denominator = source_hit + source_miss
             return {
-                "total": source_graded + source_pending,
+                "total": source_graded + source_pending + source_void,
                 "hit": source_hit,
                 "miss": source_miss,
                 "push": source_push,
+                "void": source_void,
                 "pending": source_pending,
                 "graded": source_graded,
-                "hit_rate": round(source_hit / source_graded * 100, 1)
-                if source_graded > 0 else 0.0,
+                "denominator": source_denominator,
+                "hit_rate": round(source_hit / source_denominator * 100, 1)
+                if source_denominator > 0 else 0.0,
             }
 
         return {
@@ -9638,8 +9663,10 @@ class Database:
             "hit":      hit,
             "miss":     miss,
             "push":     push,
+            "void":     void,
             "pending":  pending,
             "graded":   graded,
+            "denominator": denominator,
             "hit_rate": hit_rate,
             "by_provider": {
                 source: _provider_summary(source_buckets)
@@ -9947,6 +9974,7 @@ class Database:
                     else:              entry["P"] += n
             for v in acc.values():
                 t = v["W"] + v["L"]
+                v["denominator"] = t
                 v["win_pct"] = round(v["W"] / t * 100, 1) if t else 0.0
             return acc
 
