@@ -242,12 +242,34 @@ def test_gridiron_allows_mixed_primary_and_propline_results(sport):
 
 
 @pytest.mark.parametrize("sport", ["NFL", "CFB"])
-def test_gridiron_still_rejects_propline_only_history(sport):
+def test_gridiron_accepts_sufficient_settled_propline_history(sport):
     validation = SimpleNamespace(
         has_supporting_data=True,
         data_source="propline",
         n_real_games=0,
         n_supplemental_games=5,
+    )
+    decision = SimpleNamespace(recommendation="OVER")
+
+    assert _has_strong_underdog_evidence(
+        sport=sport,
+        validation=validation,
+        decision=decision,
+    ) is True
+    assert market_engine._has_delivery_evidence(
+        sport=sport,
+        validation=validation,
+        decision=decision,
+    ) is True
+
+
+@pytest.mark.parametrize("sport", ["NFL", "CFB"])
+def test_gridiron_rejects_insufficient_propline_history(sport):
+    validation = SimpleNamespace(
+        has_supporting_data=True,
+        data_source="propline",
+        n_real_games=0,
+        n_supplemental_games=4,
     )
     decision = SimpleNamespace(recommendation="OVER")
 

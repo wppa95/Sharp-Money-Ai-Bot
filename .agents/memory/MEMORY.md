@@ -64,7 +64,7 @@
 - [Tier-1 direction gate (Weak direction fix)](tier1-direction-gate.md) — sport= param on make_ud_bet_decision; Tier-1 uses _B_RATE_TIER1=0.55, Tier-2/empty uses _B_RATE=0.60; all 8 call sites pass sport=.
 - [Cold-start scheduler stall](cold-start-scheduler-stall.md) — live cold-start Underdog cycles can remain in DB state restoration for many minutes while player-history/FPR work overlaps; measure restore separately before optimizing.
 - [Monitoring baseline August 2026](monitoring-baseline-aug2026.md) — three post-restore cycles show database pool reads dominate; OpenDota needs more samples before provider optimization.
-- [Telegram sport scope](strict-tier1-telegram.md) — Telegram allows NFL/CFB but blocks other football-family sports; PropLine evidence remains football-excluded.
+- [Telegram sport scope](strict-tier1-telegram.md) — NFL/CFB are eligible; other football aliases are blocked, and settled PropLine uses the normal sample gate.
 - [Unified prop tracking](unified-prop-tracking.md) — persistent monitoring rows are independent of delivery; retired Watchlist/Near-Miss labels must not drive rotation or reports.
 - [Unified monitoring universe](unified-monitoring-universe.md) — every active prop line is continuously scannable; delivery eligibility never creates a rotation or tracking queue.
 - [Directional persistence policy](pass-watchlist-persistence.md) — PASS/no-direction/watchlist are transient scan results; only OVER/UNDER evaluations are persisted.

@@ -79,10 +79,7 @@ from engine.evidence_memory import (
 )
 from providers import FailureType, get_health_monitor
 from engine.delivery_gates import directional_evidence_gate as _directional_evidence_gate
-from engine.sport_policy import (
-    is_disallowed_football_sport,
-    is_football_related_sport,
-)
+from engine.sport_policy import is_disallowed_football_sport
 from engine.player_props_pipeline import (
     canonicalize_player_props,
     persist_canonical_player_props,
@@ -4006,11 +4003,12 @@ def _has_delivery_evidence(
 ) -> bool:
     """Return whether a directional candidate may enter Telegram delivery.
 
-    The active product rule is direction-first: every non-football sport may
-    enter the delivery queue with a valid OVER/UNDER recommendation. Football
-    family suppression is enforced here and again by ``AlertDelivery``. Other
-    safety checks (freshness, timing, tracking, deduplication, and transport)
-    remain downstream.
+    The active product rule is direction-first: every eligible sport may enter
+    the delivery queue with a valid OVER/UNDER recommendation. Disallowed
+    football-family sports are suppressed here and again by ``AlertDelivery``;
+    NFL and CFB remain eligible under the normal evidence rules. Other safety
+    checks (freshness, timing, tracking, deduplication, and transport) remain
+    downstream.
     """
     direction = str(
         getattr(decision, "recommendation", "")
@@ -4027,14 +4025,6 @@ def _has_delivery_evidence(
         return False
     if not history_is_available(validation, decision, intelligence_trace):
         return is_history_optional_sport(sport)
-
-    if is_football_related_sport(sport):
-        return history_supports_delivery(
-            validation,
-            decision,
-            intelligence_trace,
-            require_primary=True,
-        )
 
     history_values = (
         (validation,)

@@ -466,7 +466,13 @@ class TestDeliverUnderdog:
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("sport", ["NFL", "CFB"])
-    async def test_gridiron_mixed_completed_history_can_deliver(self, sport):
+    @pytest.mark.parametrize(
+        ("data_source", "n_real_games", "n_supplemental_games"),
+        [("real+propline", 3, 2), ("propline", 0, 5)],
+    )
+    async def test_gridiron_completed_history_can_deliver(
+        self, sport, data_source, n_real_games, n_supplemental_games
+    ):
         sent_messages: list[str] = []
 
         async def capture(chat_id, text, **kwargs):
@@ -478,9 +484,9 @@ class TestDeliverUnderdog:
         delivery = AlertDelivery(_make_db_mock(), mock_bot, [1])
         validation = SimpleNamespace(
             has_supporting_data=True,
-            data_source="real+propline",
-            n_real_games=3,
-            n_supplemental_games=2,
+            data_source=data_source,
+            n_real_games=n_real_games,
+            n_supplemental_games=n_supplemental_games,
         )
         result = await delivery.deliver_underdog(
             player_name="Supported Player",
@@ -499,10 +505,10 @@ class TestDeliverUnderdog:
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
         "sport",
-        ["NFL", "NCAAF", "CFB", "CFL", "AFL", "RUGBY", "americanfootball_nfl"],
+        ["NCAAF", "CFL", "AFL", "RUGBY"],
     )
-    async def test_football_family_is_suppressed_even_with_propline_evidence(self, sport):
-        """Football-family sports never reach Telegram."""
+    async def test_disallowed_football_aliases_remain_suppressed(self, sport):
+        """Disallowed football-family sports never reach Telegram."""
         mock_bot = MagicMock()
         mock_bot.send_message = AsyncMock(return_value=MagicMock())
         delivery = AlertDelivery(_make_db_mock(), mock_bot, [1])

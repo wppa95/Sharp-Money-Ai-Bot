@@ -681,10 +681,10 @@ def _has_strong_underdog_evidence(
     """Apply the terminal direction/sport rule without importing market_engine.
 
     History remains useful context in the rendered alert, but it is not a
-    prerequisite for delivery under the active direction-first policy.
-    Disallowed football-family sports are blocked separately. NFL/CFB may use
-    their normal delivery path, but PropLine-only evidence is never sufficient
-    for gridiron picks.
+    prerequisite for history-optional sports under the active direction-first
+    policy. NFL/CFB are eligible and use the same completed-history source and
+    sample rules as other sports; other disallowed football-family sports are
+    blocked separately.
     """
     decision_direction = str(
         (
@@ -705,7 +705,6 @@ def _has_strong_underdog_evidence(
             validation,
             decision,
             intelligence_trace,
-            require_primary=True,
         )
 
     history_values = (
