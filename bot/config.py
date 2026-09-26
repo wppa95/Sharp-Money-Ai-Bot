@@ -308,14 +308,15 @@ class Config:
     #   WNBA   — ESPN gamelog   (site.api.espn.com)
     #   NHL    — NHL public API (api-web.nhle.com + api.nhle.com) — free, no key
     #
-    # Tracking only (data collected + scored, no Telegram bet alerts):
-    #   NBA, NFL — available; muted via ALERT_DISABLED_SPORTS.
+    # Other active sports can alert when their directional, evidence, and
+    # timing gates pass. ALERT_DISABLED_SPORTS is an optional operator override,
+    # empty by default.
     #
     # Supported with real historical data:
     #   MLB    → MLB Stats API (statsapi.mlb.com) — free, no key
     #   WNBA   → ESPN gamelog (site.api.espn.com) — free, no key
     #   NFL    → ESPN gamelog + Sleeper supplement — free, no key
-    #   NBA    → ESPN gamelog — free, no key (alerts muted by default)
+    #   NBA    → ESPN gamelog — free, no key
     #   NHL    → NHL official public API (api-web.nhle.com) — free, no key ✓ verified
     #   DOTA   → OpenDota API (api.opendota.com) — free, no key
     #   TENNIS → JeffSackmann ATP/WTA CSV (github.com/JeffSackmann) — free, no key
@@ -332,7 +333,9 @@ class Config:
     #   NPB/KBO — no accessible public per-game stat API
     UD_ALERT_SPORTS_RAW: str = os.environ.get(
         "UD_ALERT_SPORTS",
-        "MLB,WNBA,NFL,CFB,NBA,DOTA,TENNIS,CS,NHL,LOL,MMA,GOLF,SOCCER,VALORANT,TT,BADMINTON",
+        "MLB,WNBA,NFL,CFB,NBA,DOTA,TENNIS,CS,NHL,LOL,MMA,UFC,GOLF,"
+        "SOCCER,EPL,LALIGA,SERIEA,BUNDESLIGA,LIGUE1,MLS,UCL,FIFA,"
+        "VAL,VALORANT,TT,BADMINTON",
     )
 
     # ── Sport priority system ─────────────────────────────────────────────────
@@ -409,9 +412,7 @@ class Config:
     # Data collection, scoring, and DB writes continue for all suppressed sports.
     # Set ALERT_DISABLED_SPORTS="" to re-enable all sports (current default).
     # Set ALERT_DISABLED_SPORTS="NFL,NBA" to suppress specific sports.
-    # NBA, NFL, and MLB are Tier 2 sports.
-    # They are currently outside the active Tier 1 betting focus and may be
-    # temporarily suppressed from Telegram alerts.
+    # NBA, NFL, and MLB are Tier 2 sports, but are not disabled by default.
     ALERT_DISABLED_SPORTS_RAW: str = os.environ.get("ALERT_DISABLED_SPORTS", "")
 
     # ── Full-Pool Rescan (FPR) ────────────────────────────────────────────────

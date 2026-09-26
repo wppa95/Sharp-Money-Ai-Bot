@@ -68,6 +68,7 @@ from engine.delivery_evidence import (
     is_historical_average_source,
     serialized_evidence_supports_delivery,
 )
+from engine.sport_policy import is_disallowed_football_sport
 from engine.ai_analyst import (
     AnalystDecision,
     build_advisory_from_pipeline as _build_ai_analyst,
@@ -4009,6 +4010,9 @@ def _has_delivery_evidence(
     checks (freshness, timing, tracking, deduplication, and transport) remain
     downstream.
     """
+    if is_disallowed_football_sport(sport):
+        return False
+
     direction = str(
         getattr(decision, "recommendation", "")
         or (
@@ -5804,7 +5808,9 @@ async def underdog_job(context) -> None:
                         ),
                     )
                     if not _np_gate_ok:
-                        if history_is_available(
+                        if is_disallowed_football_sport(snap.sport or ""):
+                            _skip_reason = "football_suppressed"
+                        elif history_is_available(
                             validation,
                             decision,
                             _np_intel_trace,

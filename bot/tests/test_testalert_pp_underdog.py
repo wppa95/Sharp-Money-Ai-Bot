@@ -375,7 +375,13 @@ class TestDeliverUnderdog:
         assert not result.filtered
 
     @pytest.mark.asyncio
-    @pytest.mark.parametrize("sport", ["NBA", "CS", "TENNIS", "DOTA"])
+    @pytest.mark.parametrize(
+        "sport",
+        [
+            "NBA", "WNBA", "NHL", "SOCCER", "EPL", "FIFA",
+            "CS", "CS2", "DOTA", "LOL", "VAL", "VALORANT", "UFC",
+        ],
+    )
     async def test_non_mlb_propline_evidence_can_deliver(self, sport):
         """Supported non-football sports deliver only with PropLine history."""
         sent_messages: list[str] = []
@@ -468,8 +474,7 @@ class TestDeliverUnderdog:
     @pytest.mark.parametrize(
         "sport",
         [
-            "NFL", "CFB", "NCAAF", "CFL", "AFL", "RUGBY",
-            "NBA", "WNBA", "NHL", "SOCCER", "TENNIS", "DOTA",
+            "NFL", "CFB",
         ],
     )
     @pytest.mark.parametrize(
@@ -513,8 +518,8 @@ class TestDeliverUnderdog:
         "sport",
         ["NCAAF", "CFL", "AFL", "RUGBY"],
     )
-    async def test_other_football_family_sports_can_deliver(self, sport):
-        """Valid completed-history picks are not blocked by football labels."""
+    async def test_other_football_family_sports_are_blocked(self, sport):
+        """Settled history does not override the football-family scope."""
         mock_bot = MagicMock()
         mock_bot.send_message = AsyncMock(return_value=MagicMock())
         delivery = AlertDelivery(_make_db_mock(), mock_bot, [1])
@@ -536,8 +541,10 @@ class TestDeliverUnderdog:
             decision=SimpleNamespace(recommendation="OVER", confidence=75),
         )
 
-        assert result.sent is True
-        assert mock_bot.send_message.await_count == 1
+        assert result.sent is False
+        assert result.filtered is True
+        assert "football-related" in result.filtered_reason.lower()
+        mock_bot.send_message.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_non_strong_moneyline_is_filtered_before_formatting(self):

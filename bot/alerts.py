@@ -43,6 +43,7 @@ from engine.delivery_evidence import (
     is_history_optional_sport,
     serialized_evidence_supports_delivery,
 )
+from engine.sport_policy import is_disallowed_football_sport
 from engine.strongest_pick import evidence_profile
 from models import EVOpportunity, Recommendation, SteamAlert
 
@@ -649,8 +650,8 @@ def format_start_message() -> str:
 
 
 def is_telegram_suppressed_sport(sport: Optional[str]) -> bool:
-    """No supported sport is excluded solely by its sport label."""
-    return False
+    """Only NFL/CFB are allowed within the football-family sport aliases."""
+    return is_disallowed_football_sport(sport)
 
 
 def _has_strong_underdog_evidence(

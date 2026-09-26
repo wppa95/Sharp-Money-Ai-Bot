@@ -851,6 +851,21 @@ class TestConfigSportsInclusion:
         for sport in ("MLB", "WNBA", "NFL", "NBA", "DOTA", "TENNIS", "CS"):
             assert sport in c.ud_alert_sports, f"{sport} missing from UD_ALERT_SPORTS"
 
+    def test_requested_supported_sports_in_default_alert_scope(self):
+        import os
+        import config as cfg
+
+        if "UD_ALERT_SPORTS" in os.environ:
+            return
+
+        sports = cfg.Config().ud_alert_sports
+        for sport in (
+            "SOCCER", "EPL", "LALIGA", "SERIEA", "BUNDESLIGA", "LIGUE1",
+            "MLS", "UCL", "FIFA", "CS", "LOL", "WNBA", "NBA", "UFC",
+            "VAL", "VALORANT", "DOTA",
+        ):
+            assert sport in sports, f"{sport} missing from UD_ALERT_SPORTS"
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Integration: underdog_provider normalizes soccer/NHL stat types

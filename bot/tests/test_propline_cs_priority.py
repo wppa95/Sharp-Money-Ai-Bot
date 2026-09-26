@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 import market_engine
-from alerts import _has_strong_underdog_evidence
+from alerts import _has_strong_underdog_evidence, is_telegram_suppressed_sport
 from engine.delivery_evidence import serialized_evidence_supports_delivery
 from engine.player_validator import PlayerPropValidation
 from providers.player_stats import RawGameResult
@@ -221,7 +221,7 @@ def test_primary_history_without_propline_is_telegram_deliverable():
 
 @pytest.mark.parametrize(
     "sport",
-    ["NFL", "CFB", "NCAAF", "CFL", "AFL", "RUGBY"],
+    ["NFL", "CFB"],
 )
 def test_gridiron_allows_mixed_primary_and_propline_results(sport):
     validation = SimpleNamespace(
@@ -246,7 +246,7 @@ def test_gridiron_allows_mixed_primary_and_propline_results(sport):
 
 @pytest.mark.parametrize(
     "sport",
-    ["NFL", "CFB", "NCAAF", "CFL", "AFL", "RUGBY"],
+    ["NFL", "CFB"],
 )
 def test_gridiron_accepts_sufficient_settled_propline_history(sport):
     validation = SimpleNamespace(
@@ -271,7 +271,7 @@ def test_gridiron_accepts_sufficient_settled_propline_history(sport):
 
 @pytest.mark.parametrize(
     "sport",
-    ["NFL", "CFB", "NCAAF", "CFL", "AFL", "RUGBY"],
+    ["NFL", "CFB"],
 )
 def test_gridiron_rejects_insufficient_propline_history(sport):
     validation = SimpleNamespace(
@@ -287,6 +287,27 @@ def test_gridiron_rejects_insufficient_propline_history(sport):
         validation=validation,
         decision=decision,
     ) is False
+    assert market_engine._has_delivery_evidence(
+        sport=sport,
+        validation=validation,
+        decision=decision,
+    ) is False
+
+
+@pytest.mark.parametrize(
+    "sport",
+    ["NCAAF", "CFL", "AFL", "RUGBY", "RUGBY_UNION", "college_football"],
+)
+def test_other_football_families_are_blocked_even_with_settled_history(sport):
+    validation = SimpleNamespace(
+        has_supporting_data=True,
+        data_source="propline",
+        n_real_games=0,
+        n_supplemental_games=10,
+    )
+    decision = SimpleNamespace(recommendation="OVER")
+
+    assert is_telegram_suppressed_sport(sport) is True
     assert market_engine._has_delivery_evidence(
         sport=sport,
         validation=validation,

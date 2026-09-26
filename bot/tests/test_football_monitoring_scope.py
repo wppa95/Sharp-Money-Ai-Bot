@@ -91,9 +91,9 @@ def test_nfl_and_college_football_remain_classified_as_allowed(sport):
         "gridiron",
     ],
 )
-def test_other_football_family_classification_does_not_suppress_telegram(sport):
+def test_other_football_family_sports_remain_suppressed(sport):
     assert is_disallowed_football_sport(sport) is True
-    assert is_telegram_suppressed_sport(sport) is False
+    assert is_telegram_suppressed_sport(sport) is True
 
 
 @pytest.mark.parametrize(

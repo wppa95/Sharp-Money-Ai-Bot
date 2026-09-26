@@ -388,8 +388,8 @@ async def test_underdog_removal_skips_timing_filter():
     "sport",
     ["NCAAF", "CFL", "RUGBY_UNION", "AFL", "college_football"],
 )
-async def test_football_family_label_alone_does_not_block_delivery(sport):
-    """The football-family label alone does not block a supported sport."""
+async def test_disallowed_football_family_is_not_delivered(sport):
+    """Only NFL/CFB football-family labels may reach normal delivery gates."""
     db = _make_db()
     delivery = _make_delivery(db)
 
@@ -403,9 +403,10 @@ async def test_football_family_label_alone_does_not_block_delivery(sport):
         decision=SimpleNamespace(recommendation="OVER"),
     )
 
-    assert result.sent is True
-    assert result.filtered is False
-    delivery._bot.send_message.assert_awaited_once()
+    assert result.sent is False
+    assert result.filtered is True
+    assert "football-related" in result.filtered_reason.lower()
+    delivery._bot.send_message.assert_not_awaited()
 
 
 # ── S-tier does not consume A/B cap budget ────────────────────────────────────
