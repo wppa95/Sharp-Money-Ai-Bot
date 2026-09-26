@@ -1000,6 +1000,39 @@ async def player_history_collector_job(context) -> None:
         logger.exception("player_history_collector_job: %s", exc)
 
 
+async def _persist_propline_player_history_rows(db, target, result) -> int:
+    """Persist only explicitly settled entries from an already-fetched rotation result."""
+    if (
+        str(getattr(target, "family", "") or "") != "player_history"
+        or is_football_related_sport(
+            str(getattr(target, "canonical_sport", "") or "")
+        )
+        or not bool(getattr(result, "succeeded", False))
+        or not bool(getattr(result, "complete", False))
+        or bool(getattr(result, "redacted", False))
+    ):
+        return 0
+
+    from providers.player_history import propline_player_history_rows
+
+    rows = propline_player_history_rows(
+        getattr(result, "entries", ()) or (),
+        player_name=getattr(target, "player_name", ""),
+        sport=getattr(target, "canonical_sport", ""),
+        stat_type=getattr(target, "market", ""),
+    )
+    if not rows:
+        return 0
+
+    bulk_writer = getattr(db, "upsert_player_results_bulk", None)
+    if callable(bulk_writer):
+        await bulk_writer(rows)
+    else:
+        for row in rows:
+            await db.upsert_player_result(row)
+    return len(rows)
+
+
 async def propline_read_only_rotation_job(context) -> None:
     """Rotate supplemental PropLine endpoints without entering alert logic.
 
@@ -1316,6 +1349,10 @@ async def propline_read_only_rotation_job(context) -> None:
                         else:
                             for row in rows:
                                 await db.upsert_player_result(row)
+                elif target.family == "player_history":
+                    await _persist_propline_player_history_rows(
+                        db, target, result
+                    )
                 return True
             rows = [
                 row for row in propline_result_rows(

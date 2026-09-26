@@ -105,6 +105,92 @@ def propline_result_rows(results) -> list:
     return rows
 
 
+def propline_player_history_rows(
+    entries,
+    player_name: str,
+    sport: str,
+    stat_type: str,
+) -> list:
+    """Convert explicitly settled PropLine player-history entries to game rows.
+
+    This is shared by the scheduled supplement and the bounded read-only
+    rotation. A completed-looking response is not enough: each entry must have
+    an event ID, event date, numeric actual value, and explicit settlement.
+    """
+    from providers.player_stats import RawGameResult
+    from providers.propline import _parse_datetime
+
+    player = str(player_name or "").strip()
+    sport_key = str(sport or "").strip().upper()
+    stat = str(stat_type or "").strip().lower()
+    if not player or not sport_key or not stat:
+        return []
+
+    settled = {"WON", "LOST", "PUSH", "VOID"}
+    rows = []
+    for entry in entries or ():
+        def _entry_value(name: str, default=None):
+            if isinstance(entry, dict):
+                return entry.get(name, default)
+            return getattr(entry, name, default)
+
+        redacted = _entry_value("redacted", False)
+        response_complete = _entry_value("response_complete", True)
+        if (
+            bool(redacted)
+            or response_complete is False
+            or str(response_complete).strip().lower() in {"false", "0", "no"}
+        ):
+            continue
+
+        event_id = str(_entry_value("event_id") or "").strip()
+        actual = _entry_value("actual_value")
+        game_date = _parse_datetime(_entry_value("commence_time"))
+        resolution = str(
+            _entry_value("over_result") or _entry_value("under_result") or ""
+        ).strip().upper()
+        if (
+            not event_id
+            or game_date is None
+            or actual is None
+            or resolution not in settled
+        ):
+            continue
+        try:
+            value = float(actual)
+        except (TypeError, ValueError):
+            continue
+
+        player_team = str(
+            _entry_value("player_team") or _entry_value("team") or ""
+        ).strip()
+        home_team = str(
+            _entry_value("home_team") or _entry_value("home") or ""
+        ).strip()
+        away_team = str(
+            _entry_value("away_team") or _entry_value("away") or ""
+        ).strip()
+        opponent = None
+        if player_team and home_team and away_team:
+            if _fuzzy_team_match(player_team, home_team):
+                opponent = away_team
+            elif _fuzzy_team_match(player_team, away_team):
+                opponent = home_team
+        rows.append(
+            RawGameResult(
+                player_name=player,
+                sport=sport_key,
+                stat_type=stat,
+                game_date=game_date.date().isoformat(),
+                actual_value=value,
+                opponent=opponent,
+                source="propline_history",
+                game_id=event_id,
+            )
+        )
+    return rows
+
+
 def _is_database_backend(db: object) -> bool:
     """Only the real database backend may trigger remote history enrichment."""
     try:
@@ -1056,10 +1142,8 @@ class PlayerHistoryProvider:
         coverage: Optional[dict[str, str]] = None,
     ) -> list:
         """Adapt official PropLine resolved history into game-result rows."""
-        from providers.player_stats import RawGameResult
         from providers.propline import (
             PropLineClient,
-            _parse_datetime,
             official_player_market_for,
         )
 
@@ -1224,64 +1308,12 @@ class PlayerHistoryProvider:
             )
             return []
 
-        settled = {"WON", "LOST", "PUSH", "VOID"}
-        rows = []
-        for entry in result.entries:
-            def _entry_value(name: str, default=None):
-                if isinstance(entry, dict):
-                    return entry.get(name, default)
-                return getattr(entry, name, default)
-
-            event_id = str(_entry_value("event_id") or "").strip()
-            actual = _entry_value("actual_value")
-            game_date = _parse_datetime(_entry_value("commence_time"))
-            resolution = str(
-                _entry_value("over_result")
-                or _entry_value("under_result")
-                or ""
-            ).strip().upper()
-            if (
-                not event_id
-                or game_date is None
-                or actual is None
-                or resolution not in settled
-            ):
-                continue
-            try:
-                value = float(actual)
-            except (TypeError, ValueError):
-                continue
-            player_team = str(
-                _entry_value("player_team")
-                or _entry_value("team")
-                or ""
-            ).strip()
-            home_team = str(
-                _entry_value("home_team")
-                or _entry_value("home")
-                or ""
-            ).strip()
-            away_team = str(
-                _entry_value("away_team")
-                or _entry_value("away")
-                or ""
-            ).strip()
-            opponent = None
-            if player_team and home_team and away_team:
-                if _fuzzy_team_match(player_team, home_team):
-                    opponent = away_team
-                elif _fuzzy_team_match(player_team, away_team):
-                    opponent = home_team
-            rows.append(RawGameResult(
-                player_name=player_name,
-                sport=str(sport or "").upper(),
-                stat_type=stat_type.lower().strip(),
-                game_date=game_date.date().isoformat(),
-                actual_value=value,
-                opponent=opponent,
-                source="propline_history",
-                game_id=event_id,
-            ))
+        rows = propline_player_history_rows(
+            result.entries,
+            player_name=player_name,
+            sport=sport_u,
+            stat_type=stat_type,
+        )
         if coverage is not None:
             coverage.update(
                 status=(

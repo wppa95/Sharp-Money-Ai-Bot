@@ -6,7 +6,12 @@ import asyncio
 from datetime import datetime
 from types import SimpleNamespace
 
-from providers.player_history import propline_result_rows
+import pytest
+
+from providers.player_history import (
+    propline_player_history_rows,
+    propline_result_rows,
+)
 from providers.propline import (
     PropLineReadOnlyRotation,
     PropLineEvent,
@@ -603,3 +608,240 @@ def test_redacted_retired_and_incomplete_results_never_become_rows():
         )
         assert evidence.is_settled is False
         assert propline_result_rows([evidence]) == []
+
+
+def test_player_history_entries_require_explicit_settlement_and_identity():
+    from datetime import datetime
+    from types import SimpleNamespace
+
+    valid = SimpleNamespace(
+        event_id="ufc-event-1",
+        commence_time=datetime(2026, 9, 12),
+        actual_value="38",
+        over_result="WON",
+        under_result=None,
+        player_team="Red",
+        home_team="Red",
+        away_team="Blue",
+        redacted=False,
+        response_complete=True,
+    )
+    invalid_entries = [
+        SimpleNamespace(**{**vars(valid), "event_id": ""}),
+        SimpleNamespace(**{**vars(valid), "commence_time": "not-a-date"}),
+        SimpleNamespace(**{**vars(valid), "actual_value": "unknown"}),
+        SimpleNamespace(**{**vars(valid), "over_result": None}),
+        SimpleNamespace(**{**vars(valid), "redacted": True}),
+        SimpleNamespace(**{**vars(valid), "response_complete": False}),
+    ]
+
+    rows = propline_player_history_rows(
+        [valid, *invalid_entries],
+        player_name="Alex Example",
+        sport="UFC",
+        stat_type="significant strikes",
+    )
+
+    assert len(rows) == 1
+    assert rows[0].player_name == "Alex Example"
+    assert rows[0].sport == "UFC"
+    assert rows[0].stat_type == "significant strikes"
+    assert rows[0].game_date == "2026-09-12"
+    assert rows[0].actual_value == 38.0
+    assert rows[0].opponent == "Blue"
+    assert rows[0].source == "propline_history"
+    assert rows[0].game_id == "ufc-event-1"
+
+
+@pytest.mark.asyncio
+async def test_read_only_player_history_rotation_persists_verified_rows():
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, MagicMock
+
+    from player_history_job import _persist_propline_player_history_rows
+
+    db = MagicMock()
+    db.upsert_player_results_bulk = AsyncMock()
+    target = SimpleNamespace(
+        family="player_history",
+        canonical_sport="UFC",
+        player_name="Alex Example",
+        market="significant strikes",
+    )
+    result = SimpleNamespace(
+        succeeded=True,
+        complete=True,
+        redacted=False,
+        entries=[
+            SimpleNamespace(
+                event_id="ufc-event-1",
+                commence_time=datetime(2026, 9, 12),
+                actual_value=38,
+                over_result="WON",
+                under_result=None,
+                redacted=False,
+                response_complete=True,
+            ),
+            SimpleNamespace(
+                event_id="unresolved-event",
+                commence_time=datetime(2026, 9, 13),
+                actual_value=29,
+                over_result=None,
+                under_result=None,
+                redacted=False,
+                response_complete=True,
+            ),
+        ],
+    )
+
+    count = await _persist_propline_player_history_rows(db, target, result)
+
+    assert count == 1
+    db.upsert_player_results_bulk.assert_awaited_once()
+    saved = db.upsert_player_results_bulk.await_args.args[0]
+    assert len(saved) == 1
+    assert saved[0].game_id == "ufc-event-1"
+    assert saved[0].sport == "UFC"
+
+
+@pytest.mark.asyncio
+async def test_read_only_history_persistence_stays_closed_for_football_and_incomplete():
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, MagicMock
+
+    from player_history_job import _persist_propline_player_history_rows
+
+    db = MagicMock()
+    db.upsert_player_results_bulk = AsyncMock()
+    target = SimpleNamespace(
+        family="player_history",
+        canonical_sport="NFL",
+        player_name="Alex Example",
+        market="goals",
+    )
+    settled_entry = SimpleNamespace(
+        event_id="match-1",
+        commence_time=datetime(2026, 9, 12),
+        actual_value=1,
+        over_result="WON",
+        under_result=None,
+    )
+
+    football_count = await _persist_propline_player_history_rows(
+        db,
+        target,
+        SimpleNamespace(
+            succeeded=True,
+            complete=True,
+            redacted=False,
+            entries=[settled_entry],
+        ),
+    )
+    incomplete_count = await _persist_propline_player_history_rows(
+        db,
+        SimpleNamespace(**{**vars(target), "canonical_sport": "UFC"}),
+        SimpleNamespace(
+            succeeded=True,
+            complete=False,
+            redacted=False,
+            entries=[settled_entry],
+        ),
+    )
+
+    assert football_count == 0
+    assert incomplete_count == 0
+    db.upsert_player_results_bulk.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_read_only_rotation_job_persists_settled_player_history_target(
+    monkeypatch,
+):
+    from unittest.mock import AsyncMock, MagicMock
+
+    from player_history_job import propline_read_only_rotation_job
+    from providers.propline import (
+        PropLineReadOnlyRotationReport,
+        PropLineSport,
+    )
+
+    class _Client:
+        is_configured = True
+        sports_discovery_failed = False
+
+        async def discover_sports(self):
+            return [PropLineSport("mma_ufc", "UFC", "UFC")]
+
+        async def discover_events(self, _official_sport):
+            return []
+
+    class _Rotation:
+        def __init__(self, _client, *, max_requests_per_cycle):
+            assert max_requests_per_cycle == 4
+
+        async def run(self, targets, *, persist):
+            target = next(
+                target for target in targets
+                if target.family == "player_history"
+            )
+            result = SimpleNamespace(
+                succeeded=True,
+                complete=True,
+                redacted=False,
+                entries=[
+                    SimpleNamespace(
+                        event_id="ufc-event-2",
+                        commence_time=datetime(2026, 9, 19),
+                        actual_value=42,
+                        over_result="WON",
+                        under_result=None,
+                        redacted=False,
+                        response_complete=True,
+                    )
+                ],
+            )
+            assert await persist(target, result) is True
+            return PropLineReadOnlyRotationReport(
+                attempted=1,
+                completed=1,
+                persisted=1,
+                family_counts={"player_history": 1},
+            )
+
+    monkeypatch.setattr(
+        "providers.propline.PropLineReadOnlyRotation",
+        _Rotation,
+    )
+    db = MagicMock()
+    db.get_all_active_prop_line_history_by_line = AsyncMock(
+        return_value={
+            ("PrizePicks", "Alex Example", "UFC", "significant strikes"):
+                SimpleNamespace(
+                    sport="UFC",
+                    player_name="Alex Example",
+                    stat_type="significant strikes",
+                )
+        }
+    )
+    db.get_propline_evidence = AsyncMock(return_value=None)
+    db.upsert_propline_evidence_batch = AsyncMock()
+    db.get_fresh_propline_evidence_target_keys = AsyncMock(return_value=set())
+    db.save_propline_catalog_audit = AsyncMock(return_value={})
+    db.get_propline_catalog_audit_history = AsyncMock(return_value=[])
+    db.upsert_player_results_bulk = AsyncMock()
+    context = SimpleNamespace(
+        bot_data={
+            "db": db,
+            "propline_read_only_client": _Client(),
+        }
+    )
+
+    await propline_read_only_rotation_job(context)
+
+    db.upsert_player_results_bulk.assert_awaited_once()
+    saved = db.upsert_player_results_bulk.await_args.args[0]
+    assert len(saved) == 1
+    assert saved[0].player_name == "Alex Example"
+    assert saved[0].sport == "UFC"
+    assert saved[0].stat_type == "significant strikes"
+    assert saved[0].game_id == "ufc-event-2"
