@@ -24,6 +24,23 @@ def _future_game() -> datetime:
     return datetime.utcnow() + timedelta(hours=1)
 
 
+def _directional_decision(
+    direction: str,
+    *,
+    over_rate: float = 0.70,
+    l30_over_rate: float | None = None,
+) -> SimpleNamespace:
+    windows = ("l5", "l10", "l15", "l20", "l30", "season")
+    values = {"recommendation": direction}
+    for window in windows:
+        rate = l30_over_rate if window == "l30" and l30_over_rate is not None else over_rate
+        over_count = round(rate * 100)
+        values[f"{window}_games"] = 100
+        values[f"{window}_over"] = over_count
+        values[f"{window}_under"] = 100 - over_count
+    return SimpleNamespace(**values)
+
+
 async def _track_and_log(db: Database, *, external_id: str = "funnel-prop") -> None:
     await db.track_prop_records(
         [{
@@ -114,7 +131,7 @@ async def test_alert_delivery_blocks_already_delivered_funnel_row(db):
             new_line=0.5,
             game_time=_future_game(),
             validation=validation,
-            decision=SimpleNamespace(recommendation="OVER"),
+            decision=_directional_decision("OVER"),
             strict_pregame=True,
             source_id="funnel-prop",
             event_id="funnel-game",
@@ -122,4 +139,44 @@ async def test_alert_delivery_blocks_already_delivered_funnel_row(db):
 
     assert result.sent is False
     assert result.deduped is True
+    bot.send_message.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_alert_delivery_blocks_57_percent_l30_even_for_history_optional_sport(db):
+    bot = MagicMock()
+    bot.send_message = AsyncMock()
+    delivery = AlertDelivery(db, bot, [123])
+    validation = SimpleNamespace(
+        has_supporting_data=True,
+        data_source="propline",
+        n_real_games=0,
+        n_supplemental_games=10,
+    )
+
+    with (
+        patch("alert_scope_filter.check", return_value=SimpleNamespace(allowed=True)),
+        patch("reporting.is_current_reporting_day", return_value=True),
+    ):
+        result = await delivery.deliver_underdog(
+            player_name="Tennis Player",
+            team="TST",
+            sport="TENNIS",
+            stat_type="Aces",
+            old_line=2.5,
+            new_line=2.5,
+            game_time=_future_game(),
+            validation=validation,
+            decision=_directional_decision(
+                "OVER",
+                over_rate=0.70,
+                l30_over_rate=0.57,
+            ),
+            strict_pregame=True,
+            source_id="tennis-prop",
+            event_id="tennis-game",
+        )
+
+    assert result.sent is False
+    assert result.filtered is True
     bot.send_message.assert_not_awaited()

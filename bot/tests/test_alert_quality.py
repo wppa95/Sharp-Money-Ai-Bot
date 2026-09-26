@@ -558,31 +558,31 @@ def test_strong_bet_thresholds_are_inclusive_and_directional():
     over_at_boundary = types.SimpleNamespace(
         recommendation="OVER",
         **{
-            **{f"{window}_games": 10 for window in ("l5", "l10", "l15", "l20", "l30", "season")},
-            **{f"{window}_over": 7 for window in ("l5", "l10", "l15", "l20", "l30", "season")},
+            **{f"{window}_games": 100 for window in ("l5", "l10", "l15", "l20", "l30", "season")},
+            **{f"{window}_over": 70 for window in ("l5", "l10", "l15", "l20", "l30", "season")},
         },
     )
     over_below_boundary = types.SimpleNamespace(
         recommendation="OVER",
         **{
-            **{f"{window}_games": 10 for window in ("l5", "l10", "l15", "l20", "l30", "season")},
-            **{f"{window}_over": 7 for window in ("l5", "l10", "l15", "l20", "l30", "season")},
-            "l20_over": 6,
+            **{f"{window}_games": 100 for window in ("l5", "l10", "l15", "l20", "l30", "season")},
+            **{f"{window}_over": 70 for window in ("l5", "l10", "l15", "l20", "l30", "season")},
+            "l20_over": 69,
         },
     )
     under_at_boundary = types.SimpleNamespace(
         recommendation="UNDER",
         **{
-            **{f"{window}_games": 10 for window in ("l5", "l10", "l15", "l20", "l30", "season")},
-            **{f"{window}_under": 7 for window in ("l5", "l10", "l15", "l20", "l30", "season")},
+            **{f"{window}_games": 100 for window in ("l5", "l10", "l15", "l20", "l30", "season")},
+            **{f"{window}_under": 65 for window in ("l5", "l10", "l15", "l20", "l30", "season")},
         },
     )
     under_above_allowed_over_rate = types.SimpleNamespace(
         recommendation="UNDER",
         **{
-            **{f"{window}_games": 10 for window in ("l5", "l10", "l15", "l20", "l30", "season")},
-            **{f"{window}_under": 7 for window in ("l5", "l10", "l15", "l20", "l30", "season")},
-            "l15_under": 6,
+            **{f"{window}_games": 100 for window in ("l5", "l10", "l15", "l20", "l30", "season")},
+            **{f"{window}_under": 65 for window in ("l5", "l10", "l15", "l20", "l30", "season")},
+            "l15_under": 64,
         },
     )
 
@@ -591,7 +591,38 @@ def test_strong_bet_thresholds_are_inclusive_and_directional():
     assert _has_strong_directional_history(validation, under_at_boundary) is True
     assert _has_strong_directional_history(
         validation, under_above_allowed_over_rate
-    ) is True
+    ) is False
+
+
+def test_strong_history_rejects_57_percent_l30_for_over_and_under():
+    from alerts_multiplatform import _has_strong_directional_history
+    import types
+
+    validation = types.SimpleNamespace(
+        data_source="real",
+        n_real_games=30,
+        n_supplemental_games=0,
+    )
+    windows = ("l5", "l10", "l15", "l20", "l30", "season")
+    over_l30_at_57 = types.SimpleNamespace(
+        recommendation="OVER",
+        **{
+            **{f"{window}_games": 100 for window in windows},
+            **{f"{window}_over": 70 for window in windows},
+            "l30_over": 57,
+        },
+    )
+    under_l30_at_57 = types.SimpleNamespace(
+        recommendation="UNDER",
+        **{
+            **{f"{window}_games": 100 for window in windows},
+            **{f"{window}_under": 65 for window in windows},
+            "l30_under": 43,
+        },
+    )
+
+    assert _has_strong_directional_history(validation, over_l30_at_57) is False
+    assert _has_strong_directional_history(validation, under_l30_at_57) is False
 
 
 def test_clean_reason_removes_repeated_history_and_internal_tier():

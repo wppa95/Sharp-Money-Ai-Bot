@@ -38,6 +38,31 @@ def _propline_rows() -> list[RawGameResult]:
     ]
 
 
+def _directional_history(
+    direction: str = "OVER",
+    *,
+    over_rate: float = 0.70,
+) -> dict:
+    """Complete six-window history meeting the universal delivery cutoff."""
+    windows = ("l5", "l10", "l15", "l20", "l30", "season")
+    over = round(over_rate * 100)
+    return {
+        "recommendation": direction,
+        **{
+            f"{window}_games": 100
+            for window in windows
+        },
+        **{
+            f"{window}_over": over
+            for window in windows
+        },
+        **{
+            f"{window}_under": 100 - over
+            for window in windows
+        },
+    }
+
+
 @pytest.mark.asyncio
 async def test_cs_does_not_use_singular_propline_history_enrichment():
     db = _DB()
@@ -99,7 +124,7 @@ def test_propline_history_is_valid_delivery_evidence():
     assert _has_strong_underdog_evidence(
         sport="CS",
         validation=validation,
-        decision=SimpleNamespace(recommendation="OVER"),
+        decision=SimpleNamespace(**_directional_history()),
     ) is True
     assert market_engine._has_strong_delivery_evidence(validation=validation) is True
 
@@ -117,7 +142,7 @@ def test_serialized_propline_evidence_requires_sample_count():
     assert _has_strong_underdog_evidence(
         sport="CS",
         decision=sufficient_directional,
-    ) is True
+    ) is False
     assert market_engine._has_strong_delivery_evidence(decision=sufficient) is True
 
 
@@ -132,7 +157,7 @@ def test_serialized_validation_json_keeps_propline_provenance_and_count():
     assert _has_strong_underdog_evidence(
         sport="CS",
         decision={**decision, "recommendation": "OVER"},
-    ) is True
+    ) is False
     assert market_engine._has_strong_delivery_evidence(
         decision={"validation_json": decision["validation_json"]},
     ) is True
@@ -173,42 +198,13 @@ def test_primary_history_without_propline_is_telegram_deliverable():
         n_real_games=31,
         n_supplemental_games=0,
     )
-    decision = SimpleNamespace(
-        recommendation="OVER",
-        **{
-            **{
-                f"{window}_games": games
-                for window, games in (
-                    ("l5", 5),
-                    ("l10", 10),
-                    ("l15", 15),
-                    ("l20", 20),
-                    ("l30", 30),
-                    ("season", 31),
-                )
-            },
-            **{
-                f"{window}_over": over
-                for window, over in (
-                    ("l5", 5),
-                    ("l10", 6),
-                    ("l15", 8),
-                    ("l20", 11),
-                    ("l30", 17),
-                    ("season", 17),
-                )
-            },
-        },
-    )
+    decision = SimpleNamespace(**_directional_history())
 
     assert _has_strong_underdog_evidence(
         sport="MLB",
         validation=validation,
         decision=decision,
     ) is True
-    # The general delivery gate accepts the completed primary history.  The
-    # legacy strong-history helper remains stricter and rejects this fixture
-    # because its season window is below the OVER threshold.
     assert market_engine._has_delivery_evidence(
         sport="CS",
         validation=validation,
@@ -217,7 +213,7 @@ def test_primary_history_without_propline_is_telegram_deliverable():
     assert market_engine._has_strong_delivery_evidence(
         validation=validation,
         decision=decision,
-    ) is False
+    ) is True
 
 
 @pytest.mark.parametrize("sport", ["KBO", "NPB"])
@@ -236,9 +232,9 @@ def test_kbo_npb_need_settled_history_and_do_not_guess_markets(sport):
     ) is False
 
     settled_history = SimpleNamespace(
-        recommendation="OVER",
         evidence_source="propline",
         n_supplemental_games=5,
+        **_directional_history(),
     )
     assert market_engine._has_delivery_evidence(
         sport=sport,
@@ -265,7 +261,7 @@ def test_gridiron_allows_mixed_primary_and_propline_results(sport):
         n_real_games=3,
         n_supplemental_games=2,
     )
-    decision = SimpleNamespace(recommendation="OVER")
+    decision = SimpleNamespace(**_directional_history())
 
     assert _has_strong_underdog_evidence(
         sport=sport,
@@ -290,7 +286,7 @@ def test_gridiron_accepts_sufficient_settled_propline_history(sport):
         n_real_games=0,
         n_supplemental_games=5,
     )
-    decision = SimpleNamespace(recommendation="OVER")
+    decision = SimpleNamespace(**_directional_history())
 
     assert _has_strong_underdog_evidence(
         sport=sport,
@@ -417,9 +413,9 @@ def test_nonfootball_sports_require_direction_and_completed_history(sport):
     ) is False
 
     completed_history = SimpleNamespace(
-        recommendation="OVER",
         evidence_source="primary",
         n_real_games=5,
+        **_directional_history(),
     )
     assert market_engine._has_delivery_evidence(
         sport=sport,

@@ -291,8 +291,8 @@ def is_historical_average_source(value: Any) -> bool:
 def has_strict_directional_history(value: Any) -> bool:
     """Require every displayed history window to support the direction.
 
-    Hit rates are stored as OVER rates.  Therefore an OVER needs at least 70%
-    in every window, while an UNDER needs at most 40% OVER in every window.
+    Hit rates are stored as OVER rates. Therefore an OVER needs at least 70%
+    in every window, while an UNDER needs at most 35% OVER in every window.
     Missing windows are not treated as passing evidence.
     """
     if value is None:
@@ -327,7 +327,7 @@ def has_strict_directional_history(value: Any) -> bool:
         over_rate = float(over_count) / float(games)
         if recommendation == "OVER" and over_rate < 0.70:
             return False
-        if recommendation == "UNDER" and over_rate > 0.40:
+        if recommendation == "UNDER" and over_rate > 0.35:
             return False
 
     return True

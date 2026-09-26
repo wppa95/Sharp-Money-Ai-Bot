@@ -307,10 +307,8 @@ def is_strong_actionable_pick(
 ) -> bool:
     """Return whether a candidate meets the shared strongest-pick contract.
 
-    Strict-history sports need complete directional history. High-priority
-    non-MLB/NFL/NBA sports retain the direction-plus-confidence path used by
-    the canonical delivery gate, even when completed player-game history is
-    not available yet.
+    Every sport needs complete directional history at the user's configured
+    OVER/UNDER cutoffs. A sport's priority never substitutes for hit-rate data.
     """
     direction = _direction(candidate)
     if direction not in {"OVER", "UNDER"}:
@@ -318,7 +316,6 @@ def is_strong_actionable_pick(
     if not require_strong:
         return True
 
-    sport = _sport(candidate)
     history = candidate.get("hit_rates") or candidate.get("decision")
     validation = candidate.get("validation")
     history_values = (
@@ -328,11 +325,6 @@ def is_strong_actionable_pick(
     )
     if not history_supports_delivery(*history_values):
         return False
-    if is_history_optional_sport(sport):
-        # Non-goblin sports are actionable as soon as the canonical gate has
-        # a direction. Do not turn the legacy confidence score into a second
-        # delivery gate.
-        return True
     return has_strong_directional_history(history, direction)
 
 

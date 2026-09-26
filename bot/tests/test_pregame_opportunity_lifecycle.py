@@ -18,6 +18,21 @@ def _future(minutes: int = 60) -> datetime:
     return datetime.utcnow() + timedelta(minutes=minutes)
 
 
+def _directional_history(direction: str = "OVER") -> dict:
+    over = 70 if direction == "OVER" else 30
+    windows = ("l5", "l10", "l15", "l20", "l30", "season")
+    return {
+        "recommendation": direction,
+        **{f"{window}_games": 100 for window in windows},
+        **{f"{window}_over": over for window in windows},
+        **{f"{window}_under": 100 - over for window in windows},
+    }
+
+
+def _directional_decision(direction: str = "OVER") -> SimpleNamespace:
+    return SimpleNamespace(**_directional_history(direction))
+
+
 def _pp_opportunity(*, start_time=None, status: str = "") -> PPEdgeOpportunity:
     line = PrizePicksLine(
         external_id="pp-pregame-1",
@@ -30,7 +45,7 @@ def _pp_opportunity(*, start_time=None, status: str = "") -> PPEdgeOpportunity:
         start_time=start_time,
     )
     line.provider_status = status
-    return PPEdgeOpportunity(
+    opportunity = PPEdgeOpportunity(
         pp_line=line,
         sportsbook="DraftKings",
         sportsbook_line=21.5,
@@ -47,6 +62,8 @@ def _pp_opportunity(*, start_time=None, status: str = "") -> PPEdgeOpportunity:
         best_edge=10.0,
         prob_per_unit=3.0,
     )
+    opportunity.hit_rates = SimpleNamespace(**_directional_history("OVER"))
+    return opportunity
 
 
 def _delivery() -> AlertDelivery:
@@ -133,7 +150,7 @@ async def test_pregame_underdog_prop_can_reach_delivery():
                 n_real_games=0,
                 n_supplemental_games=5,
             ),
-            decision=SimpleNamespace(recommendation="OVER", confidence=80),
+             decision=_directional_decision("OVER"),
         )
     assert result.sent is True
 
@@ -192,7 +209,7 @@ async def test_scheduled_non_mlb_underdog_prop_can_reach_delivery(sport):
                 n_real_games=0,
                 n_supplemental_games=5,
             ),
-            decision=SimpleNamespace(recommendation="OVER", confidence=80),
+             decision=_directional_decision("OVER"),
         )
     assert result.sent is True
 
@@ -311,7 +328,7 @@ async def test_underdog_delivery_blocks_events_beyond_two_hours():
                 n_real_games=0,
                 n_supplemental_games=5,
             ),
-            decision=SimpleNamespace(recommendation="OVER", confidence=80),
+             decision=_directional_decision("OVER"),
         )
 
     assert result.sent is False

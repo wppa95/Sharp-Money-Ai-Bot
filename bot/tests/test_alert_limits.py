@@ -40,6 +40,17 @@ def _make_pp_line(start_time=None) -> MagicMock:
     return line
 
 
+def _directional_history(direction: str = "OVER") -> SimpleNamespace:
+    over = 70 if direction == "OVER" else 30
+    windows = ("l5", "l10", "l15", "l20", "l30", "season")
+    return SimpleNamespace(
+        recommendation=direction,
+        **{f"{window}_games": 100 for window in windows},
+        **{f"{window}_over": over for window in windows},
+        **{f"{window}_under": 100 - over for window in windows},
+    )
+
+
 def _make_opp(tier: str = "A", edge: float = 6.0, start_time=None) -> MagicMock:
     opp = MagicMock()
     opp.pp_line   = _make_pp_line(start_time)
@@ -53,6 +64,7 @@ def _make_opp(tier: str = "A", edge: float = 6.0, start_time=None) -> MagicMock:
     opp.adjusted_fair_prob_under = 0.48
     opp.edge_over  = edge
     opp.edge_under = 0.0
+    opp.hit_rates = _directional_history("OVER")
     return opp
 
 
@@ -267,7 +279,10 @@ async def test_underdog_cap_disabled_when_limit_is_zero():
                         n_real_games=0,
                         n_supplemental_games=10,
                 ),
-                decision=MagicMock(recommendation="OVER", confidence=80),
+                 decision=SimpleNamespace(
+                     **vars(_directional_history("OVER")),
+                     confidence=80,
+                 ),
             )
 
     assert result.sent is True
@@ -300,7 +315,10 @@ async def test_underdog_allowed_when_under_cap():
                     n_real_games=0,
                     n_supplemental_games=10,
             ),
-            decision=MagicMock(recommendation="OVER", confidence=80),
+             decision=SimpleNamespace(
+                 **vars(_directional_history("OVER")),
+                 confidence=80,
+             ),
         )
 
     assert result.sent is True
@@ -342,7 +360,7 @@ async def test_underdog_strict_delivery_blocks_next_reporting_day():
             "Tomorrow Player", "TeamA", "NBA", "Points",
             25.5, 26.0,
             game_time=datetime.utcnow() + timedelta(days=1),
-            decision=SimpleNamespace(recommendation="OVER"),
+         decision=SimpleNamespace(**vars(_directional_history("OVER"))),
             strict_pregame=True,
         )
 
@@ -405,7 +423,7 @@ async def test_disallowed_football_family_is_not_delivered(sport):
             data_source="primary",
             n_real_games=5,
         ),
-        decision=SimpleNamespace(recommendation="OVER"),
+        decision=SimpleNamespace(**vars(_directional_history("OVER"))),
     )
 
     assert result.sent is False
@@ -431,7 +449,7 @@ async def test_ncaaf_alias_is_delivered_as_active_cfb_scope():
             data_source="primary",
             n_real_games=5,
         ),
-        decision=SimpleNamespace(recommendation="OVER"),
+        decision=SimpleNamespace(**vars(_directional_history("OVER"))),
     )
 
     assert result.sent is True

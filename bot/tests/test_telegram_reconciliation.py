@@ -9,6 +9,17 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 
+def _directional_decision(direction: str = "OVER") -> SimpleNamespace:
+    over = 70 if direction == "OVER" else 30
+    windows = ("l5", "l10", "l15", "l20", "l30", "season")
+    return SimpleNamespace(
+        recommendation=direction,
+        **{f"{window}_games": 100 for window in windows},
+        **{f"{window}_over": over for window in windows},
+        **{f"{window}_under": 100 - over for window in windows},
+    )
+
+
 @pytest.fixture()
 async def db():
     from database import Database
@@ -185,11 +196,7 @@ async def _deliver_traceable_play(db, *, source_id: str, event_id: str, path: st
                 n_real_games=0,
                 n_supplemental_games=5,
             ),
-            decision=SimpleNamespace(
-                recommendation="OVER",
-                confidence=85,
-                decision_tier="A",
-            ),
+            decision=_directional_decision("OVER"),
             score=SimpleNamespace(total=90, stars=4),
             source_id=source_id,
             event_id=event_id,
@@ -305,9 +312,7 @@ async def test_failed_play_is_audited_but_not_marked_delivered(db):
                 n_real_games=0,
                 n_supplemental_games=5,
             ),
-            decision=SimpleNamespace(
-                recommendation="OVER", confidence=85, decision_tier="A"
-            ),
+            decision=_directional_decision("OVER"),
             score=SimpleNamespace(total=90, stars=4),
             source_id="failed-play",
             event_id="failed-game",

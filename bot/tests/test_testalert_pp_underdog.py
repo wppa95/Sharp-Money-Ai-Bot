@@ -79,7 +79,7 @@ def _make_opp(
 ) -> PPEdgeOpportunity:
     if pp_line is None:
         pp_line = _make_pp_line()
-    return PPEdgeOpportunity(
+    opp = PPEdgeOpportunity(
         pp_line                   = pp_line,
         sportsbook                = "DraftKings",
         sportsbook_line           = 27.0,
@@ -95,6 +95,38 @@ def _make_opp(
         best_side                 = best_side,
         best_edge                 = best_edge,
         prob_per_unit             = 3.0,
+    )
+    opp.hit_rates = SimpleNamespace(**_directional_history(best_side))
+    return opp
+
+
+def _directional_history(
+    direction: str = "OVER",
+    *,
+    over_rate: float | None = None,
+) -> dict:
+    if over_rate is None:
+        over_rate = 0.70 if direction == "OVER" else 0.30
+    over = round(over_rate * 100)
+    windows = ("l5", "l10", "l15", "l20", "l30", "season")
+    return {
+        "recommendation": direction,
+        **{f"{window}_games": 100 for window in windows},
+        **{f"{window}_over": over for window in windows},
+        **{f"{window}_under": 100 - over for window in windows},
+    }
+
+
+def _make_directional_decision(
+    direction: str = "OVER",
+    *,
+    confidence: int = 80,
+    over_rate: float | None = None,
+) -> SimpleNamespace:
+    return SimpleNamespace(
+        **_directional_history(direction, over_rate=over_rate),
+        confidence=confidence,
+        decision_tier="A",
     )
 
 
@@ -370,7 +402,7 @@ class TestDeliverUnderdog:
             old_line    = 0.5,
             new_line    = 1.5,
             validation  = _make_real_validation(),
-            decision    = MagicMock(recommendation="OVER", confidence=80),
+            decision    = _make_directional_decision("OVER", confidence=80),
         )
         assert not result.filtered
 
@@ -407,7 +439,7 @@ class TestDeliverUnderdog:
             old_line=10.5,
             new_line=11.5,
             validation=validation,
-            decision=SimpleNamespace(recommendation="OVER", confidence=75),
+            decision=_make_directional_decision("OVER", confidence=75),
         )
 
         assert result.sent is True
@@ -433,25 +465,7 @@ class TestDeliverUnderdog:
             n_real_games=10,
             n_supplemental_games=0,
         )
-        decision = SimpleNamespace(
-            recommendation="OVER",
-            confidence=71,
-            l5_games=5,
-            l5_over=4,
-            l5_hit_rate=0.8,
-            l10_games=10,
-            l10_over=7,
-            l10_hit_rate=0.7,
-            l15_games=None,
-            l15_over=None,
-            l20_games=None,
-            l20_over=None,
-            l30_games=None,
-            l30_over=None,
-            season_games=10,
-            season_over=7,
-            season_hit_rate=0.7,
-        )
+        decision = _make_directional_decision("OVER", confidence=71)
 
         result = await delivery.deliver_underdog(
             player_name="Supported Player",
@@ -507,7 +521,7 @@ class TestDeliverUnderdog:
             old_line=10.5,
             new_line=11.5,
             validation=validation,
-            decision=SimpleNamespace(recommendation="OVER", confidence=75),
+            decision=_make_directional_decision("OVER", confidence=75),
         )
 
         assert result.sent is True
@@ -538,7 +552,7 @@ class TestDeliverUnderdog:
             old_line=10.5,
             new_line=11.5,
             validation=validation,
-            decision=SimpleNamespace(recommendation="OVER", confidence=75),
+            decision=_make_directional_decision("OVER", confidence=75),
         )
 
         assert result.sent is False
@@ -565,12 +579,9 @@ class TestDeliverUnderdog:
     @pytest.mark.asyncio
     async def test_football_moneyline_uses_normal_delivery_scope(self, monkeypatch):
         delivery = self._delivery()
-        decision = MagicMock(
-            moneyline_strength="STRONG",
-            recommendation="OVER",
-            decision_tier=None,
-            confidence=95,
-        )
+        decision = _make_directional_decision("OVER", confidence=95)
+        decision.moneyline_strength = "STRONG"
+        decision.decision_tier = None
         validation = SimpleNamespace(
             has_supporting_data=True,
             data_source="propline",
@@ -617,11 +628,7 @@ class TestDeliverUnderdog:
             old_line    = 0.5,
             new_line    = 1.5,
             validation  = _make_real_validation(),
-            decision    = MagicMock(
-                recommendation="OVER",
-                confidence=66,
-                decision_tier="B",
-            ),
+             decision    = _make_directional_decision("OVER", confidence=66),
             score       = MagicMock(total=66, stars=3, tier="B"),
         )
 
@@ -658,11 +665,7 @@ class TestDeliverUnderdog:
                 old_line=0.5,
                 new_line=1.5,
                 validation=_make_real_validation(),
-                decision=MagicMock(
-                    recommendation="OVER",
-                    confidence=66,
-                    decision_tier="B",
-                ),
+                decision=_make_directional_decision("OVER", confidence=66),
                 score=MagicMock(total=66, stars=3, tier="B"),
             )
 
@@ -691,11 +694,7 @@ class TestDeliverUnderdog:
             old_line=3.5,
             new_line=2.5,
             validation=_make_real_validation(),
-            decision=MagicMock(
-                recommendation="UNDER",
-                confidence=66,
-                decision_tier="B",
-            ),
+            decision=_make_directional_decision("UNDER", confidence=66),
             score=MagicMock(total=66, stars=3, tier="B"),
         )
 
@@ -723,7 +722,7 @@ class TestDeliverUnderdog:
             old_line    = 3.5,
             new_line    = 2.5,
             validation  = _make_real_validation(),
-            decision    = MagicMock(recommendation="UNDER", confidence=80),
+            decision    = _make_directional_decision("UNDER", confidence=80),
         )
 
         msg = sent_messages[0]
@@ -767,7 +766,7 @@ class TestDeliverUnderdog:
             old_line    = 0.5,
             new_line    = 1.5,
             validation  = _make_real_validation(),
-            decision    = MagicMock(recommendation="OVER", confidence=80),
+            decision    = _make_directional_decision("OVER", confidence=80),
         )
         assert result.sent is True
 
@@ -782,7 +781,7 @@ class TestDeliverUnderdog:
             old_line    = 0.5,
             new_line    = 1.5,
             validation  = _make_real_validation(),
-            decision    = MagicMock(recommendation="OVER", confidence=80),
+            decision    = _make_directional_decision("OVER", confidence=80),
         )
         assert result.sent is False
 
@@ -799,7 +798,7 @@ class TestDeliverUnderdog:
             old_line    = 0.5,
             new_line    = 1.5,
             validation  = _make_real_validation(),
-            decision    = MagicMock(recommendation="OVER", confidence=80),
+            decision    = _make_directional_decision("OVER", confidence=80),
         )
         assert result.recipients_sent   == 3
         assert result.recipients_failed == 0
@@ -828,7 +827,7 @@ class TestDeliverUnderdog:
             new_line    = 1.5,
             game_time   = game_ts,
             validation  = _make_real_validation(),
-            decision    = MagicMock(recommendation="OVER", confidence=80),
+            decision    = _make_directional_decision("OVER", confidence=80),
         )
 
         assert sent_messages, "Expected alert to be sent with future game_time"
@@ -877,7 +876,7 @@ class TestDeliverUnderdog:
             old_line    = 26.5,
             new_line    = 28.5,
             validation  = _make_real_validation(),
-            decision    = MagicMock(recommendation="OVER", confidence=80),
+            decision    = _make_directional_decision("OVER", confidence=80),
         )
         assert "🏀" in sent_messages[0]
 
@@ -895,7 +894,7 @@ class TestDeliverUnderdog:
             old_line    = 0.5,
             new_line    = 1.5,
             validation  = _make_real_validation(),
-            decision    = MagicMock(recommendation="OVER", confidence=80),
+            decision    = _make_directional_decision("OVER", confidence=80),
         )
         assert result.sent is False
         assert result.recipients_failed == 1

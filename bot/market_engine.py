@@ -61,6 +61,7 @@ from engine.strongest_pick import (
     select_strongest_actionable_picks,
 )
 from engine.delivery_evidence import (
+    has_strong_directional_history,
     has_strict_directional_history,
     history_supports_delivery,
     history_is_available,
@@ -3860,10 +3861,9 @@ def _has_strong_delivery_evidence(
 ) -> bool:
     """Return whether existing scoring/validation data supports strong delivery.
 
-    This remains the strict compatibility helper: a directional result must
-    have strong completed-result evidence in every required window. The actual
-    alert gate uses ``_has_delivery_evidence`` below, because a valid
-    lower-volume sport need not have every history window populated.
+    A directional result must have strong completed-result evidence in every
+    required window. The active alert gate below applies the same threshold
+    alongside its source-provenance checks.
     """
     def _strong_directional_history(obj: object) -> bool:
         recommendation = str(
@@ -4010,7 +4010,8 @@ def _has_delivery_evidence(
     """Return whether a directional candidate may enter Telegram delivery.
 
     A valid OVER/UNDER recommendation is necessary but not sufficient: every
-    candidate also needs completed primary-player results or explicitly
+    candidate must pass the directional hit-rate threshold in each required
+    history window and have completed primary-player results or explicitly
     settled PropLine history. Disallowed football-family sports are suppressed
     here and again by ``AlertDelivery``. Other safety checks (freshness, timing,
     tracking, deduplication, and transport) remain downstream.
@@ -4038,6 +4039,8 @@ def _has_delivery_evidence(
         else (decision, intelligence_trace)
     )
     if not history_supports_delivery(*history_values):
+        return False
+    if not has_strong_directional_history(decision, direction):
         return False
     if is_history_optional_sport(sport):
         return True

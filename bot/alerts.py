@@ -664,8 +664,8 @@ def _has_strong_underdog_evidence(
     """Apply the terminal direction/sport rule without importing market_engine.
 
     A direction alone is not delivery evidence. Every sport needs completed
-    primary-player history or explicitly settled PropLine results; history-
-    optional sports skip only the stricter quality checks after that proof.
+    primary-player history or explicitly settled PropLine results, plus
+    history meeting the directional hit-rate thresholds.
     """
     decision_direction = str(
         (
@@ -685,6 +685,10 @@ def _has_strong_underdog_evidence(
         else (decision, intelligence_trace)
     )
     if not history_supports_delivery(*history_values):
+        return False
+    from engine.delivery_evidence import has_strong_directional_history
+
+    if not has_strong_directional_history(decision, decision_direction):
         return False
     if is_history_optional_sport(sport):
         return True
@@ -1646,6 +1650,20 @@ class AlertDelivery:
                 sent=False,
                 filtered=True,
                 filtered_reason="Canonical direction/evidence gate",
+            )
+        from engine.delivery_evidence import has_strong_directional_history
+
+        _pp_history = (
+            getattr(opp, "hit_rates", None)
+            or getattr(opp, "decision", None)
+            or getattr(score, "hit_rates", None)
+            or getattr(score, "decision", None)
+        )
+        if not has_strong_directional_history(_pp_history, _pp_direction):
+            return DeliveryResult(
+                sent=False,
+                filtered=True,
+                filtered_reason="Directional history threshold",
             )
 
         _pp_line_value = float(getattr(opp.pp_line, "line_value", 0) or 0)
