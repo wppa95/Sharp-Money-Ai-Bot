@@ -191,15 +191,32 @@ class TestUnderdogProvider:
         p = UnderdogProvider(snapshots=[_make_snap()])
         assert p.is_available() is True
 
-    def test_sport_keys_default_non_empty(self):
+    def test_sport_keys_default_cover_all_configured_sports(self):
         p = UnderdogProvider()
+        from config import config
+
         keys = p.sport_keys
-        assert "MLB" in keys
-        assert "NBA" in keys
+        expected = [
+            str(sport).strip().upper()
+            for sport in config.active_sports
+            if str(sport).strip()
+        ]
+        assert keys == expected
+        assert {"KBO", "NPB"} <= set(keys)
 
     def test_sport_keys_custom_filter(self):
-        p = UnderdogProvider(sport_filter=["MLB", "NBA"])
+        p = UnderdogProvider(sport_filter=["mlb", "NBA"])
         assert p.sport_keys == ["MLB", "NBA"]
+
+    def test_fetch_props_uses_case_insensitive_sport_filter(self):
+        p = UnderdogProvider(
+            snapshots=[_make_snap(sport="KBO")],
+            sport_filter=["kbo"],
+        )
+        props = _run(p.fetch_props())
+
+        assert len(props) == 1
+        assert props[0].sport == "KBO"
 
     def test_fetch_props_basic(self):
         snaps = [_make_snap(), _make_snap(player_name="Trout", external_id="ud-002")]

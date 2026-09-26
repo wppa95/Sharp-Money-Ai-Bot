@@ -89,6 +89,20 @@ class TestActiveSportsConfig:
     def test_default_includes_all_expected_sports(self):
         assert config.active_sports == EXPECTED_DEFAULT_SPORTS
 
+    def test_every_active_sport_is_in_the_default_alert_scope(self):
+        active = {
+            str(sport).strip().upper()
+            for sport in config.active_sports
+            if str(sport).strip()
+        }
+        alerts = {
+            str(sport).strip().upper()
+            for sport in config.ud_alert_sports
+            if str(sport).strip()
+        }
+
+        assert active <= alerts
+
     def test_every_default_active_sport_is_non_empty_string(self):
         # active_sports contains Underdog scanner identifiers (TENNIS, CS, etc.)
         # which are NOT Sport enum values — they use a different string namespace.

@@ -265,7 +265,11 @@ class UnderdogConnector(BaseConnector):
         active_sports: Optional[list[str]] = None,
         enabled: bool = True,
     ) -> None:
-        self._active_sports = set(active_sports or [])
+        self._active_sports = {
+            str(sport or "").strip().upper()
+            for sport in (active_sports or [])
+            if str(sport or "").strip()
+        }
         self.enabled        = enabled
         # external_id → previous projection (for movement detection)
         self._previous: dict[str, UnderdogProjection] = {}
@@ -293,7 +297,11 @@ class UnderdogConnector(BaseConnector):
         now = datetime.utcnow()
 
         for proj in projections:
-            if self._active_sports and proj.sport not in self._active_sports:
+            if (
+                self._active_sports
+                and str(proj.sport or "").strip().upper()
+                not in self._active_sports
+            ):
                 continue
 
             prev = self._previous.get(proj.external_id)

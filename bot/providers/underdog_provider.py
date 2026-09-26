@@ -172,7 +172,15 @@ class UnderdogProvider(PropProviderBase):
             propline_client: Optional[Any] = None,
         ) -> None:
             self._snapshots       = snapshots or []
-            self._sport_filter    = sport_filter
+            self._sport_filter    = (
+                [
+                    str(sport or "").strip().upper()
+                    for sport in sport_filter
+                    if str(sport or "").strip()
+                ]
+                if sport_filter is not None
+                else None
+            )
             self._propline_client = propline_client or PropLineClient()
 
     # ── PropProviderBase interface ────────────────────────────────────────────
@@ -183,9 +191,14 @@ class UnderdogProvider(PropProviderBase):
 
     @property
     def sport_keys(self) -> list[str]:
-        return self._sport_filter or [
-            "MLB", "NBA", "NFL", "NHL", "WNBA",
-            "SOCCER", "TENNIS", "CS", "DOTA", "LOL",
+        if self._sport_filter is not None:
+            return list(self._sport_filter)
+        from config import config
+
+        return [
+            str(sport or "").strip().upper()
+            for sport in config.active_sports
+            if str(sport or "").strip()
         ]
 
     def is_available(self) -> bool:
@@ -204,7 +217,10 @@ class UnderdogProvider(PropProviderBase):
             if getattr(snap, "removed", False):
                 continue
             prop = ud_snapshot_to_player_prop(snap)
-            if self._sport_filter is None or prop.sport in self._sport_filter:
+            if (
+                self._sport_filter is None
+                or str(prop.sport or "").strip().upper() in self._sport_filter
+            ):
                 props.append(prop)
         return props
 

@@ -237,6 +237,47 @@ class TestUnderdogConnector:
         assert p.stat_type   == "Fantasy Points"
         assert p.sport       == "NFL"
 
+    @pytest.mark.asyncio
+    async def test_active_sport_filter_accepts_every_configured_feed_sport(self):
+        from config import config
+
+        for configured_sport in config.active_sports:
+            sport = str(configured_sport).strip().upper()
+            payload = {
+                "over_under_lines": [{
+                    "id": f"{sport.lower()}-line",
+                    "stat_value": 1.5,
+                    "over_under": {
+                        "appearance_stat": {
+                            "appearance_id": f"{sport.lower()}-appearance",
+                            "display_stat": "Hits",
+                        },
+                    },
+                }],
+                "appearances": [{
+                    "id": f"{sport.lower()}-appearance",
+                    "player_id": f"{sport.lower()}-player",
+                }],
+                "players": [{
+                    "id": f"{sport.lower()}-player",
+                    "first_name": "Feed",
+                    "last_name": "Player",
+                    "sport_id": sport.lower(),
+                }],
+            }
+            connector = UnderdogConnector(
+                active_sports=[configured_sport],
+                enabled=True,
+            )
+            projections = connector._parse(payload)
+            assert len(projections) == 1, configured_sport
+            connector._fetch_projections = AsyncMock(return_value=projections)
+
+            snapshots = await connector.fetch()
+
+            assert len(snapshots) == 1, configured_sport
+            assert snapshots[0].sport == sport
+
     def test_parse_skips_null_stat_value(self):
         c = self._make_connector()
         projs = c._parse(UNDERDOG_API_RESPONSE)
