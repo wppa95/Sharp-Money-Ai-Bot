@@ -1,0 +1,98 @@
+[
+  {
+    "name": ".github",
+    "path": ".github",
+    "sha": "36f1ec6fa49ff80d8c39f4306bca319798ebb329",
+    "size": 0,
+    "url": "https://api.github.com/repos/dentearl/npb-data/contents/.github?ref=main",
+    "html_url": "https://github.com/dentearl/npb-data/tree/main/.github",
+    "git_url": "https://api.github.com/repos/dentearl/npb-data/git/trees/36f1ec6fa49ff80d8c39f4306bca319798ebb329",
+    "download_url": null,
+    "type": "dir",
+    "_links": {
+      "self": "https://api.github.com/repos/dentearl/npb-data/contents/.github?ref=main",
+      "git": "https://api.github.com/repos/dentearl/npb-data/git/trees/36f1ec6fa49ff80d8c39f4306bca319798ebb329",
+      "html": "https://github.com/dentearl/npb-data/tree/main/.github"
+    }
+  },
+  {
+    "name": ".gitignore",
+    "path": ".gitignore",
+    "sha": "e47db61a3ff8825821c50fe524ca402151d014d3",
+    "size": 42,
+    "url": "https://api.github.com/repos/dentearl/npb-data/contents/.gitignore?ref=main",
+    "html_url": "https://github.com/dentearl/npb-data/blob/main/.gitignore",
+    "git_url": "https://api.github.com/repos/dentearl/npb-data/git/blobs/e47db61a3ff8825821c50fe524ca402151d014d3",
+    "download_url": "https://raw.githubusercontent.com/dentearl/npb-data/main/.gitignore",
+    "type": "file",
+    "_links": {
+      "self": "https://api.github.com/repos/dentearl/npb-data/contents/.gitignore?ref=main",
+      "git": "https://api.github.com/repos/dentearl/npb-data/git/blobs/e47db61a3ff8825821c50fe524ca402151d014d3",
+      "html": "https://github.com/dentearl/npb-data/blob/main/.gitignore"
+    }
+  },
+  {
+    "name": "README.md",
+    "path": "README.md",
+    "sha": "bfab1cb3127f14118e838802b550fadca2d2ff5e",
+    "size": 1466,
+    "url": "https://api.github.com/repos/dentearl/npb-data/contents/README.md?ref=main",
+    "html_url": "https://github.com/dentearl/npb-data/blob/main/README.md",
+    "git_url": "https://api.github.com/repos/dentearl/npb-data/git/blobs/bfab1cb3127f14118e838802b550fadca2d2ff5e",
+    "download_url": "https://raw.githubusercontent.com/dentearl/npb-data/main/README.md",
+    "type": "file",
+    "_links": {
+      "self": "https://api.github.com/repos/dentearl/npb-data/contents/README.md?ref=main",
+      "git": "https://api.github.com/repos/dentearl/npb-data/git/blobs/bfab1cb3127f14118e838802b550fadca2d2ff5e",
+      "html": "https://github.com/dentearl/npb-data/blob/main/README.md"
+    }
+  },
+  {
+    "name": "data",
+    "path": "data",
+    "sha": "36216463cc9534738de2708dab844c57474afde0",
+    "size": 0,
+    "url": "https://api.github.com/repos/dentearl/npb-data/contents/data?ref=main",
+    "html_url": "https://github.com/dentearl/npb-data/tree/main/data",
+    "git_url": "https://api.github.com/repos/dentearl/npb-data/git/trees/36216463cc9534738de2708dab844c57474afde0",
+    "download_url": null,
+    "type": "dir",
+    "_links": {
+      "self": "https://api.github.com/repos/dentearl/npb-data/contents/data?ref=main",
+      "git": "https://api.github.com/repos/dentearl/npb-data/git/trees/36216463cc9534738de2708dab844c57474afde0",
+      "html": "https://github.com/dentearl/npb-data/tree/main/data"
+    }
+  },
+  {
+    "name": "package.json",
+    "path": "package.json",
+    "sha": "be1c0a98b9db061cd6981230bf40715f1f77b914",
+    "size": 502,
+    "url": "https://api.github.com/repos/dentearl/npb-data/contents/package.json?ref=main",
+    "html_url": "https://github.com/dentearl/npb-data/blob/main/package.json",
+    "git_url": "https://api.github.com/repos/dentearl/npb-data/git/blobs/be1c0a98b9db061cd6981230bf40715f1f77b914",
+    "download_url": "https://raw.githubusercontent.com/dentearl/npb-data/main/package.json",
+    "type": "file",
+    "_links": {
+      "self": "https://api.github.com/repos/dentearl/npb-data/contents/package.json?ref=main",
+      "git": "https://api.github.com/repos/dentearl/npb-data/git/blobs/be1c0a98b9db061cd6981230bf40715f1f77b914",
+      "html": "https://github.com/dentearl/npb-data/blob/main/package.json"
+    }
+  },
+  {
+    "name": "scripts",
+    "path": "scripts",
+    "sha": "945290fcc64adf7616a3c4d4b630204dde3526fd",
+    "size": 0,
+    "url": "https://api.github.com/repos/dentearl/npb-data/contents/scripts?ref=main",
+    "html_url": "https://github.com/dentearl/npb-data/tree/main/scripts",
+    "git_url": "https://api.github.com/repos/dentearl/npb-data/git/trees/945290fcc64adf7616a3c4d4b630204dde3526fd",
+    "download_url": null,
+    "type": "dir",
+    "_links": {
+      "self": "https://api.github.com/repos/dentearl/npb-data/contents/scripts?ref=main",
+      "git": "https://api.github.com/repos/dentearl/npb-data/git/trees/945290fcc64adf7616a3c4d4b630204dde3526fd",
+      "html": "https://github.com/dentearl/npb-data/tree/main/scripts"
+    }
+  }
+]

@@ -151,6 +151,118 @@
       "publicationDate": "2026-07-15",
       "tier": 3,
       "evidencePath": "research/sources/sportradar-badminton-faq.md"
+    },
+    {
+      "key": "riot-match-v5-official-portal",
+      "title": "Riot Match-V5 API Reference",
+      "url": "https://developer.riotgames.com/apis#match-v5",
+      "publicationDate": null,
+      "tier": 1,
+      "evidencePath": "research/sources/riot-match-v5-official-portal.md"
+    },
+    {
+      "key": "riot-developer-portal",
+      "title": "Riot Developer Portal: API key types and rate limits",
+      "url": "https://developer.riotgames.com/docs/portal",
+      "publicationDate": null,
+      "tier": 1,
+      "evidencePath": "research/sources/riot-developer-portal.md"
+    },
+    {
+      "key": "oracles-elixir-downloads-official",
+      "title": "Oracle's Elixir Match Data Downloads",
+      "url": "https://oracleselixir.com/tools/downloads",
+      "publicationDate": null,
+      "tier": 3,
+      "evidencePath": "research/sources/oracles-elixir-downloads-official.md"
+    },
+    {
+      "key": "oracles-elixir-riot-policy-link",
+      "title": "Riot General Policy Linked by Oracle's Elixir",
+      "url": "https://developer.riotgames.com/policies/general",
+      "publicationDate": null,
+      "tier": 1,
+      "evidencePath": "research/sources/oracles-elixir-riot-policy-link.md"
+    },
+    {
+      "key": "official-kbo-player-stats",
+      "title": "KBO Player Records",
+      "url": "https://www.koreabaseball.com/Record/Player/HitterBasic/Basic1.aspx",
+      "publicationDate": "2026-09-26",
+      "tier": 1,
+      "evidencePath": "research/sources/official-kbo-player-stats.html"
+    },
+    {
+      "key": "official-kbo-schedule",
+      "title": "KBO Schedule and Results",
+      "url": "https://www.koreabaseball.com/Schedule/Schedule.aspx",
+      "publicationDate": "2026-09-26",
+      "tier": 1,
+      "evidencePath": "research/sources/official-kbo-schedule.html"
+    },
+    {
+      "key": "official-npb-players",
+      "title": "NPB Individual Annual Records",
+      "url": "https://npb.jp/bis/players/",
+      "publicationDate": "2026-09-26",
+      "tier": 1,
+      "evidencePath": "research/sources/official-npb-players.html"
+    },
+    {
+      "key": "official-npb-games",
+      "title": "NPB Games",
+      "url": "https://npb.jp/games/",
+      "publicationDate": "2026-09-26",
+      "tier": 1,
+      "evidencePath": "research/sources/official-npb-games.html"
+    },
+    {
+      "key": "dentearl-kbo-data",
+      "title": "dentearl/kbo-data",
+      "url": "https://github.com/dentearl/kbo-data",
+      "publicationDate": "2026-09-26",
+      "tier": 2,
+      "evidencePath": "research/sources/dentearl-kbo-data-README.md"
+    },
+    {
+      "key": "dentearl-npb-data",
+      "title": "dentearl/npb-data",
+      "url": "https://github.com/dentearl/npb-data",
+      "publicationDate": "2026-09-26",
+      "tier": 2,
+      "evidencePath": "research/sources/dentearl-npb-data-README.md"
+    },
+    {
+      "key": "armstjc-npb-repository",
+      "title": "Nippon Baseball Data Repository",
+      "url": "https://github.com/armstjc/Nippon-Baseball-Data-Repository",
+      "publicationDate": "2026-09-26",
+      "tier": 2,
+      "evidencePath": "research/sources/armstjc-Nippon-Baseball-Data-Repository-README.md"
+    },
+    {
+      "key": "riot-val-match-v1",
+      "title": "Riot VAL-MATCH-V1 API reference",
+      "url": "https://developer.riotgames.com/api-details/val-match-v1",
+      "publicationDate": "2026-09-26",
+      "tier": 1,
+      "evidencePath": "research/sources/riot-val-match-v1.md"
+    },
+    {
+      "key": "riot-api-terms-and-getting-started",
+      "title": "Riot API Terms, Getting Started, and Valorant policy",
+      "url": "https://developer.riotgames.com/terms",
+      "publicationDate": "2026-09-26",
+      "tier": 1,
+      "evidencePath": "research/sources/riot-api-terms-and-getting-started.md"
+    },
+    {
+      "key": "henrikdev-unofficial-valorant-api-readme",
+      "title": "Henrik-3 unofficial Valorant API README",
+      "url": "https://github.com/Henrik-3/unofficial-valorant-api",
+      "publicationDate": "2026-09-26",
+      "tier": 2,
+      "evidencePath": "research/sources/henrikdev-unofficial-valorant-api-readme.md"
     }
   ]
 }

@@ -66,3 +66,63 @@
 - Confirm the exact table-tennis and badminton stats required by the bot against licensed sample payloads; the public docs establish match results and set scores only.
 - Verify Sportradar quotas, retention, and production-use rights with the vendor.
 - Research used public documentation fetched directly because the web-search service returned HTTP 402; no authenticated API samples were available.
+
+## Public-Alternatives Follow-Up — 2026-09-26
+
+**Status:** complete  
+**Depth:** Quick
+
+### Plan
+
+- **Question:** Which public alternatives can replace the inaccessible licensed feeds for KBO, NPB, LoL, and Valorant?
+- **Scope:** Check player/game identity, stat fields, completion evidence, coverage/history, access requirements, quotas, and reuse limits. Do not integrate undocumented APIs or assume keys.
+- **Audience:** Technical, focused on safe completed-history inputs for the bot.
+- **Deliverable:** A cited addendum ranking usable public sources and clearly marking gaps.
+
+### Focus Areas
+
+| # | Area | Status | Sources |
+|---|---|---|---|
+| 1 | KBO and NPB public datasets | complete; no bot-ready source verified | [@official-kbo-player-stats], [@official-kbo-schedule], [@official-npb-players], [@official-npb-games], [@dentearl-kbo-data], [@dentearl-npb-data], [@armstjc-npb-repository] |
+| 2 | LoL professional match exports | complete; Oracle's Elixir is a lead, not cleared for bot use | [@oracles-elixir-downloads-official], [@oracles-elixir-riot-policy-link], [@riot-match-v5-official-portal], [@riot-developer-portal] |
+| 3 | Valorant documented APIs and public feeds | complete; documented fields, but pro-history and reuse remain unconfirmed | [@riot-val-match-v1], [@riot-api-terms-and-getting-started], [@henrikdev-unofficial-valorant-api-readme] |
+
+### Coverage Checklist
+
+- [x] Identify public KBO/NPB sources and whether they include per-player game statistics.
+- [x] Assess available LoL pro-match documentation for player fields, completion, history, and access; record schema gaps.
+- [x] Verify whether Valorant public sources cover pro matches or only ordinary player match history.
+- [x] Record access, quotas, freshness, and reuse/license limitations.
+- [x] Recommend which sources are safe enough to pilot without unauthorized provider accounts.
+
+### Findings Log
+
+Source-key citations below map to `research/sources.json`.
+
+### Conflicts & Open Questions
+
+- The built-in web-search/page-fetch services returned HTTP 402. Findings were checked against direct public official pages and GitHub REST/raw content; no authenticated feed samples were available.
+
+### Gaps
+
+- No checked anonymous public source met the data-rights, completion, stable-identity, and coverage requirements for bot ingestion. No source was integrated.
+
+### Valorant follow-up findings — 2026-09-26
+
+- Four independent web-search attempts returned errors consistent with the reported HTTP 402; direct Riot pages and GitHub REST/raw content were used instead.
+- Official Riot VAL-MATCH-V1 documents match-by-ID, matchlist-by-PUUID, and recent-by-queue routes. Its match schema exposes `isCompleted` and per-player combat/economy/ability/damage fields [@riot-val-match-v1].
+- Riot’s recent route is only a short discovery window (10 minutes for live regions; 12 hours for `esports` routing). This does not prove durable professional-match history, and the public reference does not establish that ordinary PUUID history contains tournament matches [@riot-val-match-v1].
+- Riot access requires an API key; terms/getting-started/policy pages distinguish key types and product registration/approval. Exact quota and production approval are account-specific [@riot-developer-portal], [@riot-api-terms-and-getting-started].
+- HenrikDev is explicitly unofficial. Its README states consent and key/rate limits but warns about large analytics/production use and does not establish tournament coverage or bot reuse rights. Treat it as ordinary player/account history unless the provider says otherwise [@henrikdev-unofficial-valorant-api-readme].
+- Public GitHub visibility or a public page is not a license. No anonymous, documented source met all professional-coverage, final-result, stable-field, quota, and reuse requirements.
+
+### Public-alternatives follow-up findings
+
+- Four web-search attempts were made on 2026-09-26; all failed with the known HTTP 402 behavior. Direct public HTML and GitHub REST/raw fetches were used instead.
+- KBO's public pages expose aggregate player records and schedule/results, but the captured pages provide no documented per-game player API, identity contract, quota, cadence/history policy, or bot reuse permission. The footer says all rights reserved [@official-kbo-player-stats], [@official-kbo-schedule].
+- NPB's public pages expose annual player records and a games area, but not a documented per-player-per-game feed. The player page expressly prohibits secondary use and unauthorized reproduction [@official-npb-players], [@official-npb-games].
+- `dentearl/kbo-data` and `dentearl/npb-data` are team-level score/result snapshots, not player-stat feeds; public visibility does not establish reuse rights [@dentearl-kbo-data], [@dentearl-npb-data].
+- `armstjc/Nippon-Baseball-Data-Repository` lists a Player Game Stats release and identifies SPAIA as a data source. Its README does not establish rights to SPAIA-sourced data, so obtain permission before use [@armstjc-npb-repository].
+- Oracle's Elixir provides professional LoL match-data CSV downloads and says they are refreshed daily, but its page does not define a completion protocol or bot license; Riot's linked policy applies [@oracles-elixir-downloads-official], [@oracles-elixir-riot-policy-link].
+- Riot Match-V5 is ordinary player match history rather than a verified professional archive. Its public portal documents key and usage constraints; do not use it for tournament history without confirmation [@riot-match-v5-official-portal], [@riot-developer-portal].
+- Result: no checked public source satisfies all required criteria for a bot. Public pages/repositories remain cross-check or research leads only.

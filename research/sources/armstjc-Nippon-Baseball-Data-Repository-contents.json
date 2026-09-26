@@ -1,0 +1,418 @@
+[
+  {
+    "name": ".github",
+    "path": ".github",
+    "sha": "d6194db19b0a9172b0191fd1be72d5d69c9f85e2",
+    "size": 0,
+    "url": "https://api.github.com/repos/armstjc/Nippon-Baseball-Data-Repository/contents/.github?ref=main",
+    "html_url": "https://github.com/armstjc/Nippon-Baseball-Data-Repository/tree/main/.github",
+    "git_url": "https://api.github.com/repos/armstjc/Nippon-Baseball-Data-Repository/git/trees/d6194db19b0a9172b0191fd1be72d5d69c9f85e2",
+    "download_url": null,
+    "type": "dir",
+    "_links": {
+      "self": "https://api.github.com/repos/armstjc/Nippon-Baseball-Data-Repository/contents/.github?ref=main",
+      "git": "https://api.github.com/repos/armstjc/Nippon-Baseball-Data-Repository/git/trees/d6194db19b0a9172b0191fd1be72d5d69c9f85e2",
+      "html": "https://github.com/armstjc/Nippon-Baseball-Data-Repository/tree/main/.github"
+    }
+  },
+  {
+    "name": ".gitignore",
+    "path": ".gitignore",
+    "sha": "e9e37dfdd834ba32f84c5b4be93e8052427bf2bc",
+    "size": 4880,
+    "url": "https://api.github.com/repos/armstjc/Nippon-Baseball-Data-Repository/contents/.gitignore?ref=main",
+    "html_url": "https://github.com/armstjc/Nippon-Baseball-Data-Repository/blob/main/.gitignore",
+    "git_url": "https://api.github.com/repos/armstjc/Nippon-Baseball-Data-Repository/git/blobs/e9e37dfdd834ba32f84c5b4be93e8052427bf2bc",
+    "download_url": "https://raw.githubusercontent.com/armstjc/Nippon-Baseball-Data-Repository/main/.gitignore",
+    "type": "file",
+    "_links": {
+      "self": "https://api.github.com/repos/armstjc/Nippon-Baseball-Data-Repository/contents/.gitignore?ref=main",
+      "git": "https://api.github.com/repos/armstjc/Nippon-Baseball-Data-Repository/git/blobs/e9e37dfdd834ba32f84c5b4be93e8052427bf2bc",
+      "html": "https://github.com/armstjc/Nippon-Baseball-Data-Repository/blob/main/.gitignore"
+    }
+  },
+  {
+    "name": ".vscode",
+    "path": ".vscode",
+    "sha": "03c627ddb2d6f18db04aaa3e1cfde7353ebce221",
+    "size": 0,
+    "url": "https://api.github.com/repos/armstjc/Nippon-Baseball-Data-Repository/contents/.vscode?ref=main",
+    "html_url": "https://github.com/armstjc/Nippon-Baseball-Data-Repository/tree/main/.vscode",
+    "git_url": "https://api.github.com/repos/armstjc/Nippon-Baseball-Data-Repository/git/trees/03c627ddb2d6f18db04aaa3e1cfde7353ebce221",
+    "download_url": null,
+    "type": "dir",
+    "_links": {
+      "self": "https://api.github.com/repos/armstjc/Nippon-Baseball-Data-Repository/contents/.vscode?ref=main",
+      "git": "https://api.github.com/repos/armstjc/Nippon-Baseball-Data-Repository/git/trees/03c627ddb2d6f18db04aaa3e1cfde7353ebce221",
+      "html": "https://github.com/armstjc/Nippon-Baseball-Data-Repository/tree/main/.vscode"
+    }
+  },
+  {
+    "name": "CITATION.cff",
+    "path": "CITATION.cff",
+    "sha": "c3bb207245d10d3416deede9f2eb91f5f87e31ab",
+    "size": 323,
+    "url": "https://api.github.com/repos/armstjc/Nippon-Baseball-Data-Repository/contents/CITATION.cff?ref=main",
+    "html_url": "https://github.com/armstjc/Nippon-Baseball-Data-Repository/blob/main/CITATION.cff",
+    "git_url": "https://api.github.com/repos/armstjc/Nippon-Baseball-Data-Repository/git/blobs/c3bb207245d10d3416deede9f2eb91f5f87e31ab",
+    "download_url": "https://raw.githubusercontent.com/armstjc/Nippon-Baseball-Data-Repository/main/CITATION.cff",
+    "type": "file",
+    "_links": {
+      "self": "https://api.github.com/repos/armstjc/Nippon-Baseball-Data-Repository/contents/CITATION.cff?ref=main",
+      "git": "https://api.github.com/repos/armstjc/Nippon-Baseball-Data-Repository/git/blobs/c3bb207245d10d3416deede9f2eb91f5f87e31ab",
+      "html": "https://github.com/armstjc/Nippon-Baseball-Data-Repository/blob/main/CITATION.cff"
+    }
+  },
+  {
+    "name": "LICENSE",
+    "path": "LICENSE",
+    "sha": "6551392fe44b1a078235941af1448ae65a0cefe3",
+    "size": 1404,
+    "url": "https://api.github.com/repos/armstjc/Nippon-Baseball-Data-Repository/contents/LICENSE?ref=main",
+    "html_url": "https://github.com/armstjc/Nippon-Baseball-Data-Repository/blob/main/LICENSE",
+    "git_url": "https://api.github.com/repos/armstjc/Nippon-Baseball-Data-Repository/git/blobs/6551392fe44b1a078235941af1448ae65a0cefe3",
+    "download_url": "https://raw.githubusercontent.com/armstjc/Nippon-Baseball-Data-Repository/main/LICENSE",
+    "type": "file",
+    "_links": {
+      "self": "https://api.github.com/repos/armstjc/Nippon-Baseball-Data-Repository/contents/LICENSE?ref=main",
+      "git": "https://api.github.com/repos/armstjc/Nippon-Baseball-Data-Repository/git/blobs/6551392fe44b1a078235941af1448ae65a0cefe3",
+      "html": "https://github.com/armstjc/Nippon-Baseball-Data-Repository/blob/main/LICENSE"
+    }
+  },
+  {
+    "name": "README.md",
+    "path": "README.md",
+    "sha": "7a1050f005d766e6fe2cb155e8ce8220dc4326c9",
+    "size": 4771,
+    "url": "https://api.github.com/repos/armstjc/Nippon-Baseball-Data-Repository/contents/README.md?ref=main",
+    "html_url": "https://github.com/armstjc/Nippon-Baseball-Data-Repository/blob/main/README.md",
+    "git_url": "https://api.github.com/repos/armstjc/Nippon-Baseball-Data-Repository/git/blobs/7a1050f005d766e6fe2cb155e8ce8220dc4326c9",
+    "download_url": "https://raw.githubusercontent.com/armstjc/Nippon-Baseball-Data-Repository/main/README.md",
+    "type": "file",
+    "_links": {
+      "self": "https://api.github.com/repos/armstjc/Nippon-Baseball-Data-Repository/contents/README.md?ref=main",
+      "git": "https://api.github.com/repos/armstjc/Nippon-Baseball-Data-Repository/git/blobs/7a1050f005d766e6fe2cb155e8ce8220dc4326c9",
+      "html": "https://github.com/armstjc/Nippon-Baseball-Data-Repository/blob/main/README.md"
+    }
+  },
+  {
+    "name": "game_statcast_pbp.json",
+    "path": "game_statcast_pbp.json",
+    "sha": "210ee8aea0b2ddad66d9ca468a6d1bdfd86f4b47",
+    "size": 202416,
+    "url": "https://api.github.com/repos/armstjc/Nippon-Baseball-Data-Repository/contents/game_statcast_pbp.json?ref=main",
+    "html_url": "https://github.com/armstjc/Nippon-Baseball-Data-Repository/blob/main/game_statcast_pbp.json",
+    "git_url": "https://api.github.com/repos/armstjc/Nippon-Baseball-Data-Repository/git/blobs/210ee8aea0b2ddad66d9ca468a6d1bdfd86f4b47",
+    "download_url": "https://raw.githubusercontent.com/armstjc/Nippon-Baseball-Data-Repository/main/game_statcast_pbp.json",
+    "type": "file",
+    "_links": {
+      "self": "https://api.github.com/repos/armstjc/Nippon-Baseball-Data-Repository/contents/game_statcast_pbp.json?ref=main",
+      "git": "https://api.github.com/repos/armstjc/Nippon-Baseball-Data-Repository/git/blobs/210ee8aea0b2ddad66d9ca468a6d1bdfd86f4b47",
+      "html": "https://github.com/armstjc/Nippon-Baseball-Data-Repository/blob/main/game_statcast_pbp.json"
+    }
+  },
+  {
+    "name": "game_stats",
+    "path": "game_stats",
+    "sha": "79413d95bacbe7a499d8dd31b59c8496a474a4aa",
+    "size": 0,
+    "url": "https://api.github.com/repos/armstjc/Nippon-Baseball-Data-Repository/contents/game_stats?ref=main",
+    "html_url": "https://github.com/armstjc/Nippon-Baseball-Data-Repository/tree/main/game_stats",
+    "git_url": "https://api.github.com/repos/armstjc/Nippon-Baseball-Data-Repository/git/trees/79413d95bacbe7a499d8dd31b59c8496a474a4aa",
+    "download_url": null,
+    "type": "dir",
+    "_links": {
+      "self": "https://api.github.com/repos/armstjc/Nippon-Baseball-Data-Repository/contents/game_stats?ref=main",
+      "git": "https://api.github.com/repos/armstjc/Nippon-Baseball-Data-Repository/git/trees/79413d95bacbe7a499d8dd31b59c8496a474a4aa",
+      "html": "https://github.com/armstjc/Nippon-Baseball-Data-Repository/tree/main/game_stats"
+    }
+  },
+  {
+    "name": "game_text_pbp.json",
+    "path": "game_text_pbp.json",
+    "sha": "273dea3b3cd573b880f8f1c97ea0f1b68f23c8cf",
+    "size": 639334,
+    "url": "https://api.github.com/repos/armstjc/Nippon-Baseball-Data-Repository/contents/game_text_pbp.json?ref=main",
+    "html_url": "https://github.com/armstjc/Nippon-Baseball-Data-Repository/blob/main/game_text_pbp.json",
+    "git_url": "https://api.github.com/repos/armstjc/Nippon-Baseball-Data-Repository/git/blobs/273dea3b3cd573b880f8f1c97ea0f1b68f23c8cf",
+    "download_url": "https://raw.githubusercontent.com/armstjc/Nippon-Baseball-Data-Repository/main/game_text_pbp.json",
+    "type": "file",
+    "_links": {
+      "self": "https://api.github.com/repos/armstjc/Nippon-Baseball-Data-Repository/contents/game_text_pbp.json?ref=main",
+      "git": "https://api.github.com/repos/armstjc/Nippon-Baseball-Data-Repository/git/blobs/273dea3b3cd573b880f8f1c97ea0f1b68f23c8cf",
+      "html": "https://github.com/armstjc/Nippon-Baseball-Data-Repository/blob/main/game_text_pbp.json"
+    }
+  },
+  {
+    "name": "get_game_stats.py",
+    "path": "get_game_stats.py",
+    "sha": "e75c4ef08b22292e1f4d715e60e8f677dffb4f5b",
+    "size": 10467,
+    "url": "https://api.github.com/repos/armstjc/Nippon-Baseball-Data-Repository/contents/get_game_stats.py?ref=main",
+    "html_url": "https://github.com/armstjc/Nippon-Baseball-Data-Repository/blob/main/get_game_stats.py",
+    "git_url": "https://api.github.com/repos/armstjc/Nippon-Baseball-Data-Repository/git/blobs/e75c4ef08b22292e1f4d715e60e8f677dffb4f5b",
+    "download_url": "https://raw.githubusercontent.com/armstjc/Nippon-Baseball-Data-Repository/main/get_game_stats.py",
+    "type": "file",
+    "_links": {
+      "self": "https://api.github.com/repos/armstjc/Nippon-Baseball-Data-Repository/contents/get_game_stats.py?ref=main",
+      "git": "https://api.github.com/repos/armstjc/Nippon-Baseball-Data-Repository/git/blobs/e75c4ef08b22292e1f4d715e60e8f677dffb4f5b",
+      "html": "https://github.com/armstjc/Nippon-Baseball-Data-Repository/blob/main/get_game_stats.py"
+    }
+  },
+  {
+    "name": "get_npb_draft.py",
+    "path": "get_npb_draft.py",
+    "sha": "4fea7546750795e7c5a8390ed09811120d4a4710",
+    "size": 3968,
+    "url": "https://api.github.com/repos/armstjc/Nippon-Baseball-Data-Repository/contents/get_npb_draft.py?ref=main",
+    "html_url": "https://github.com/armstjc/Nippon-Baseball-Data-Repository/blob/main/get_npb_draft.py",
+    "git_url": "https://api.github.com/repos/armstjc/Nippon-Baseball-Data-Repository/git/blobs/4fea7546750795e7c5a8390ed09811120d4a4710",
+    "download_url": "https://raw.githubusercontent.com/armstjc/Nippon-Baseball-Data-Repository/main/get_npb_draft.py",
+    "type": "file",
+    "_links": {
+      "self": "https://api.github.com/repos/armstjc/Nippon-Baseball-Data-Repository/contents/get_npb_draft.py?ref=main",
+      "git": "https://api.github.com/repos/armstjc/Nippon-Baseball-Data-Repository/git/blobs/4fea7546750795e7c5a8390ed09811120d4a4710",
+      "html": "https://github.com/armstjc/Nippon-Baseball-Data-Repository/blob/main/get_npb_draft.py"
+    }
+  },
+  {
+    "name": "get_npb_pbp.py",
+    "path": "get_npb_pbp.py",
+    "sha": "07aec5ed2c83d2b54391ed9bb758fb2ac6308edb",
+    "size": 20661,
+    "url": "https://api.github.com/repos/armstjc/Nippon-Baseball-Data-Repository/contents/get_npb_pbp.py?ref=main",
+    "html_url": "https://github.com/armstjc/Nippon-Baseball-Data-Repository/blob/main/get_npb_pbp.py",
+    "git_url": "https://api.github.com/repos/armstjc/Nippon-Baseball-Data-Repository/git/blobs/07aec5ed2c83d2b54391ed9bb758fb2ac6308edb",
+    "download_url": "https://raw.githubusercontent.com/armstjc/Nippon-Baseball-Data-Repository/main/get_npb_pbp.py",
+    "type": "file",
+    "_links": {
+      "self": "https://api.github.com/repos/armstjc/Nippon-Baseball-Data-Repository/contents/get_npb_pbp.py?ref=main",
+      "git": "https://api.github.com/repos/armstjc/Nippon-Baseball-Data-Repository/git/blobs/07aec5ed2c83d2b54391ed9bb758fb2ac6308edb",
+      "html": "https://github.com/armstjc/Nippon-Baseball-Data-Repository/blob/main/get_npb_pbp.py"
+    }
+  },
+  {
+    "name": "get_npb_rosters.py",
+    "path": "get_npb_rosters.py",
+    "sha": "bd270f4dfa7c0f7f887c42a7592bab413ad66e2e",
+    "size": 4189,
+    "url": "https://api.github.com/repos/armstjc/Nippon-Baseball-Data-Repository/contents/get_npb_rosters.py?ref=main",
+    "html_url": "https://github.com/armstjc/Nippon-Baseball-Data-Repository/blob/main/get_npb_rosters.py",
+    "git_url": "https://api.github.com/repos/armstjc/Nippon-Baseball-Data-Repository/git/blobs/bd270f4dfa7c0f7f887c42a7592bab413ad66e2e",
+    "download_url": "https://raw.githubusercontent.com/armstjc/Nippon-Baseball-Data-Repository/main/get_npb_rosters.py",
+    "type": "file",
+    "_links": {
+      "self": "https://api.github.com/repos/armstjc/Nippon-Baseball-Data-Repository/contents/get_npb_rosters.py?ref=main",
+      "git": "https://api.github.com/repos/armstjc/Nippon-Baseball-Data-Repository/git/blobs/bd270f4dfa7c0f7f887c42a7592bab413ad66e2e",
+      "html": "https://github.com/armstjc/Nippon-Baseball-Data-Repository/blob/main/get_npb_rosters.py"
+    }
+  },
+  {
+    "name": "get_npb_salaries.py",
+    "path": "get_npb_salaries.py",
+    "sha": "24fab4d2676e937d1c763372af6bb6f9d79d9a8b",
+    "size": 7078,
+    "url": "https://api.github.com/repos/armstjc/Nippon-Baseball-Data-Repository/contents/get_npb_salaries.py?ref=main",
+    "html_url": "https://github.com/armstjc/Nippon-Baseball-Data-Repository/blob/main/get_npb_salaries.py",
+    "git_url": "https://api.github.com/repos/armstjc/Nippon-Baseball-Data-Repository/git/blobs/24fab4d2676e937d1c763372af6bb6f9d79d9a8b",
+    "download_url": "https://raw.githubusercontent.com/armstjc/Nippon-Baseball-Data-Repository/main/get_npb_salaries.py",
+    "type": "file",
+    "_links": {
+      "self": "https://api.github.com/repos/armstjc/Nippon-Baseball-Data-Repository/contents/get_npb_salaries.py?ref=main",
+      "git": "https://api.github.com/repos/armstjc/Nippon-Baseball-Data-Repository/git/blobs/24fab4d2676e937d1c763372af6bb6f9d79d9a8b",
+      "html": "https://github.com/armstjc/Nippon-Baseball-Data-Repository/blob/main/get_npb_salaries.py"
+    }
+  },
+  {
+    "name": "get_npb_schedule.py",
+    "path": "get_npb_schedule.py",
+    "sha": "0cf0a1f7452927924e0c264debcdae787e57e584",
+    "size": 4894,
+    "url": "https://api.github.com/repos/armstjc/Nippon-Baseball-Data-Repository/contents/get_npb_schedule.py?ref=main",
+    "html_url": "https://github.com/armstjc/Nippon-Baseball-Data-Repository/blob/main/get_npb_schedule.py",
+    "git_url": "https://api.github.com/repos/armstjc/Nippon-Baseball-Data-Repository/git/blobs/0cf0a1f7452927924e0c264debcdae787e57e584",
+    "download_url": "https://raw.githubusercontent.com/armstjc/Nippon-Baseball-Data-Repository/main/get_npb_schedule.py",
+    "type": "file",
+    "_links": {
+      "self": "https://api.github.com/repos/armstjc/Nippon-Baseball-Data-Repository/contents/get_npb_schedule.py?ref=main",
+      "git": "https://api.github.com/repos/armstjc/Nippon-Baseball-Data-Repository/git/blobs/0cf0a1f7452927924e0c264debcdae787e57e584",
+      "html": "https://github.com/armstjc/Nippon-Baseball-Data-Repository/blob/main/get_npb_schedule.py"
+    }
+  },
+  {
+    "name": "get_npb_standings.py",
+    "path": "get_npb_standings.py",
+    "sha": "c0adab6d383cd7736eb3e01c7a6a87cb0249cc9a",
+    "size": 2140,
+    "url": "https://api.github.com/repos/armstjc/Nippon-Baseball-Data-Repository/contents/get_npb_standings.py?ref=main",
+    "html_url": "https://github.com/armstjc/Nippon-Baseball-Data-Repository/blob/main/get_npb_standings.py",
+    "git_url": "https://api.github.com/repos/armstjc/Nippon-Baseball-Data-Repository/git/blobs/c0adab6d383cd7736eb3e01c7a6a87cb0249cc9a",
+    "download_url": "https://raw.githubusercontent.com/armstjc/Nippon-Baseball-Data-Repository/main/get_npb_standings.py",
+    "type": "file",
+    "_links": {
+      "self": "https://api.github.com/repos/armstjc/Nippon-Baseball-Data-Repository/contents/get_npb_standings.py?ref=main",
+      "git": "https://api.github.com/repos/armstjc/Nippon-Baseball-Data-Repository/git/blobs/c0adab6d383cd7736eb3e01c7a6a87cb0249cc9a",
+      "html": "https://github.com/armstjc/Nippon-Baseball-Data-Repository/blob/main/get_npb_standings.py"
+    }
+  },
+  {
+    "name": "get_player_stats.py",
+    "path": "get_player_stats.py",
+    "sha": "b9815cf0a0d56a6731a050c462d5078d9cb7ca30",
+    "size": 3015,
+    "url": "https://api.github.com/repos/armstjc/Nippon-Baseball-Data-Repository/contents/get_player_stats.py?ref=main",
+    "html_url": "https://github.com/armstjc/Nippon-Baseball-Data-Repository/blob/main/get_player_stats.py",
+    "git_url": "https://api.github.com/repos/armstjc/Nippon-Baseball-Data-Repository/git/blobs/b9815cf0a0d56a6731a050c462d5078d9cb7ca30",
+    "download_url": "https://raw.githubusercontent.com/armstjc/Nippon-Baseball-Data-Repository/main/get_player_stats.py",
+    "type": "file",
+    "_links": {
+      "self": "https://api.github.com/repos/armstjc/Nippon-Baseball-Data-Repository/contents/get_player_stats.py?ref=main",
+      "git": "https://api.github.com/repos/armstjc/Nippon-Baseball-Data-Repository/git/blobs/b9815cf0a0d56a6731a050c462d5078d9cb7ca30",
+      "html": "https://github.com/armstjc/Nippon-Baseball-Data-Repository/blob/main/get_player_stats.py"
+    }
+  },
+  {
+    "name": "npb_draft",
+    "path": "npb_draft",
+    "sha": "6fb6f8104c5484c2dcdcd0126b1d9461804bccd1",
+    "size": 0,
+    "url": "https://api.github.com/repos/armstjc/Nippon-Baseball-Data-Repository/contents/npb_draft?ref=main",
+    "html_url": "https://github.com/armstjc/Nippon-Baseball-Data-Repository/tree/main/npb_draft",
+    "git_url": "https://api.github.com/repos/armstjc/Nippon-Baseball-Data-Repository/git/trees/6fb6f8104c5484c2dcdcd0126b1d9461804bccd1",
+    "download_url": null,
+    "type": "dir",
+    "_links": {
+      "self": "https://api.github.com/repos/armstjc/Nippon-Baseball-Data-Repository/contents/npb_draft?ref=main",
+      "git": "https://api.github.com/repos/armstjc/Nippon-Baseball-Data-Repository/git/trees/6fb6f8104c5484c2dcdcd0126b1d9461804bccd1",
+      "html": "https://github.com/armstjc/Nippon-Baseball-Data-Repository/tree/main/npb_draft"
+    }
+  },
+  {
+    "name": "pbp",
+    "path": "pbp",
+    "sha": "97fd5af0c93ec20ddc2f22324e01835c4e2d6438",
+    "size": 0,
+    "url": "https://api.github.com/repos/armstjc/Nippon-Baseball-Data-Repository/contents/pbp?ref=main",
+    "html_url": "https://github.com/armstjc/Nippon-Baseball-Data-Repository/tree/main/pbp",
+    "git_url": "https://api.github.com/repos/armstjc/Nippon-Baseball-Data-Repository/git/trees/97fd5af0c93ec20ddc2f22324e01835c4e2d6438",
+    "download_url": null,
+    "type": "dir",
+    "_links": {
+      "self": "https://api.github.com/repos/armstjc/Nippon-Baseball-Data-Repository/contents/pbp?ref=main",
+      "git": "https://api.github.com/repos/armstjc/Nippon-Baseball-Data-Repository/git/trees/97fd5af0c93ec20ddc2f22324e01835c4e2d6438",
+      "html": "https://github.com/armstjc/Nippon-Baseball-Data-Repository/tree/main/pbp"
+    }
+  },
+  {
+    "name": "requirements.txt",
+    "path": "requirements.txt",
+    "sha": "a779964a053643f098d84d100cf51a741f8c28d3",
+    "size": 98,
+    "url": "https://api.github.com/repos/armstjc/Nippon-Baseball-Data-Repository/contents/requirements.txt?ref=main",
+    "html_url": "https://github.com/armstjc/Nippon-Baseball-Data-Repository/blob/main/requirements.txt",
+    "git_url": "https://api.github.com/repos/armstjc/Nippon-Baseball-Data-Repository/git/blobs/a779964a053643f098d84d100cf51a741f8c28d3",
+    "download_url": "https://raw.githubusercontent.com/armstjc/Nippon-Baseball-Data-Repository/main/requirements.txt",
+    "type": "file",
+    "_links": {
+      "self": "https://api.github.com/repos/armstjc/Nippon-Baseball-Data-Repository/contents/requirements.txt?ref=main",
+      "git": "https://api.github.com/repos/armstjc/Nippon-Baseball-Data-Repository/git/blobs/a779964a053643f098d84d100cf51a741f8c28d3",
+      "html": "https://github.com/armstjc/Nippon-Baseball-Data-Repository/blob/main/requirements.txt"
+    }
+  },
+  {
+    "name": "rosters",
+    "path": "rosters",
+    "sha": "8a0625d9ff5811f75404228144b4a5f93d7df8ba",
+    "size": 0,
+    "url": "https://api.github.com/repos/armstjc/Nippon-Baseball-Data-Repository/contents/rosters?ref=main",
+    "html_url": "https://github.com/armstjc/Nippon-Baseball-Data-Repository/tree/main/rosters",
+    "git_url": "https://api.github.com/repos/armstjc/Nippon-Baseball-Data-Repository/git/trees/8a0625d9ff5811f75404228144b4a5f93d7df8ba",
+    "download_url": null,
+    "type": "dir",
+    "_links": {
+      "self": "https://api.github.com/repos/armstjc/Nippon-Baseball-Data-Repository/contents/rosters?ref=main",
+      "git": "https://api.github.com/repos/armstjc/Nippon-Baseball-Data-Repository/git/trees/8a0625d9ff5811f75404228144b4a5f93d7df8ba",
+      "html": "https://github.com/armstjc/Nippon-Baseball-Data-Repository/tree/main/rosters"
+    }
+  },
+  {
+    "name": "salaries",
+    "path": "salaries",
+    "sha": "64b58321625cffa8acd074b0cac5a28e952e2026",
+    "size": 0,
+    "url": "https://api.github.com/repos/armstjc/Nippon-Baseball-Data-Repository/contents/salaries?ref=main",
+    "html_url": "https://github.com/armstjc/Nippon-Baseball-Data-Repository/tree/main/salaries",
+    "git_url": "https://api.github.com/repos/armstjc/Nippon-Baseball-Data-Repository/git/trees/64b58321625cffa8acd074b0cac5a28e952e2026",
+    "download_url": null,
+    "type": "dir",
+    "_links": {
+      "self": "https://api.github.com/repos/armstjc/Nippon-Baseball-Data-Repository/contents/salaries?ref=main",
+      "git": "https://api.github.com/repos/armstjc/Nippon-Baseball-Data-Repository/git/trees/64b58321625cffa8acd074b0cac5a28e952e2026",
+      "html": "https://github.com/armstjc/Nippon-Baseball-Data-Repository/tree/main/salaries"
+    }
+  },
+  {
+    "name": "schedules",
+    "path": "schedules",
+    "sha": "ee708a96d447f0d6c01f6ca2dc9c1a4db0bc6bae",
+    "size": 0,
+    "url": "https://api.github.com/repos/armstjc/Nippon-Baseball-Data-Repository/contents/schedules?ref=main",
+    "html_url": "https://github.com/armstjc/Nippon-Baseball-Data-Repository/tree/main/schedules",
+    "git_url": "https://api.github.com/repos/armstjc/Nippon-Baseball-Data-Repository/git/trees/ee708a96d447f0d6c01f6ca2dc9c1a4db0bc6bae",
+    "download_url": null,
+    "type": "dir",
+    "_links": {
+      "self": "https://api.github.com/repos/armstjc/Nippon-Baseball-Data-Repository/contents/schedules?ref=main",
+      "git": "https://api.github.com/repos/armstjc/Nippon-Baseball-Data-Repository/git/trees/ee708a96d447f0d6c01f6ca2dc9c1a4db0bc6bae",
+      "html": "https://github.com/armstjc/Nippon-Baseball-Data-Repository/tree/main/schedules"
+    }
+  },
+  {
+    "name": "spaia_api_endpoints.md",
+    "path": "spaia_api_endpoints.md",
+    "sha": "34a2f86b22d89e2963c1ed0616188c5a616369db",
+    "size": 3674,
+    "url": "https://api.github.com/repos/armstjc/Nippon-Baseball-Data-Repository/contents/spaia_api_endpoints.md?ref=main",
+    "html_url": "https://github.com/armstjc/Nippon-Baseball-Data-Repository/blob/main/spaia_api_endpoints.md",
+    "git_url": "https://api.github.com/repos/armstjc/Nippon-Baseball-Data-Repository/git/blobs/34a2f86b22d89e2963c1ed0616188c5a616369db",
+    "download_url": "https://raw.githubusercontent.com/armstjc/Nippon-Baseball-Data-Repository/main/spaia_api_endpoints.md",
+    "type": "file",
+    "_links": {
+      "self": "https://api.github.com/repos/armstjc/Nippon-Baseball-Data-Repository/contents/spaia_api_endpoints.md?ref=main",
+      "git": "https://api.github.com/repos/armstjc/Nippon-Baseball-Data-Repository/git/blobs/34a2f86b22d89e2963c1ed0616188c5a616369db",
+      "html": "https://github.com/armstjc/Nippon-Baseball-Data-Repository/blob/main/spaia_api_endpoints.md"
+    }
+  },
+  {
+    "name": "standings",
+    "path": "standings",
+    "sha": "d8d5b27165ea564b23a1b094419b974fa454ae38",
+    "size": 0,
+    "url": "https://api.github.com/repos/armstjc/Nippon-Baseball-Data-Repository/contents/standings?ref=main",
+    "html_url": "https://github.com/armstjc/Nippon-Baseball-Data-Repository/tree/main/standings",
+    "git_url": "https://api.github.com/repos/armstjc/Nippon-Baseball-Data-Repository/git/trees/d8d5b27165ea564b23a1b094419b974fa454ae38",
+    "download_url": null,
+    "type": "dir",
+    "_links": {
+      "self": "https://api.github.com/repos/armstjc/Nippon-Baseball-Data-Repository/contents/standings?ref=main",
+      "git": "https://api.github.com/repos/armstjc/Nippon-Baseball-Data-Repository/git/trees/d8d5b27165ea564b23a1b094419b974fa454ae38",
+      "html": "https://github.com/armstjc/Nippon-Baseball-Data-Repository/tree/main/standings"
+    }
+  },
+  {
+    "name": "utls.py",
+    "path": "utls.py",
+    "sha": "c267a2c5a739413f443236606309aa6e66159c6a",
+    "size": 2307,
+    "url": "https://api.github.com/repos/armstjc/Nippon-Baseball-Data-Repository/contents/utls.py?ref=main",
+    "html_url": "https://github.com/armstjc/Nippon-Baseball-Data-Repository/blob/main/utls.py",
+    "git_url": "https://api.github.com/repos/armstjc/Nippon-Baseball-Data-Repository/git/blobs/c267a2c5a739413f443236606309aa6e66159c6a",
+    "download_url": "https://raw.githubusercontent.com/armstjc/Nippon-Baseball-Data-Repository/main/utls.py",
+    "type": "file",
+    "_links": {
+      "self": "https://api.github.com/repos/armstjc/Nippon-Baseball-Data-Repository/contents/utls.py?ref=main",
+      "git": "https://api.github.com/repos/armstjc/Nippon-Baseball-Data-Repository/git/blobs/c267a2c5a739413f443236606309aa6e66159c6a",
+      "html": "https://github.com/armstjc/Nippon-Baseball-Data-Repository/blob/main/utls.py"
+    }
+  }
+]

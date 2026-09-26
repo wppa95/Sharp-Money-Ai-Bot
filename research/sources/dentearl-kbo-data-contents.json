@@ -1,0 +1,98 @@
+[
+  {
+    "name": ".github",
+    "path": ".github",
+    "sha": "63aaa4cc1f8cb81b1ee4b008476d03b918b2d3e7",
+    "size": 0,
+    "url": "https://api.github.com/repos/dentearl/kbo-data/contents/.github?ref=main",
+    "html_url": "https://github.com/dentearl/kbo-data/tree/main/.github",
+    "git_url": "https://api.github.com/repos/dentearl/kbo-data/git/trees/63aaa4cc1f8cb81b1ee4b008476d03b918b2d3e7",
+    "download_url": null,
+    "type": "dir",
+    "_links": {
+      "self": "https://api.github.com/repos/dentearl/kbo-data/contents/.github?ref=main",
+      "git": "https://api.github.com/repos/dentearl/kbo-data/git/trees/63aaa4cc1f8cb81b1ee4b008476d03b918b2d3e7",
+      "html": "https://github.com/dentearl/kbo-data/tree/main/.github"
+    }
+  },
+  {
+    "name": ".gitignore",
+    "path": ".gitignore",
+    "sha": "cfb28a3fb0c5398c9927a30df72a62c369ae70f7",
+    "size": 42,
+    "url": "https://api.github.com/repos/dentearl/kbo-data/contents/.gitignore?ref=main",
+    "html_url": "https://github.com/dentearl/kbo-data/blob/main/.gitignore",
+    "git_url": "https://api.github.com/repos/dentearl/kbo-data/git/blobs/cfb28a3fb0c5398c9927a30df72a62c369ae70f7",
+    "download_url": "https://raw.githubusercontent.com/dentearl/kbo-data/main/.gitignore",
+    "type": "file",
+    "_links": {
+      "self": "https://api.github.com/repos/dentearl/kbo-data/contents/.gitignore?ref=main",
+      "git": "https://api.github.com/repos/dentearl/kbo-data/git/blobs/cfb28a3fb0c5398c9927a30df72a62c369ae70f7",
+      "html": "https://github.com/dentearl/kbo-data/blob/main/.gitignore"
+    }
+  },
+  {
+    "name": "README.md",
+    "path": "README.md",
+    "sha": "3f3f86cfb8782b0fc9a8d21e533f53e4946864f2",
+    "size": 1268,
+    "url": "https://api.github.com/repos/dentearl/kbo-data/contents/README.md?ref=main",
+    "html_url": "https://github.com/dentearl/kbo-data/blob/main/README.md",
+    "git_url": "https://api.github.com/repos/dentearl/kbo-data/git/blobs/3f3f86cfb8782b0fc9a8d21e533f53e4946864f2",
+    "download_url": "https://raw.githubusercontent.com/dentearl/kbo-data/main/README.md",
+    "type": "file",
+    "_links": {
+      "self": "https://api.github.com/repos/dentearl/kbo-data/contents/README.md?ref=main",
+      "git": "https://api.github.com/repos/dentearl/kbo-data/git/blobs/3f3f86cfb8782b0fc9a8d21e533f53e4946864f2",
+      "html": "https://github.com/dentearl/kbo-data/blob/main/README.md"
+    }
+  },
+  {
+    "name": "data",
+    "path": "data",
+    "sha": "9ae3ebf11068187bd2d59474ffc64f2b9bfa2455",
+    "size": 0,
+    "url": "https://api.github.com/repos/dentearl/kbo-data/contents/data?ref=main",
+    "html_url": "https://github.com/dentearl/kbo-data/tree/main/data",
+    "git_url": "https://api.github.com/repos/dentearl/kbo-data/git/trees/9ae3ebf11068187bd2d59474ffc64f2b9bfa2455",
+    "download_url": null,
+    "type": "dir",
+    "_links": {
+      "self": "https://api.github.com/repos/dentearl/kbo-data/contents/data?ref=main",
+      "git": "https://api.github.com/repos/dentearl/kbo-data/git/trees/9ae3ebf11068187bd2d59474ffc64f2b9bfa2455",
+      "html": "https://github.com/dentearl/kbo-data/tree/main/data"
+    }
+  },
+  {
+    "name": "package.json",
+    "path": "package.json",
+    "sha": "d804c5c6dc61238900d9312f8db4f16601a02c0d",
+    "size": 464,
+    "url": "https://api.github.com/repos/dentearl/kbo-data/contents/package.json?ref=main",
+    "html_url": "https://github.com/dentearl/kbo-data/blob/main/package.json",
+    "git_url": "https://api.github.com/repos/dentearl/kbo-data/git/blobs/d804c5c6dc61238900d9312f8db4f16601a02c0d",
+    "download_url": "https://raw.githubusercontent.com/dentearl/kbo-data/main/package.json",
+    "type": "file",
+    "_links": {
+      "self": "https://api.github.com/repos/dentearl/kbo-data/contents/package.json?ref=main",
+      "git": "https://api.github.com/repos/dentearl/kbo-data/git/blobs/d804c5c6dc61238900d9312f8db4f16601a02c0d",
+      "html": "https://github.com/dentearl/kbo-data/blob/main/package.json"
+    }
+  },
+  {
+    "name": "scripts",
+    "path": "scripts",
+    "sha": "d7e98d0ec92c540a40b8e59d2658dd5734f9900d",
+    "size": 0,
+    "url": "https://api.github.com/repos/dentearl/kbo-data/contents/scripts?ref=main",
+    "html_url": "https://github.com/dentearl/kbo-data/tree/main/scripts",
+    "git_url": "https://api.github.com/repos/dentearl/kbo-data/git/trees/d7e98d0ec92c540a40b8e59d2658dd5734f9900d",
+    "download_url": null,
+    "type": "dir",
+    "_links": {
+      "self": "https://api.github.com/repos/dentearl/kbo-data/contents/scripts?ref=main",
+      "git": "https://api.github.com/repos/dentearl/kbo-data/git/trees/d7e98d0ec92c540a40b8e59d2658dd5734f9900d",
+      "html": "https://github.com/dentearl/kbo-data/tree/main/scripts"
+    }
+  }
+]
