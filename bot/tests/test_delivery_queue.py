@@ -38,6 +38,7 @@ from market_engine import (
     _select_best_per_sport,
     _select_best_over_under,
     _select_strong_directional_picks,
+    _rank_delivery_candidates_by_sport,
 )
 
 
@@ -348,6 +349,33 @@ class TestBestPerSportDelivery:
 
         assert len(selected) == 1
         assert selected[0]["player"] == "Over"
+
+
+class TestIndependentSportDeliveryOrdering:
+    def test_keeps_all_directional_picks_and_ranks_only_within_each_sport(self):
+        nba_first = _make_cand(
+            player="NBA first", sport="NBA", direction="OVER",
+            evidence_count=10, over_rate=0.7,
+        )
+        nba_second = _make_cand(
+            player="NBA second", sport="NBA", direction="OVER",
+            evidence_count=5, over_rate=0.9,
+        )
+        nhl_pick = _make_cand(
+            player="NHL", sport="NHL", direction="UNDER",
+            evidence_count=8, over_rate=0.2,
+        )
+
+        ordered = _rank_delivery_candidates_by_sport(
+            [nba_first, nba_second, nhl_pick]
+        )
+
+        assert len(ordered) == 3
+        assert [(candidate["sport"], candidate["player"]) for candidate in ordered] == [
+            ("NBA", "NBA second"),
+            ("NHL", "NHL"),
+            ("NBA", "NBA first"),
+        ]
 
 
 class TestStrongDirectionalDelivery:

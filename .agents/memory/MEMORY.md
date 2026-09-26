@@ -123,7 +123,7 @@
 - [Funnel timing](funnel-timing.md) — report scan age/cadence from observed timestamps, never from the requested report window.
 - [Monitoring cycle budget](cycle-budget-funnel-resilience.md) — optional enrichment must have a hard shared budget so stalled history calls cannot block cycle completion or /funnel.
 - [Direction-only prop delivery](direction-only-delivery.md) — no usable history or no OVER/UNDER direction blocks alerts; watchlist/near-miss states stay non-blocking.
-- [Independent sport delivery](independent-sport-delivery-quotas.md) — partition by sport before ranking or limiting; never let other sports compete for delivery.
+- [Independent sport delivery](independent-sport-delivery-quotas.md) — attempt every pick passing existing gates; order within sports and never impose global or per-sport caps.
 - [PropLine complete-feed ledger](propline-complete-feed-ledger.md) — fetch all active non-football sports, retain immutable normalized observations, and withhold evaluation on partial feeds.
 - [PropLine catalog audit boundary](propline-catalog-audit.md) — catalog drift is separate operational evidence; retain unknown identities and resolve them only when a later complete audit maps them.
 - [Opportunity identity and FPR delivery](opportunity-event-identity.md) — keep source IDs stable and persist the directional opportunity before Telegram under the exact ID checked at delivery.

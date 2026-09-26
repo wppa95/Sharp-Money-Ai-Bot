@@ -210,6 +210,68 @@ def directional_hit_rate_strength(candidate: dict) -> float | None:
     return None
 
 
+def season_directional_hit_rate_strength(candidate: dict) -> float | None:
+    """Return season hit-rate strength oriented to the candidate's direction.
+
+    Hit rates are measured from the OVER perspective, so a 70% season rate
+    gives an OVER strength of 0.70 and a 30% season rate gives an UNDER
+    strength of 0.70. At least five season games are required for this ordering
+    signal; existing delivery gates remain responsible for eligibility.
+    """
+    decision = candidate.get("decision")
+    validation = candidate.get("validation")
+    hit_rates = candidate.get("hit_rates") or getattr(decision, "hit_rates", None)
+
+    def _value(source, key):
+        if isinstance(source, dict):
+            return source.get(key)
+        return getattr(source, key, None) if source is not None else None
+
+    season = _value(hit_rates, "season")
+    games = (
+        _value(season, "games")
+        or _value(hit_rates, "season_games")
+        or _value(decision, "season_games")
+        or _value(validation, "season_games")
+        or candidate.get("season_games")
+    )
+    rate = (
+        _value(season, "hit_rate")
+        if _value(season, "hit_rate") is not None
+        else (
+            _value(hit_rates, "season_hit_rate")
+            if _value(hit_rates, "season_hit_rate") is not None
+            else (
+                _value(decision, "season_hit_rate")
+                if _value(decision, "season_hit_rate") is not None
+                else (
+                    _value(validation, "season_hit_rate")
+                    if _value(validation, "season_hit_rate") is not None
+                    else candidate.get("season_hit_rate")
+                )
+            )
+        )
+    )
+    try:
+        games_value = float(games)
+        rate_value = float(rate)
+    except (TypeError, ValueError):
+        return None
+    if games_value < 5:
+        return None
+    if 1.0 < rate_value <= 100.0:
+        rate_value /= 100.0
+    if not 0.0 <= rate_value <= 1.0:
+        return None
+
+    direction = _direction(candidate)
+    if direction == "OVER":
+        return rate_value
+    if direction == "UNDER":
+        return 1.0 - rate_value
+    return None
+
+
 def _player(candidate: dict) -> str:
     prop = candidate.get("prop")
     return str(
@@ -424,22 +486,3 @@ def rank_qualified_actionable_picks(candidates: Iterable[dict]) -> list[dict]:
     indexed.sort(key=_rank)
     return [candidate for _index, candidate in indexed]
 
-
-def select_best_actionable_pick_per_sport(
-    candidates: Iterable[dict],
-) -> list[dict]:
-    """Keep the evidence-ranked top directional pick for each sport.
-
-    Candidates are ranked with the existing settled-history evidence key, then
-    reduced to the first candidate for each normalized sport. The result keeps
-    one pick per represented sport without letting one sport suppress another.
-    """
-    selected: list[dict] = []
-    seen_sports: set[str] = set()
-    for candidate in rank_qualified_actionable_picks(candidates):
-        sport = _sport(candidate)
-        if not sport or sport in seen_sports:
-            continue
-        seen_sports.add(sport)
-        selected.append(candidate)
-    return selected

@@ -57,7 +57,7 @@ from engine.score_validation import clamp_score
 from engine.strongest_pick import (
     directional_hit_rate_strength,
     evidence_profile,
-    select_best_actionable_pick_per_sport,
+    season_directional_hit_rate_strength,
     select_strongest_actionable_picks,
 )
 from engine.delivery_evidence import (
@@ -3336,15 +3336,10 @@ async def _run_prizepicks_independent_cycle(
         )
         return
 
-    actionable = select_best_actionable_pick_per_sport(
-        _select_strong_directional_picks(
-            # The collection point and AlertDelivery independently enforce
-            # the canonical completed-history gate. Strong-mode's all-window
-            # directional filter is a reporting/selection preference, not a
-            # second production delivery gate.
-            select_strongest_actionable_picks(actionable, require_strong=False)
-        )
-    )
+    # Each candidate has already passed the PrizePicks collection gates.
+    # Preserve all eligible candidates; this sport-scoped cycle cannot compete
+    # with other sports for a shared winner or cap.
+    actionable = _rank_delivery_candidates_by_sport(actionable)
     delivered = 0
     delivery = AlertDelivery(db, bot, chat_ids)
     for candidate in actionable:
@@ -4458,7 +4453,9 @@ def _select_strong_directional_picks(candidates: list[dict]) -> list[dict]:
             or candidate.get("direction")
             or ""
         ).strip().upper()
-        hit_rate_strength = directional_hit_rate_strength(candidate)
+        hit_rate_strength = season_directional_hit_rate_strength(candidate)
+        if hit_rate_strength is None:
+            hit_rate_strength = directional_hit_rate_strength(candidate)
         return (
             -(hit_rate_strength if hit_rate_strength is not None else -1.0),
             -evidence_count,
@@ -4468,6 +4465,41 @@ def _select_strong_directional_picks(candidates: list[dict]) -> list[dict]:
 
     selected.sort(key=_rank)
     return selected
+
+
+def _delivery_candidate_sport(candidate: dict) -> str:
+    prop = candidate.get("prop")
+    return str(
+        candidate.get("sport")
+        or candidate.get("league")
+        or getattr(prop, "sport", None)
+        or "UNKNOWN"
+    ).strip().upper()
+
+
+def _rank_delivery_candidates_by_sport(
+    candidates: list[dict],
+) -> list[dict]:
+    """Rank directional candidates only within their own sport.
+
+    No candidate is dropped for being weaker than a pick in the same or a
+    different sport. Round-robin interleaving keeps a high-volume sport from
+    delaying all other sports while preserving each sport's internal ranking.
+    """
+    groups: dict[str, list[dict]] = {}
+    for candidate in candidates:
+        groups.setdefault(_delivery_candidate_sport(candidate), []).append(candidate)
+
+    ranked_groups = [
+        _select_strong_directional_picks(group)
+        for group in groups.values()
+    ]
+    interleaved: list[dict] = []
+    while any(ranked_groups):
+        for group in ranked_groups:
+            if group:
+                interleaved.append(group.pop(0))
+    return interleaved
 
 
 # ── CLV opportunity check job ──────────────────────────────────────────────────
@@ -6824,28 +6856,32 @@ async def underdog_job(context) -> None:
                 len(_delivery_queue),
             )
         if _delivery_queue and chat_ids:
-            _delivery_queue[:] = _select_strong_directional_picks(_delivery_queue)
-            _prioritize_delivery_sports(_delivery_queue)
-            _candidate_count_before_selection = len(_delivery_queue)
-            _delivery_queue[:] = select_best_actionable_pick_per_sport(
+            _delivery_queue[:] = _rank_delivery_candidates_by_sport(
                 _delivery_queue
             )
             logger.info(
-                "underdog_job: best-per-sport selection — candidates=%d selected=%d "
-                "sports=%s",
-                _candidate_count_before_selection,
+                "underdog_job: independent sport queues — candidates=%d sports=%s",
                 len(_delivery_queue),
                 ",".join(
                     dict.fromkeys(
-                        str(candidate.get("sport") or "").upper()
+                        _delivery_candidate_sport(candidate)
                         for candidate in _delivery_queue
                     )
                 ) or "none",
             )
-            _delivery_total = len(_delivery_queue)
-            for _delivery_rank, _ranked in enumerate(_delivery_queue, 1):
-                _ranked["_delivery_rank"] = _delivery_rank
-                _ranked["_delivery_total"] = _delivery_total
+            _delivery_sport_totals: dict[str, int] = {}
+            _delivery_sport_ranks: dict[str, int] = {}
+            for _ranked in _delivery_queue:
+                _sport_key = _delivery_candidate_sport(_ranked)
+                _delivery_sport_totals[_sport_key] = (
+                    _delivery_sport_totals.get(_sport_key, 0) + 1
+                )
+            for _ranked in _delivery_queue:
+                _sport_key = _delivery_candidate_sport(_ranked)
+                _sport_rank = _delivery_sport_ranks.get(_sport_key, 0) + 1
+                _delivery_sport_ranks[_sport_key] = _sport_rank
+                _ranked["_delivery_rank"] = _sport_rank
+                _ranked["_delivery_total"] = _delivery_sport_totals[_sport_key]
             _n_dq_deferred   = 0
             _dq_deferred_log: list[str] = []
             for _dq in _delivery_queue:
@@ -9241,22 +9277,27 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
             fpr_not_delivered += len(_fpr_delivery_candidates)
             _fpr_delivery_candidates.clear()
 
-        # Selection happens only after the complete qualified batch has been
-        # evaluated.  This prevents a stronger later-processed prop from
-        # losing to an earlier weaker prop for the same provider/player.
-        _fpr_selected = select_strongest_actionable_picks(
-            _fpr_delivery_candidates,
-            require_strong=False,
+        # Preserve every direction/evidence-qualified primary-provider pick.
+        # Sports are ranked independently and round-robin interleaved; no
+        # cross-sport or strongest-per-player selector suppresses candidates.
+        _fpr_primary_candidates = [
+            candidate
+            for candidate in _fpr_delivery_candidates
+            if str(candidate.get("provider") or "").strip().lower()
+            in {"underdog", "prizepicks"}
+        ]
+        fpr_not_delivered += (
+            len(_fpr_delivery_candidates) - len(_fpr_primary_candidates)
         )
-        _fpr_selected = _select_strong_directional_picks(_fpr_selected)
-        _fpr_selected = select_best_actionable_pick_per_sport(_fpr_selected)
-        _prioritize_delivery_sports(_fpr_selected)
+        _fpr_selected = _rank_delivery_candidates_by_sport(
+            _fpr_primary_candidates
+        )
         _fpr_selected_ids = {id(candidate) for candidate in _fpr_selected}
         for _fpr_candidate in _fpr_delivery_candidates:
             if id(_fpr_candidate) not in _fpr_selected_ids:
-                fpr_not_delivered += 1
                 logger.debug(
-                    "strongest_pick: suppressed %s/%s/%s for provider=%s",
+                    "full_pool_rescan: candidate not in primary delivery scope "
+                    "%s/%s/%s provider=%s",
                     _fpr_candidate["player"],
                     _fpr_candidate["sport"],
                     _fpr_candidate["stat_type"],

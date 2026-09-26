@@ -5,7 +5,7 @@ import pytest
 from engine.strongest_pick import (
     evidence_profile,
     rank_qualified_actionable_picks,
-    select_best_actionable_pick_per_sport,
+    season_directional_hit_rate_strength,
     select_strongest_actionable_picks,
 )
 
@@ -262,44 +262,58 @@ def test_global_delivery_ranking_keeps_all_candidates_and_puts_strong_first():
     assert len(ranked) == 2
 
 
-def test_best_actionable_selection_keeps_one_evidence_leader_per_sport():
-    weaker_nba = _candidate(
-        "Underdog", "Weaker NBA", "Points", confidence=99, evidence_count=20
-    )
-    weaker_nba["sport"] = "NBA"
-    weaker_nba["decision"] = SimpleNamespace(
+def test_season_directional_strength_matches_70_over_and_30_under():
+    over = _candidate("Underdog", "Over Player", "Points")
+    over["decision"] = SimpleNamespace(
         recommendation="OVER",
-        l5_games=10,
-        l5_hit_rate=0.65,
+        season_games=20,
+        season_hit_rate=0.70,
     )
 
-    stronger_nba = _candidate(
-        "Underdog", "Best NBA", "Rebounds", confidence=20, evidence_count=5
-    )
-    stronger_nba["sport"] = "NBA"
-    stronger_nba["decision"] = SimpleNamespace(
-        recommendation="OVER",
-        l5_games=10,
-        l5_hit_rate=0.9,
-    )
-
-    best_nhl = _candidate("Underdog", "Best NHL", "Shots", evidence_count=10)
-    best_nhl["sport"] = "NHL"
-    best_nhl["decision"] = SimpleNamespace(
+    under = _candidate("Underdog", "Under Player", "Points")
+    under["decision"] = SimpleNamespace(
         recommendation="UNDER",
-        l5_games=10,
-        l5_hit_rate=0.15,
+        season_games=20,
+        season_hit_rate=0.30,
     )
 
-    selected = select_best_actionable_pick_per_sport(
-        [weaker_nba, best_nhl, stronger_nba]
+    assert season_directional_hit_rate_strength(over) == pytest.approx(0.70)
+    assert season_directional_hit_rate_strength(under) == pytest.approx(0.70)
+
+
+def test_sport_queue_order_prefers_season_direction_over_recent_window(
+    monkeypatch,
+):
+    from market_engine import _rank_delivery_candidates_by_sport
+
+    weaker_season = _candidate("Underdog", "Recent Hot", "Points")
+    weaker_season["sport"] = "NBA"
+    weaker_season["decision"] = SimpleNamespace(
+        recommendation="OVER",
+        season_games=20,
+        season_hit_rate=0.55,
+        l5_games=5,
+        l5_hit_rate=0.95,
+    )
+    stronger_season = _candidate("Underdog", "Season Strong", "Rebounds")
+    stronger_season["sport"] = "NBA"
+    stronger_season["decision"] = SimpleNamespace(
+        recommendation="OVER",
+        season_games=20,
+        season_hit_rate=0.70,
+        l5_games=5,
+        l5_hit_rate=0.40,
     )
 
-    assert {(candidate["sport"], candidate["player"]) for candidate in selected} == {
-        ("NBA", "Best NBA"),
-        ("NHL", "Best NHL"),
-    }
-    assert len(selected) == 2
+    ordered = _rank_delivery_candidates_by_sport(
+        [weaker_season, stronger_season]
+    )
+
+    assert len(ordered) == 2
+    assert [candidate["player"] for candidate in ordered] == [
+        "Season Strong",
+        "Recent Hot",
+    ]
 
 
 def test_strong_mode_excludes_mediocre_directional_history():
