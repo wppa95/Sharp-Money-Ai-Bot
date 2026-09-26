@@ -7,3 +7,18 @@ uri = "file://backups/sharp-money-ai-bot-b70630e.zip"
 type = "unspecified"
 title = "Sharp Money Ai Bot backup — b70630e"
 description = "Complete ZIP archive of the tracked Replit project at HEAD b70630ee15da6f5031fb67d2e09ab41847f78c83. Verified: 592 archived files matching 592 tracked files."
+logical_id = "4ea9da55-1b55-4405-bc84-aa2c743ca1f6"
+
+[[outputs]]
+id = "ocmN4ZU6us3PXx-ZiQQF4"
+uri = "file://research/notes.md"
+type = "text"
+title = "Research Notes: Completed-Game Data"
+description = "Scope, source-checklist, and findings for completed player stats in the remaining active sports."
+logical_id = "1fcea9d2-4518-401b-b233-44d401240362"
+content_hash = "sha256:dad52ce462d83618bbd59d658a8406eb48f7e3b811587db9d40c714161dea2d4"
+size = 2012
+mtime_ms = 1790456015643
+storage_uri = "gcs://replit-rams-assets-spock/rams/assets/repl:0f126d34-12f4-4521-91c1-5cf2228d2bcd/1fcea9d2-4518-401b-b233-44d401240362/22d97389-3ee1-43df-b1f3-9c2e98d7d862"
+storage_version_token = "1790456025136777"
+content_type = "text/markdown"
