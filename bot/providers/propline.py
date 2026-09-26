@@ -2548,9 +2548,10 @@ def official_player_market_for(
         # a three-map label as the two-map market.
         return None
     if sport_key in _SPORTS_WITHOUT_GRADED_PLAYER_MARKETS:
-        # PropLine documents game-line coverage for these esports titles, but
-        # graded player props only for CS2. Never route a Dota/LoL/Valorant
-        # player stat through the CS2 market keys.
+        # No source-backed graded player market is configured for this sport.
+        # Adding a sport to alert scope does not establish a settlement route;
+        # keep history lookup disabled until PropLine publishes its exact
+        # sport and market mapping.
         return None
     if sport_key == "CS" and normalized not in {"kills", "headshots"}:
         # CS2 is the only esports title with documented graded player props,

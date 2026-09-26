@@ -801,6 +801,17 @@ class TestConfigNHL:
         for sport in ("MLB", "WNBA", "NFL", "NBA", "DOTA", "TENNIS", "CS"):
             assert sport in c.ud_alert_sports, f"{sport} missing"
 
+    def test_kbo_npb_in_default_monitoring_and_alert_scopes(self):
+        import config as cfg
+        if "ACTIVE_SPORTS" not in os.environ:
+            active = cfg.Config().active_sports
+            assert "KBO" in active
+            assert "NPB" in active
+        if "UD_ALERT_SPORTS" not in os.environ:
+            alerts = cfg.Config().ud_alert_sports
+            assert "KBO" in alerts
+            assert "NPB" in alerts
+
     def test_tier1_sports_in_ud_alert_sports(self):
         """All Tier 1 priority sports must be in the alert-sports whitelist."""
         import os

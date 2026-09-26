@@ -559,7 +559,7 @@ def test_supported_sports_resolve_to_propline_catalog_routes(sport, official):
     assert client.official_sport_for(sport) == official
 
 
-def test_every_configured_sport_has_a_history_route():
+def test_kbo_npb_alert_scope_remains_blocked_without_verified_history_routes():
     from config import config
     from player_history_job import _SUPPORTED_HISTORY_SPORTS
 
@@ -576,8 +576,10 @@ def test_every_configured_sport_has_a_history_route():
         sport for sport in active_sports if not client.official_sport_for(sport)
     )
 
-    assert not missing_from_history_universe
-    assert not missing_provider_route
+    assert {"KBO", "NPB"} <= active_sports
+    assert {"KBO", "NPB"} <= config.ud_alert_sports
+    assert missing_from_history_universe == ["KBO", "NPB"]
+    assert missing_provider_route == ["KBO", "NPB"]
 
 
 @pytest.mark.asyncio

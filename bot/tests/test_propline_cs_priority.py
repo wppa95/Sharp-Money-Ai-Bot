@@ -12,6 +12,7 @@ import market_engine
 from alerts import _has_strong_underdog_evidence, is_telegram_suppressed_sport
 from engine.delivery_evidence import serialized_evidence_supports_delivery
 from engine.player_validator import PlayerPropValidation
+from providers.propline import official_player_market_for
 from providers.player_stats import RawGameResult
 
 
@@ -217,6 +218,40 @@ def test_primary_history_without_propline_is_telegram_deliverable():
         validation=validation,
         decision=decision,
     ) is False
+
+
+@pytest.mark.parametrize("sport", ["KBO", "NPB"])
+def test_kbo_npb_need_settled_history_and_do_not_guess_markets(sport):
+    direction_only = SimpleNamespace(
+        recommendation="OVER",
+        evidence_source=None,
+    )
+    assert market_engine._has_delivery_evidence(
+        sport=sport,
+        decision=direction_only,
+    ) is False
+    assert _has_strong_underdog_evidence(
+        sport=sport,
+        decision=direction_only,
+    ) is False
+
+    settled_history = SimpleNamespace(
+        recommendation="OVER",
+        evidence_source="propline",
+        n_supplemental_games=5,
+    )
+    assert market_engine._has_delivery_evidence(
+        sport=sport,
+        decision=settled_history,
+    ) is True
+    assert _has_strong_underdog_evidence(
+        sport=sport,
+        decision=settled_history,
+    ) is True
+
+    # Scope allowlisting is independent from PropLine's official catalog.
+    # Until it exposes a verified sport/market mapping, do not infer one.
+    assert official_player_market_for("Hits", sport=sport) is None
 
 
 @pytest.mark.parametrize(

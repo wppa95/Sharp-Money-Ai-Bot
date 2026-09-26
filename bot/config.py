@@ -153,11 +153,12 @@ class Config:
     PREGAME_SCAN_INTERVAL: int = int(os.environ.get("PREGAME_SCAN_INTERVAL", "120"))
 
     # ── Sports to monitor (comma-separated provider sport values) ────────────
-    # All supported provider namespaces are enabled by default. PropLine's
-    # active catalog remains authoritative when it is available.
+    # Configured namespaces can be monitored independently of whether a
+    # provider currently has an active catalog entry. Completed history or
+    # explicit settled PropLine evidence is still required before delivery.
     ACTIVE_SPORTS_RAW: str = os.environ.get(
         "ACTIVE_SPORTS",
-        "NFL,CFB,NBA,MLB,NHL,NCAAB,UFC,WNBA,EPL,LaLiga,SerieA,"
+        "NFL,CFB,NBA,MLB,KBO,NPB,NHL,NCAAB,UFC,WNBA,EPL,LaLiga,SerieA,"
         "Bundesliga,Ligue1,MLS,UCL,SOCCER,CS,LOL,VAL,VALORANT,DOTA,"
         "TENNIS,FIFA,PGA,MMA,GOLF,TT,BADMINTON",
     )
@@ -327,13 +328,13 @@ class Config:
     #   SOCCER → collected when present; result/evidence requirements still apply
     #            before any user-facing delivery.
     #
-    # No free provider available (self-suppress via PASS decision):
-    #   COD  — no public per-game player stat API exists
-    #   LOL  — Riot Games API requires a developer key
-    #   NPB/KBO — no accessible public per-game stat API
+    # Some active sports lack public per-game history. PropLine's explicitly
+    # settled player history may qualify them when its official catalog and
+    # market mappings support the sport; otherwise the completed-history gate
+    # keeps delivery disabled.
     UD_ALERT_SPORTS_RAW: str = os.environ.get(
         "UD_ALERT_SPORTS",
-        "MLB,WNBA,NFL,CFB,NCAAF,NBA,NCAAB,DOTA,TENNIS,CS,NHL,LOL,MMA,UFC,GOLF,"
+        "MLB,KBO,NPB,WNBA,NFL,CFB,NCAAF,NBA,NCAAB,DOTA,TENNIS,CS,NHL,LOL,MMA,UFC,GOLF,"
         "SOCCER,EPL,LALIGA,SERIEA,BUNDESLIGA,LIGUE1,MLS,UCL,FIFA,"
         "VAL,VALORANT,TT,BADMINTON",
     )
@@ -496,7 +497,7 @@ class Config:
 
     @property
     def ud_alert_sports(self) -> frozenset[str]:
-        """Sports for which Underdog bet alerts are delivered (others: tracking only)."""
+        """Allowlist for Underdog alerts; final delivery still requires evidence."""
         return frozenset(s.strip() for s in self.UD_ALERT_SPORTS_RAW.split(",") if s.strip())
 
     @property
