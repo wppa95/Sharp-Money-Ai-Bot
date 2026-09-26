@@ -573,16 +573,16 @@ def test_strong_bet_thresholds_are_inclusive_and_directional():
     under_at_boundary = types.SimpleNamespace(
         recommendation="UNDER",
         **{
-            **{f"{window}_games": 100 for window in ("l5", "l10", "l15", "l20", "l30", "season")},
-            **{f"{window}_under": 65 for window in ("l5", "l10", "l15", "l20", "l30", "season")},
+            **{f"{window}_games": 10 for window in ("l5", "l10", "l15", "l20", "l30", "season")},
+            **{f"{window}_under": 7 for window in ("l5", "l10", "l15", "l20", "l30", "season")},
         },
     )
     under_above_allowed_over_rate = types.SimpleNamespace(
         recommendation="UNDER",
         **{
-            **{f"{window}_games": 100 for window in ("l5", "l10", "l15", "l20", "l30", "season")},
-            **{f"{window}_under": 65 for window in ("l5", "l10", "l15", "l20", "l30", "season")},
-            "l15_under": 64,
+            **{f"{window}_games": 10 for window in ("l5", "l10", "l15", "l20", "l30", "season")},
+            **{f"{window}_under": 7 for window in ("l5", "l10", "l15", "l20", "l30", "season")},
+            "l15_under": 6,
         },
     )
 
@@ -591,6 +591,40 @@ def test_strong_bet_thresholds_are_inclusive_and_directional():
     assert _has_strong_directional_history(validation, under_at_boundary) is True
     assert _has_strong_directional_history(
         validation, under_above_allowed_over_rate
+    ) is True
+
+
+def test_delivery_history_uses_70_and_35_percent_cutoffs():
+    from engine.delivery_evidence import has_delivery_directional_history
+    import types
+
+    windows = ("l5", "l10", "l15", "l20", "l30", "season")
+
+    def decision(direction, over_rate, *, l30_over_rate=None):
+        values = {"recommendation": direction}
+        for window in windows:
+            rate = (
+                l30_over_rate
+                if window == "l30" and l30_over_rate is not None
+                else over_rate
+            )
+            over = round(rate * 100)
+            values[f"{window}_games"] = 100
+            values[f"{window}_over"] = over
+            values[f"{window}_under"] = 100 - over
+        return types.SimpleNamespace(**values)
+
+    assert has_delivery_directional_history(
+        decision("OVER", 0.70), "OVER"
+    ) is True
+    assert has_delivery_directional_history(
+        decision("OVER", 0.70, l30_over_rate=0.69), "OVER"
+    ) is False
+    assert has_delivery_directional_history(
+        decision("UNDER", 0.35), "UNDER"
+    ) is True
+    assert has_delivery_directional_history(
+        decision("UNDER", 0.35, l30_over_rate=0.36), "UNDER"
     ) is False
 
 

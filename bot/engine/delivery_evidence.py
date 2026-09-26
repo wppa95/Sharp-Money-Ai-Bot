@@ -288,11 +288,16 @@ def is_historical_average_source(value: Any) -> bool:
     )
 
 
-def has_strict_directional_history(value: Any) -> bool:
+def has_strict_directional_history(
+    value: Any,
+    *,
+    under_max_over_rate: float = 0.40,
+) -> bool:
     """Require every displayed history window to support the direction.
 
-    Hit rates are stored as OVER rates. Therefore an OVER needs at least 70%
-    in every window, while an UNDER needs at most 35% OVER in every window.
+    Hit rates are stored as OVER rates. OVER needs at least 70% in every
+    window. The existing analyst-view UNDER cutoff defaults to 40%; callers
+    with a stricter delivery policy can provide a lower cutoff.
     Missing windows are not treated as passing evidence.
     """
     if value is None:
@@ -327,7 +332,7 @@ def has_strict_directional_history(value: Any) -> bool:
         over_rate = float(over_count) / float(games)
         if recommendation == "OVER" and over_rate < 0.70:
             return False
-        if recommendation == "UNDER" and over_rate > 0.35:
+        if recommendation == "UNDER" and over_rate > under_max_over_rate:
             return False
 
     return True
@@ -336,6 +341,8 @@ def has_strict_directional_history(value: Any) -> bool:
 def has_strong_directional_history(
     value: Any,
     direction: Any = None,
+    *,
+    under_max_over_rate: float = 0.40,
 ) -> bool:
     """Return whether *value* contains complete, directionally strong history.
 
@@ -387,7 +394,26 @@ def has_strong_directional_history(
                 over_count = games - under_count
         payload[prefix] = {"g": games, "o": over_count}
 
-    return has_strict_directional_history(payload)
+    return has_strict_directional_history(
+        payload,
+        under_max_over_rate=under_max_over_rate,
+    )
+
+
+def has_delivery_directional_history(
+    value: Any,
+    direction: Any = None,
+) -> bool:
+    """Require delivery-grade directional history in every required window.
+
+    Delivery is intentionally stricter than analyst views: OVER must be at
+    least 70% and UNDER must be at most 35% OVER-rate.
+    """
+    return has_strong_directional_history(
+        value,
+        direction,
+        under_max_over_rate=0.35,
+    )
 
 
 def has_directional_history_fields(value: Any) -> bool:
