@@ -3240,12 +3240,15 @@ async def cmd_slip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     # This keeps /slip aligned with /picks while still excluding unscored,
     # stale, or zero-confidence rows.
     _scored_provider_props = []
-    for _provider, _plh in provider_props:
+    _scored_candidates = []
+    for _cand, (_provider, _plh) in zip(_candidates, provider_props):
         if _is_canonical_alert_prop(_plh) or _has_current_prop_data(
             _plh, now, require_direction=False
         ):
             _scored_provider_props.append((_provider, _plh))
+            _scored_candidates.append(_cand)
     provider_props = _scored_provider_props
+    _candidates = _scored_candidates
     if not provider_props:
         await update.message.reply_text(
             "🎯 <b>Sharp Money Prop Slip</b>\n\n"
@@ -3256,22 +3259,69 @@ async def cmd_slip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         )
         return
 
-    # Slip eligibility remains directional only. The stricter 70%/35%
-    # thresholds apply to automatic delivery, not this analyst tool.
+    # Use the same complete-history quality gate as automatic delivery and
+    # /picks. All reported hit rates are OVER rates.
+    from engine.delivery_evidence import has_qualifying_pick_history
+    from engine.player_results import compute_hit_rates as _compute_slip_hit_rates
+
+    _slip_result_keys = [
+        (
+            str(_plh.player_name),
+            str(_plh.sport),
+            str(_plh.stat_type).lower().strip(),
+        )
+        for _, _plh in provider_props
+    ]
+    if hasattr(_db, "get_player_results_bulk"):
+        _slip_results_by_key = await _report_read(
+            _db.get_player_results_bulk(_slip_result_keys, limit=30),
+            fallback={},
+            timeout=_PICKS_TIMEOUT_SECONDS,
+        )
+    else:
+        _slip_results_by_key = {}
+
     _slip_ineligible = 0
     _candidates_eligible: list[PropPickAdapter] = []
-    for _cand in _candidates:
-        if _cand.best_side not in ("OVER", "UNDER"):
+    for _cand, (_, _plh), _key in zip(
+        _candidates, provider_props, _slip_result_keys
+    ):
+        _direction = str(
+            _cand.best_side
+            or getattr(_plh, "bet_recommendation", None)
+            or ""
+        ).upper()
+        _results = _slip_results_by_key.get(_key, [])
+        try:
+            _history = (
+                _compute_slip_hit_rates(_results, float(_plh.line_value))
+                if _results
+                else None
+            )
+        except Exception as _history_exc:
+            logger.debug(
+                "cmd_slip: history computation failed for %s/%s: %s",
+                _cand.player_name,
+                _cand.stat_type,
+                _history_exc,
+            )
+            _history = None
+        if (
+            _direction not in ("OVER", "UNDER")
+            or not has_qualifying_pick_history(_history, _direction)
+        ):
             _slip_ineligible += 1
             logger.debug(
-                "cmd_slip: excluding %s/%s — no direction (best_side=%r)",
-                _cand.player_name, _cand.stat_type, _cand.best_side,
+                "cmd_slip: excluding %s/%s — no qualifying directional history "
+                "(direction=%r)",
+                _cand.player_name, _cand.stat_type, _direction,
             )
             continue
+        _cand.best_side = _direction
         _candidates_eligible.append(_cand)
     if _slip_ineligible:
         logger.info(
-            "cmd_slip: filtered %d ineligible candidates (no direction or MLB UNDER); "
+            "cmd_slip: filtered %d ineligible candidates (direction/history threshold); "
             "%d eligible remain",
             _slip_ineligible, len(_candidates_eligible),
         )

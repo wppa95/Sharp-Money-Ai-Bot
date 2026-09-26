@@ -421,12 +421,30 @@ class TestSlipSubcommandRouting:
                     ("Source A", "NBA", "Points", "projection-123"): ("OVER", 88)
                 }
 
+            async def get_player_results_bulk(self, requested, **kwargs):
+                from datetime import timedelta
+                from types import SimpleNamespace
+
+                return {
+                    ("Source A", "NBA", "points"): [
+                        SimpleNamespace(
+                            actual_value=21,
+                            game_date=now - timedelta(days=idx),
+                            opponent="OPP",
+                        )
+                        for idx in range(30)
+                    ]
+                }
+
         update, _ = self._make_update([])
         ctx = MagicMock()
         ctx.args = []
         with (
             patch("commands._db", SlipDB()),
-            patch("engine.slip_builder.build_all_slips", return_value={}),
+            patch(
+                "engine.slip_builder.build_all_slips",
+                return_value={},
+            ) as build_all_slips,
             patch(
                 "engine.player_prop_market.build_player_prop_market_comparison",
                 return_value=None,
@@ -437,6 +455,7 @@ class TestSlipSubcommandRouting:
             await cmd_slip(update, ctx)
 
         assert identities == [("Source A", "NBA", "Points", "projection-123")]
+        assert len(build_all_slips.call_args.args[0]) == 1
         msg = update.message.reply_text.call_args[0][0]
         assert "not enough" in msg.lower()
 

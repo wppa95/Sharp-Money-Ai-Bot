@@ -61,7 +61,7 @@ from engine.strongest_pick import (
     select_strongest_actionable_picks,
 )
 from engine.delivery_evidence import (
-    has_delivery_directional_history,
+    has_qualifying_pick_history,
     history_supports_delivery,
     history_is_available,
     is_history_optional_sport,
@@ -3903,7 +3903,7 @@ def _has_strong_delivery_evidence(
                 return False
             windows.append((float(games), float(over_count)))
 
-        return has_delivery_directional_history(
+        return has_qualifying_pick_history(
             {
                 "recommendation": recommendation,
                 **{
@@ -4039,7 +4039,7 @@ def _has_delivery_evidence(
     )
     if not history_supports_delivery(*history_values):
         return False
-    if not has_delivery_directional_history(decision, direction):
+    if not has_qualifying_pick_history(decision, direction):
         return False
     if is_history_optional_sport(sport):
         return True

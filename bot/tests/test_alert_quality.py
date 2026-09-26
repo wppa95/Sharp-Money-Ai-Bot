@@ -594,8 +594,8 @@ def test_strong_bet_thresholds_are_inclusive_and_directional():
     ) is True
 
 
-def test_delivery_history_uses_70_and_35_percent_cutoffs():
-    from engine.delivery_evidence import has_delivery_directional_history
+def test_qualifying_pick_history_uses_70_and_35_percent_cutoffs():
+    from engine.delivery_evidence import has_qualifying_pick_history
     import types
 
     windows = ("l5", "l10", "l15", "l20", "l30", "season")
@@ -614,16 +614,16 @@ def test_delivery_history_uses_70_and_35_percent_cutoffs():
             values[f"{window}_under"] = 100 - over
         return types.SimpleNamespace(**values)
 
-    assert has_delivery_directional_history(
+    assert has_qualifying_pick_history(
         decision("OVER", 0.70), "OVER"
     ) is True
-    assert has_delivery_directional_history(
+    assert has_qualifying_pick_history(
         decision("OVER", 0.70, l30_over_rate=0.69), "OVER"
     ) is False
-    assert has_delivery_directional_history(
+    assert has_qualifying_pick_history(
         decision("UNDER", 0.35), "UNDER"
     ) is True
-    assert has_delivery_directional_history(
+    assert has_qualifying_pick_history(
         decision("UNDER", 0.35, l30_over_rate=0.36), "UNDER"
     ) is False
 

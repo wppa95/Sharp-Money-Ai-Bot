@@ -400,14 +400,14 @@ def has_strong_directional_history(
     )
 
 
-def has_delivery_directional_history(
+def has_qualifying_pick_history(
     value: Any,
     direction: Any = None,
 ) -> bool:
-    """Require delivery-grade directional history in every required window.
+    """Require qualifying directional history in every required window.
 
-    Delivery is intentionally stricter than analyst views: OVER must be at
-    least 70% and UNDER must be at most 35% OVER-rate.
+    Shared by automatic delivery and the /picks and /slip commands: OVER must
+    be at least 70%, while UNDER must be at most 35% OVER-rate.
     """
     return has_strong_directional_history(
         value,

@@ -23,15 +23,22 @@ def _candidate(
     evidence_count: int = 10,
     line: float = 20.5,
 ) -> dict:
+    windows = {
+        f"{prefix}_{field}": value
+        for prefix in ("l5", "l10", "l15", "l20", "l30", "season")
+        for field, value in (("games", 10), ("over", 8), ("under", 2))
+    }
     return {
         "provider": provider,
         "player": player,
+        "sport": "MLB",
         "stat_type": stat,
         "line_val": line,
         "decision": SimpleNamespace(
             confidence=confidence,
             decision_tier=tier,
             recommendation="OVER",
+            **windows,
         ),
         "score": SimpleNamespace(total=bq),
         "market_quality": SimpleNamespace(score=mq),
@@ -169,16 +176,22 @@ def test_restricted_sports_do_not_require_high_floor_market():
         line=1.5,
     )
     candidate["sport"] = "NFL"
-    candidate["decision"].recommendation = "UNDER"
+    candidate["decision"] = _decision_with_windows(
+        "UNDER", [0.30, 0.30, 0.30, 0.30, 0.30, 0.30]
+    )
 
     assert select_strongest_actionable_picks([candidate]) == [candidate]
 
 
-def _decision_with_windows(direction: str, rates: list[float]):
+def _decision_with_windows(
+    direction: str,
+    rates: list[float],
+    *,
+    games: int = 10,
+):
     """Build the serialized decision shape used by the live selector."""
     windows = {}
     for prefix, rate in zip(("l5", "l10", "l15", "l20", "l30", "season"), rates):
-        games = 10
         over = round(games * rate)
         windows.update({
             f"{prefix}_games": games,
@@ -383,6 +396,43 @@ def test_strong_mode_uses_computed_hit_rates_when_decision_omits_windows():
         [candidate],
         require_strong=True,
     ) == [candidate]
+
+
+@pytest.mark.parametrize("sport", ["MLB", "TENNIS"])
+@pytest.mark.parametrize(
+    "direction,rates,expected",
+    [
+        ("OVER", [0.70] * 6, True),
+        ("OVER", [0.70, 0.70, 0.70, 0.70, 0.69, 0.70], False),
+        ("UNDER", [0.35] * 6, True),
+        ("UNDER", [0.35, 0.35, 0.35, 0.35, 0.36, 0.35], False),
+    ],
+)
+def test_strong_pick_applies_same_cutoffs_across_sports(
+    sport,
+    direction,
+    rates,
+    expected,
+):
+    candidate = _candidate(
+        "Underdog",
+        "Threshold Player",
+        "Points",
+        confidence=85,
+    )
+    candidate["sport"] = sport
+    candidate["decision"] = _decision_with_windows(
+        direction,
+        rates,
+        games=100,
+    )
+
+    selected = select_strongest_actionable_picks(
+        [candidate],
+        require_strong=True,
+    )
+
+    assert (candidate in selected) is expected
 
 
 @pytest.mark.parametrize("sport", ["CFB", "WNBA", "NHL", "FIFA", "KBO"])

@@ -686,9 +686,9 @@ def _has_strong_underdog_evidence(
     )
     if not history_supports_delivery(*history_values):
         return False
-    from engine.delivery_evidence import has_delivery_directional_history
+    from engine.delivery_evidence import has_qualifying_pick_history
 
-    if not has_delivery_directional_history(decision, decision_direction):
+    if not has_qualifying_pick_history(decision, decision_direction):
         return False
     if is_history_optional_sport(sport):
         return True
@@ -1651,7 +1651,7 @@ class AlertDelivery:
                 filtered=True,
                 filtered_reason="Canonical direction/evidence gate",
             )
-        from engine.delivery_evidence import has_delivery_directional_history
+        from engine.delivery_evidence import has_qualifying_pick_history
 
         _pp_history = (
             getattr(opp, "hit_rates", None)
@@ -1659,7 +1659,7 @@ class AlertDelivery:
             or getattr(score, "hit_rates", None)
             or getattr(score, "decision", None)
         )
-        if not has_delivery_directional_history(_pp_history, _pp_direction):
+        if not has_qualifying_pick_history(_pp_history, _pp_direction):
             return DeliveryResult(
                 sent=False,
                 filtered=True,

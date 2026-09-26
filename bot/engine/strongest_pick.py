@@ -11,6 +11,7 @@ from typing import Iterable
 
 from engine.delivery_evidence import (
     has_strong_directional_history,
+    has_qualifying_pick_history,
     history_supports_delivery,
     is_history_optional_sport,
 )
@@ -307,9 +308,8 @@ def is_strong_actionable_pick(
 ) -> bool:
     """Return whether a candidate meets the shared strongest-pick contract.
 
-    Strict-history sports need complete directional history. High-priority
-    non-MLB/NFL/NBA sports retain the direction-plus-confidence path used by
-    the analyst view, even when completed player-game history is unavailable.
+    Every sport needs complete directional history meeting the shared
+    70% OVER / 35% UNDER thresholds.
     """
     direction = _direction(candidate)
     if direction not in {"OVER", "UNDER"}:
@@ -317,7 +317,6 @@ def is_strong_actionable_pick(
     if not require_strong:
         return True
 
-    sport = _sport(candidate)
     history = candidate.get("hit_rates") or candidate.get("decision")
     validation = candidate.get("validation")
     history_values = (
@@ -327,9 +326,7 @@ def is_strong_actionable_pick(
     )
     if not history_supports_delivery(*history_values):
         return False
-    if is_history_optional_sport(sport):
-        return True
-    return has_strong_directional_history(history, direction)
+    return has_qualifying_pick_history(history, direction)
 
 
 def _ranking_key(candidate: dict) -> tuple[float, ...]:
