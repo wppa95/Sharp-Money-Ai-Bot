@@ -2081,18 +2081,6 @@ class AlertDelivery:
                     market_confirmation=market_confirmation,
                     source=source,
                 )
-            if delivery_rank is not None and delivery_total is not None:
-                profile = evidence_profile({
-                    "validation": validation, "decision": decision,
-                    "direction": _direction, "sport": sport,
-                })
-                badge = (
-                    f"🏷️ <b>Rank:</b> #{delivery_rank} of {delivery_total} "
-                    f"· <b>{escape(profile['class'])}</b>\n"
-                    f"   {escape(profile['source_label'])} · "
-                    f"{profile['sample_count']} samples\n\n"
-                )
-                message = badge + message
         except Exception:
             logger.exception(
                 "Underdog alert formatter failed; using delivery fallback: "

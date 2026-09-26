@@ -57,7 +57,7 @@ from engine.score_validation import clamp_score
 from engine.strongest_pick import (
     directional_hit_rate_strength,
     evidence_profile,
-    rank_qualified_actionable_picks,
+    select_best_actionable_pick_per_sport,
     select_strongest_actionable_picks,
 )
 from engine.delivery_evidence import (
@@ -3336,12 +3336,14 @@ async def _run_prizepicks_independent_cycle(
         )
         return
 
-    actionable = _select_strong_directional_picks(
-        # The collection point and AlertDelivery independently enforce the
-        # canonical completed-history gate.  Strong-mode's all-window
-        # directional filter is a reporting/selection preference, not a
-        # second production delivery gate.
-        select_strongest_actionable_picks(actionable, require_strong=False)
+    actionable = select_best_actionable_pick_per_sport(
+        _select_strong_directional_picks(
+            # The collection point and AlertDelivery independently enforce
+            # the canonical completed-history gate. Strong-mode's all-window
+            # directional filter is a reporting/selection preference, not a
+            # second production delivery gate.
+            select_strongest_actionable_picks(actionable, require_strong=False)
+        )
     )
     delivered = 0
     delivery = AlertDelivery(db, bot, chat_ids)
@@ -3438,6 +3440,15 @@ async def _run_prizepicks_independent_cycle(
                     or ""
                 ),
                 direction=str(getattr(candidate["decision"], "recommendation", "") or ""),
+            )
+            logger.info(
+                "prizepicks_cycle: delivery deferred sport=%s player=%s stat=%s "
+                "reason=%s",
+                sport,
+                player,
+                stat,
+                getattr(result, "filtered_reason", None)
+                or ("deduped" if getattr(result, "deduped", False) else "not sent"),
             )
 
     logger.info(
@@ -6815,10 +6826,22 @@ async def underdog_job(context) -> None:
         if _delivery_queue and chat_ids:
             _delivery_queue[:] = _select_strong_directional_picks(_delivery_queue)
             _prioritize_delivery_sports(_delivery_queue)
-            # Rank all eligible sends for presentation. Do not collapse to one
-            # candidate per player or impose a delivery cap; existing final
-            # gates and identity deduplication remain responsible for safety.
-            _delivery_queue[:] = rank_qualified_actionable_picks(_delivery_queue)
+            _candidate_count_before_selection = len(_delivery_queue)
+            _delivery_queue[:] = select_best_actionable_pick_per_sport(
+                _delivery_queue
+            )
+            logger.info(
+                "underdog_job: best-per-sport selection — candidates=%d selected=%d "
+                "sports=%s",
+                _candidate_count_before_selection,
+                len(_delivery_queue),
+                ",".join(
+                    dict.fromkeys(
+                        str(candidate.get("sport") or "").upper()
+                        for candidate in _delivery_queue
+                    )
+                ) or "none",
+            )
             _delivery_total = len(_delivery_queue)
             for _delivery_rank, _ranked in enumerate(_delivery_queue, 1):
                 _ranked["_delivery_rank"] = _delivery_rank
@@ -9226,6 +9249,7 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
             require_strong=False,
         )
         _fpr_selected = _select_strong_directional_picks(_fpr_selected)
+        _fpr_selected = select_best_actionable_pick_per_sport(_fpr_selected)
         _prioritize_delivery_sports(_fpr_selected)
         _fpr_selected_ids = {id(candidate) for candidate in _fpr_selected}
         for _fpr_candidate in _fpr_delivery_candidates:

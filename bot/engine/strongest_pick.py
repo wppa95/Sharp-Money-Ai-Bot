@@ -423,3 +423,23 @@ def rank_qualified_actionable_picks(candidates: Iterable[dict]) -> list[dict]:
 
     indexed.sort(key=_rank)
     return [candidate for _index, candidate in indexed]
+
+
+def select_best_actionable_pick_per_sport(
+    candidates: Iterable[dict],
+) -> list[dict]:
+    """Keep the evidence-ranked top directional pick for each sport.
+
+    Candidates are ranked with the existing settled-history evidence key, then
+    reduced to the first candidate for each normalized sport. The result keeps
+    one pick per represented sport without letting one sport suppress another.
+    """
+    selected: list[dict] = []
+    seen_sports: set[str] = set()
+    for candidate in rank_qualified_actionable_picks(candidates):
+        sport = _sport(candidate)
+        if not sport or sport in seen_sports:
+            continue
+        seen_sports.add(sport)
+        selected.append(candidate)
+    return selected

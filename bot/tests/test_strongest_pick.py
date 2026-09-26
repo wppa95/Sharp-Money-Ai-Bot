@@ -5,6 +5,7 @@ import pytest
 from engine.strongest_pick import (
     evidence_profile,
     rank_qualified_actionable_picks,
+    select_best_actionable_pick_per_sport,
     select_strongest_actionable_picks,
 )
 
@@ -259,6 +260,46 @@ def test_global_delivery_ranking_keeps_all_candidates_and_puts_strong_first():
 
     assert ranked == [stronger, weaker]
     assert len(ranked) == 2
+
+
+def test_best_actionable_selection_keeps_one_evidence_leader_per_sport():
+    weaker_nba = _candidate(
+        "Underdog", "Weaker NBA", "Points", confidence=99, evidence_count=20
+    )
+    weaker_nba["sport"] = "NBA"
+    weaker_nba["decision"] = SimpleNamespace(
+        recommendation="OVER",
+        l5_games=10,
+        l5_hit_rate=0.65,
+    )
+
+    stronger_nba = _candidate(
+        "Underdog", "Best NBA", "Rebounds", confidence=20, evidence_count=5
+    )
+    stronger_nba["sport"] = "NBA"
+    stronger_nba["decision"] = SimpleNamespace(
+        recommendation="OVER",
+        l5_games=10,
+        l5_hit_rate=0.9,
+    )
+
+    best_nhl = _candidate("Underdog", "Best NHL", "Shots", evidence_count=10)
+    best_nhl["sport"] = "NHL"
+    best_nhl["decision"] = SimpleNamespace(
+        recommendation="UNDER",
+        l5_games=10,
+        l5_hit_rate=0.15,
+    )
+
+    selected = select_best_actionable_pick_per_sport(
+        [weaker_nba, best_nhl, stronger_nba]
+    )
+
+    assert {(candidate["sport"], candidate["player"]) for candidate in selected} == {
+        ("NBA", "Best NBA"),
+        ("NHL", "Best NHL"),
+    }
+    assert len(selected) == 2
 
 
 def test_strong_mode_excludes_mediocre_directional_history():
