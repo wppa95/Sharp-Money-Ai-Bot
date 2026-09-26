@@ -22,3 +22,17 @@ mtime_ms = 1790456015643
 storage_uri = "gcs://replit-rams-assets-spock/rams/assets/repl:0f126d34-12f4-4521-91c1-5cf2228d2bcd/1fcea9d2-4518-401b-b233-44d401240362/22d97389-3ee1-43df-b1f3-9c2e98d7d862"
 storage_version_token = "1790456025136777"
 content_type = "text/markdown"
+
+[[outputs]]
+id = "Pfrl5Uh6R7BKmnFg4cbEH"
+uri = "file://research/completed-game-results-report.md"
+type = "text"
+title = "Completed Per-Player Game-Result Sources"
+description = "Documented provider coverage, result fields, completion states, access limits, saved evidence, and unresolved checks."
+logical_id = "101e9a66-2917-44f2-8c5f-da517e2f055b"
+content_hash = "sha256:d1383617f6ec21221a38eb398495775069066396833fc141ac775cb040bc2a1c"
+size = 17695
+mtime_ms = 1790456729875
+storage_uri = "gcs://replit-rams-assets-spock/rams/assets/repl:0f126d34-12f4-4521-91c1-5cf2228d2bcd/101e9a66-2917-44f2-8c5f-da517e2f055b/06b354eb-ce85-43f7-998c-4796985c4080"
+storage_version_token = "1790456758222166"
+content_type = "text/markdown"

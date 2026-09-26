@@ -1,0 +1,156 @@
+{
+  "sources": [
+    {
+      "key": "sportradar-global-baseball-overview",
+      "title": "Global Baseball v2 Overview",
+      "url": "https://developer.sportradar.com/baseball/reference/global-baseball-overview",
+      "publicationDate": "2026-08-20",
+      "tier": 3,
+      "evidencePath": "research/sources/sportradar-global-baseball-overview.md"
+    },
+    {
+      "key": "sportradar-global-baseball-sport-event-summary",
+      "title": "Global Baseball Sport Event Summary",
+      "url": "https://developer.sportradar.com/baseball/reference/global-baseball-sport-event-summary",
+      "publicationDate": "2026-05-29",
+      "tier": 3,
+      "evidencePath": "research/sources/sportradar-global-baseball-sport-event-summary.md"
+    },
+    {
+      "key": "sportradar-global-baseball-player-summaries",
+      "title": "Global Baseball Player Summaries",
+      "url": "https://developer.sportradar.com/baseball/reference/global-baseball-player-summaries",
+      "publicationDate": "2026-05-29",
+      "tier": 3,
+      "evidencePath": "research/sources/sportradar-global-baseball-player-summaries.md"
+    },
+    {
+      "key": "sportradar-global-baseball-faq",
+      "title": "Global Baseball FAQs",
+      "url": "https://developer.sportradar.com/baseball/reference/global-baseball-faq",
+      "publicationDate": "2026-07-15",
+      "tier": 3,
+      "evidencePath": "research/sources/sportradar-global-baseball-faq.md"
+    },
+    {
+      "key": "pandascore-plan-reference",
+      "title": "Plan Reference",
+      "url": "https://developers.pandascore.co/docs/plan-reference",
+      "publicationDate": "2026-08-18",
+      "tier": 3,
+      "evidencePath": "research/sources/pandascore-plan-reference.md"
+    },
+    {
+      "key": "pandascore-lol-game-data-sample",
+      "title": "League of Legends In-Game Data Sample",
+      "url": "https://developers.pandascore.co/docs/data-sample-league-of-legends",
+      "publicationDate": "2025-09-16",
+      "tier": 3,
+      "evidencePath": "research/sources/pandascore-lol-game-data-sample.md"
+    },
+    {
+      "key": "pandascore-matches-lifecycle",
+      "title": "Matches Lifecycle",
+      "url": "https://developers.pandascore.co/docs/matches-lifecycle",
+      "publicationDate": "2025-09-16",
+      "tier": 3,
+      "evidencePath": "research/sources/pandascore-matches-lifecycle.md"
+    },
+    {
+      "key": "pandascore-authentication",
+      "title": "Authentication",
+      "url": "https://developers.pandascore.co/docs/authentication",
+      "publicationDate": "2025-09-16",
+      "tier": 3,
+      "evidencePath": "research/sources/pandascore-authentication.md"
+    },
+    {
+      "key": "pandascore-rate-and-connections-limits",
+      "title": "Rate and Connection Limits",
+      "url": "https://developers.pandascore.co/docs/rate-and-connections-limits",
+      "publicationDate": "2025-09-16",
+      "tier": 3,
+      "evidencePath": "research/sources/pandascore-rate-and-connections-limits.md"
+    },
+    {
+      "key": "sportradar-table-tennis-overview",
+      "title": "Table Tennis API Overview",
+      "url": "https://developer.sportradar.com/table-tennis/reference/overview",
+      "publicationDate": "2026-08-20",
+      "tier": 3,
+      "evidencePath": "research/sources/sportradar-table-tennis-overview.md"
+    },
+    {
+      "key": "sportradar-table-tennis-sport-event-summary",
+      "title": "Table Tennis Sport Event Summary",
+      "url": "https://developer.sportradar.com/table-tennis/reference/sport-event-summary",
+      "publicationDate": "2025-09-23",
+      "tier": 3,
+      "evidencePath": "research/sources/sportradar-table-tennis-sport-event-summary.md"
+    },
+    {
+      "key": "sportradar-table-tennis-competitor-summaries",
+      "title": "Table Tennis Competitor Summaries",
+      "url": "https://developer.sportradar.com/table-tennis/reference/competitor-summaries",
+      "publicationDate": "2025-09-23",
+      "tier": 3,
+      "evidencePath": "research/sources/sportradar-table-tennis-competitor-summaries.md"
+    },
+    {
+      "key": "sportradar-table-tennis-statistics-summary",
+      "title": "Table Tennis Statistics Summary",
+      "url": "https://developer.sportradar.com/table-tennis/reference/statistics-summary",
+      "publicationDate": "2026-06-30",
+      "tier": 3,
+      "evidencePath": "research/sources/sportradar-table-tennis-statistics-summary.md"
+    },
+    {
+      "key": "sportradar-table-tennis-faq",
+      "title": "Table Tennis FAQs",
+      "url": "https://developer.sportradar.com/table-tennis/reference/faq",
+      "publicationDate": "2026-07-16",
+      "tier": 3,
+      "evidencePath": "research/sources/sportradar-table-tennis-faq.md"
+    },
+    {
+      "key": "sportradar-badminton-overview",
+      "title": "Badminton API Overview",
+      "url": "https://developer.sportradar.com/badminton/reference/badminton-overview",
+      "publicationDate": "2026-08-20",
+      "tier": 3,
+      "evidencePath": "research/sources/sportradar-badminton-overview.md"
+    },
+    {
+      "key": "sportradar-badminton-sport-event-summary",
+      "title": "Badminton Sport Event Summary",
+      "url": "https://developer.sportradar.com/badminton/reference/badminton-sport-event-summary",
+      "publicationDate": "2026-05-27",
+      "tier": 3,
+      "evidencePath": "research/sources/sportradar-badminton-sport-event-summary.md"
+    },
+    {
+      "key": "sportradar-badminton-competitor-summaries",
+      "title": "Badminton Competitor Summaries",
+      "url": "https://developer.sportradar.com/badminton/reference/badminton-competitor-summaries",
+      "publicationDate": "2026-05-27",
+      "tier": 3,
+      "evidencePath": "research/sources/sportradar-badminton-competitor-summaries.md"
+    },
+    {
+      "key": "sportradar-badminton-statistics-summary",
+      "title": "Badminton Statistics Summary",
+      "url": "https://developer.sportradar.com/badminton/reference/badminton-statistics-summary",
+      "publicationDate": "2026-06-30",
+      "tier": 3,
+      "evidencePath": "research/sources/sportradar-badminton-statistics-summary.md"
+    },
+    {
+      "key": "sportradar-badminton-faq",
+      "title": "Badminton FAQs",
+      "url": "https://developer.sportradar.com/badminton/reference/badminton-faq",
+      "publicationDate": "2026-07-15",
+      "tier": 3,
+      "evidencePath": "research/sources/sportradar-badminton-faq.md"
+    }
+  ]
+}
