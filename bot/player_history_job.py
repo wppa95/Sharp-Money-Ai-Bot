@@ -217,7 +217,11 @@ def _completed_propline_game_rows(target: Any, result: Any) -> list[Any]:
     if is_football_related_sport(target.canonical_sport):
         return []
     from providers.player_stats import RawGameResult
-    from providers.propline import _normalize_stat, _parse_datetime
+    from providers.propline import (
+        _normalize_stat,
+        _parse_datetime,
+        _propline_raw_player_game_stat_matches,
+    )
 
     rows = []
     target_stat = _normalize_stat(target.market)
@@ -235,7 +239,9 @@ def _completed_propline_game_rows(target: Any, result: Any) -> list[Any]:
             stats = _propline_value(game, "stats", "statistics", "player_stats")
             if isinstance(stats, dict):
                 for stat_name, stat_value in stats.items():
-                    if _normalize_stat(stat_name) != target_stat:
+                    if not _propline_raw_player_game_stat_matches(
+                        target.canonical_sport, target_stat, stat_name
+                    ):
                         continue
                     if isinstance(stat_value, dict):
                         actual = _propline_value(
@@ -249,7 +255,9 @@ def _completed_propline_game_rows(target: Any, result: Any) -> list[Any]:
                     stat_name = _propline_value(
                         stat_item, "stat_type", "stat", "name", "market"
                     )
-                    if _normalize_stat(stat_name) != target_stat:
+                    if not _propline_raw_player_game_stat_matches(
+                        target.canonical_sport, target_stat, stat_name
+                    ):
                         continue
                     actual = _propline_value(
                         stat_item, "actual_value", "value", "stat_value"

@@ -1327,7 +1327,12 @@ class PlayerHistoryProvider:
         completed game result.
         """
         from providers.player_stats import RawGameResult
-        from providers.propline import PropLineClient, _normalize_stat, _parse_datetime
+        from providers.propline import (
+            PropLineClient,
+            _normalize_stat,
+            _parse_datetime,
+            _propline_raw_player_game_stat_matches,
+        )
         sport_u = str(sport or "").upper().strip()
         if not sport_u:
             return []
@@ -1348,7 +1353,6 @@ class PlayerHistoryProvider:
             official_sport,
             player_name,
             limit=100,
-            stat_type=_normalize_stat(stat_type),
         )
         if not result.succeeded or not result.complete:
             return []
@@ -1377,7 +1381,9 @@ class PlayerHistoryProvider:
                 continue
             value = None
             for key, raw_value in stats.items():
-                if _normalize_stat(key) == requested_stat:
+                if _propline_raw_player_game_stat_matches(
+                    sport_u, requested_stat, key
+                ):
                     try:
                         value = float(raw_value)
                     except (TypeError, ValueError):

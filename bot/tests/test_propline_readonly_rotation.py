@@ -67,6 +67,69 @@ def test_targets_use_discovered_official_aliases_only():
     }
 
 
+def test_raw_player_game_targets_use_only_documented_sports_and_fields():
+    sports = [
+        PropLineSport("golf", "GOLF", "Golf"),
+        PropLineSport("mma_ufc", "UFC", "UFC"),
+        PropLineSport("esports", "ESPORTS", "Esports"),
+        PropLineSport("soccer_fifa_world_cup", "FIFA", "FIFA World Cup"),
+        PropLineSport(
+            "soccer_uefa_champions_league",
+            "UCL",
+            "UEFA Champions League",
+        ),
+        PropLineSport("table_tennis", "TT", "Table Tennis"),
+        PropLineSport("badminton", "BADMINTON", "Badminton"),
+    ]
+    active_props = [
+        SimpleNamespace(sport="PGA", player_name="Golfer", stat_type="strokes"),
+        SimpleNamespace(sport="GOLF", player_name="Golfer", stat_type="unlisted"),
+        SimpleNamespace(
+            sport="MMA", player_name="Fighter", stat_type="significant strikes"
+        ),
+        SimpleNamespace(sport="CS", player_name="Counter Player", stat_type="kills"),
+        SimpleNamespace(
+            sport="CS",
+            player_name="Counter Player",
+            stat_type="kills_maps_1_2",
+        ),
+        SimpleNamespace(sport="FIFA", player_name="Soccer Player", stat_type="goals"),
+        SimpleNamespace(
+            sport="UCL", player_name="European Player", stat_type="shots on target"
+        ),
+        SimpleNamespace(sport="DOTA", player_name="Dota Player", stat_type="kills"),
+        SimpleNamespace(sport="LOL", player_name="LoL Player", stat_type="kills"),
+        SimpleNamespace(sport="VAL", player_name="Valorant Player", stat_type="kills"),
+        SimpleNamespace(sport="TT", player_name="Table Tennis Player", stat_type="aces"),
+        SimpleNamespace(
+            sport="BADMINTON", player_name="Badminton Player", stat_type="aces"
+        ),
+        SimpleNamespace(sport="KBO", player_name="KBO Player", stat_type="hits"),
+        SimpleNamespace(sport="NPB", player_name="NPB Player", stat_type="hits"),
+    ]
+
+    targets = build_propline_read_only_targets(active_props, sports=sports)
+    game_targets = {
+        (target.canonical_sport, target.official_sport, target.market)
+        for target in targets
+        if target.family == "player_games" and target.player_name
+    }
+
+    assert game_targets == {
+        ("GOLF", "golf", "strokes"),
+        ("MMA", "mma_ufc", "significant strikes"),
+        ("CS", "esports", "kills"),
+        ("CS", "esports", "kills maps 1 2"),
+        ("FIFA", "soccer_fifa_world_cup", "goals"),
+        ("UCL", "soccer_uefa_champions_league", "shots on target"),
+    }
+    assert {
+        target.family
+        for target in targets
+        if target.player_name and target.canonical_sport in {"GOLF", "CS", "MMA"}
+    } == {"player_games"}
+
+
 def test_propline_result_rows_preserves_explicit_void_as_private_marker():
     evidence = PropLineResultEvidence(
         observed_at=datetime(2026, 9, 22, 12, 0),
@@ -375,6 +438,7 @@ def test_fetch_uses_documented_endpoints_and_never_single_player_stats(tmp_path)
     }
     assert "markets" not in calls["fetch_event_results"]
     assert calls["fetch_event_stats"]["stat_type"] == "points"
+    assert calls["fetch_player_games"] == {"limit": 100}
     assert calls["fetch_player_history"]["limit"] == 100
     assert calls["fetch_player_history"]["bookmaker"] == "prizepicks"
 

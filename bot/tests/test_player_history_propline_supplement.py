@@ -888,6 +888,47 @@ async def test_raw_propline_games_are_normalized_only_after_final_for_all_sports
 
 
 @pytest.mark.asyncio
+async def test_raw_propline_games_match_documented_cs2_fields_without_filtering():
+    class _CSRawGamesClient:
+        is_configured = True
+
+        def __init__(self):
+            self.calls = []
+
+        def official_sport_for(self, sport):
+            return {"CS": "esports"}.get(sport)
+
+        async def fetch_player_games(self, sport, player, **kwargs):
+            self.calls.append((sport, player, kwargs))
+            return SimpleNamespace(
+                succeeded=True,
+                complete=True,
+                payload={
+                    "games": [
+                        {
+                            "event_id": "cs-final",
+                            "commence_time": "2026-08-29T00:00:00Z",
+                            "status": "final",
+                            "stats": {"kills_maps_1_2": 24},
+                        }
+                    ]
+                },
+            )
+
+    client = _CSRawGamesClient()
+    provider = PlayerHistoryProvider(propline_client=client)
+
+    rows = await provider._fetch_propline_games(
+        "Counter Player", "CS", "kills"
+    )
+
+    assert [(row.game_id, row.actual_value) for row in rows] == [
+        ("cs-final", 24.0)
+    ]
+    assert client.calls == [("esports", "Counter Player", {"limit": 100})]
+
+
+@pytest.mark.asyncio
 async def test_supplementation_is_not_used_when_primary_evidence_is_sufficient():
     db = _DB(
         [

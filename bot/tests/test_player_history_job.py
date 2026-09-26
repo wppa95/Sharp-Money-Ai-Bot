@@ -489,6 +489,37 @@ def test_player_games_persist_only_final_identified_rows_and_preserve_zero():
     ]
 
 
+def test_player_games_map_cs2_market_to_documented_maps_1_2_field():
+    target = PropLineReadOnlyTarget(
+        family="player_games",
+        official_sport="esports",
+        canonical_sport="CS",
+        player_name="Counter Player",
+        market="kills",
+    )
+    result = SimpleNamespace(
+        payload={
+            "games": [
+                {
+                    "game_id": "cs-final",
+                    "status": "Final",
+                    "game_date": "2026-09-20T20:00:00Z",
+                    "stats": {
+                        "kills_map_1": 12,
+                        "kills_maps_1_2": 27,
+                    },
+                }
+            ]
+        }
+    )
+
+    rows = _completed_propline_game_rows(target, result)
+
+    assert [(row.game_id, row.stat_type, row.actual_value) for row in rows] == [
+        ("cs-final", "kills", 27.0),
+    ]
+
+
 def test_player_games_never_persist_football_history():
     target = PropLineReadOnlyTarget(
         family="player_games",

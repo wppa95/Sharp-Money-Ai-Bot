@@ -1895,6 +1895,67 @@ def _normalize_stat(value: Any) -> str:
     )
 
 
+_PROPLINE_RAW_PLAYER_GAME_ONLY_STATS = {
+    "GOLF": frozenset(
+        {
+            "strokes",
+            "score",
+            "total score",
+            "birdies",
+            "eagles",
+            "pars",
+            "bogeys ow",
+            "holes",
+            "rank",
+            "golf position",
+        }
+    ),
+    "CS": frozenset(
+        {
+            "kills map 1",
+            "kills maps 1 2",
+            "kills maps 1 2 3",
+            "headshots map 1",
+            "headshots maps 1 2",
+            "headshots maps 1 2 3",
+        }
+    ),
+}
+
+_PROPLINE_RAW_PLAYER_GAME_STAT_ALIASES = {
+    "CS": {
+        # PropLine's documented CS2 player markets cover maps 1-2, while the
+        # raw game log names the full stat field explicitly.
+        "kills": frozenset({"kills maps 1 2"}),
+        "kills map 1 2": frozenset({"kills maps 1 2"}),
+        "headshots": frozenset({"headshots maps 1 2"}),
+        "headshots map 1 2": frozenset({"headshots maps 1 2"}),
+    }
+}
+
+
+def _propline_raw_player_game_stat_supported(sport: Any, stat_type: Any) -> bool:
+    canonical_sport = _normalize_sport(sport)
+    normalized_stat = _normalize_stat(stat_type)
+    return normalized_stat in _PROPLINE_RAW_PLAYER_GAME_ONLY_STATS.get(
+        canonical_sport, frozenset()
+    )
+
+
+def _propline_raw_player_game_stat_matches(
+    sport: Any, requested_stat: Any, observed_stat: Any
+) -> bool:
+    canonical_sport = _normalize_sport(sport)
+    requested = _normalize_stat(requested_stat)
+    observed = _normalize_stat(observed_stat)
+    if requested == observed:
+        return True
+    aliases = _PROPLINE_RAW_PLAYER_GAME_STAT_ALIASES.get(
+        canonical_sport, {}
+    ).get(requested, frozenset())
+    return observed in aliases
+
+
 def _normalize_direction(value: Any) -> str:
     text = _clean(value).upper()
     if text in _OVER_UNDER:
@@ -5799,6 +5860,10 @@ def build_propline_read_only_targets(
             canonical_by_official[official.lower()] = canonical
 
     targets: dict[str, PropLineReadOnlyTarget] = {}
+    discovered_canonical_aliases = {
+        "MMA": "UFC",
+        "CS": "ESPORTS",
+    }
 
     def add(family: str, official: str, canonical: str, **kwargs: str) -> None:
         if family not in PROPLINE_READ_ONLY_FAMILIES or not official:
@@ -5830,6 +5895,14 @@ def build_propline_read_only_targets(
             _read_only_input(prop, "sport", "sport_key", "league")
         )
         official = official_by_canonical.get(canonical)
+        if not official and canonical in discovered_canonical_aliases:
+            # These aliases are explicitly documented by the PropLine
+            # catalog/code mappings. Preserve the active sport identity on
+            # the target while requiring the underlying official key to have
+            # been discovered in this run.
+            official = official_by_canonical.get(
+                discovered_canonical_aliases[canonical]
+            )
         player = _read_only_input(prop, "player_name", "player", "name")
         market = _normalize_stat(
             _read_only_input(prop, "stat_type", "market", "market_key", "stat")
@@ -5846,7 +5919,15 @@ def build_propline_read_only_targets(
         # for this sport.  In particular, never turn a display label into a
         # guessed single-player endpoint request.
         if player and official_market:
-            for family in ("player_games", "player_history", "player_trends"):
+            # These aliases are supported here only by documented raw game
+            # stats; do not infer resolved-history or trend support from their
+            # shared or aliased catalogs.
+            families = (
+                ("player_games",)
+                if canonical in {"CS", "MMA"}
+                else ("player_games", "player_history", "player_trends")
+            )
+            for family in families:
                 add(
                     family,
                     official,
@@ -5857,7 +5938,23 @@ def build_propline_read_only_targets(
                     official_market=official_market,
                     bookmaker=source_bookmaker,
                 )
+        elif player and _propline_raw_player_game_stat_supported(
+            canonical, market
+        ):
+            # Golf's documented raw box-score stats are available even though
+            # its outright markets do not have a player-market mapping.
+            add(
+                "player_games",
+                official,
+                canonical,
+                player_name=player,
+                player_id=player_id,
+                market=market,
+                bookmaker=source_bookmaker,
+            )
         if event_id:
+            if canonical in discovered_canonical_aliases:
+                continue
             for family in (
                 "event_results", "event_stats", "event_markets",
                 "event_odds_history", "event_movement", "event_best_line",
@@ -6035,7 +6132,6 @@ class PropLineReadOnlyRotation:
                 target.official_sport,
                 target.player_name,
                 limit=100,
-                stat_type=target.market,
             )
         if target.family == "player_history":
             return await method(
