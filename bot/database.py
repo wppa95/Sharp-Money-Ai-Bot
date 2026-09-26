@@ -3116,30 +3116,40 @@ class Database:
                     PropOpportunityLog.provider,
                     PropOpportunityLog.external_id,
                     PropOpportunityLog.stat_type,
+                    PropOpportunityLog.sport,
+                    PropOpportunityLog.game_id,
                 ).where(
                     PropOpportunityLog.recommendation.in_(("OVER", "UNDER")),
                 )
             )
         ).all()
-        linked = {
-            (
-                str(provider or "Underdog").strip().lower() or "underdog",
-                _stored_opportunity_external_id(
-                    str(external_id or ""), provider
-                ),
-                str(stat_type or "").strip(),
+        linked = set()
+        for provider, external_id, stat_type, sport, game_id in opportunity_rows:
+            event_identity = str(game_id or "").strip()
+            if not event_identity:
+                continue
+            linked.add(
+                (
+                    str(provider or "Underdog").strip().lower() or "underdog",
+                    _stored_opportunity_external_id(
+                        str(external_id or ""), provider
+                    ),
+                    str(stat_type or "").strip().casefold(),
+                    str(sport or "").strip().upper(),
+                    event_identity,
+                )
             )
-            for provider, external_id, stat_type in opportunity_rows
-        }
         return [
             audit
             for audit in audits
             if (
-                str(audit.provider or "Unknown").strip().lower() or "unknown",
+                str(audit.provider or "Underdog").strip().lower() or "underdog",
                 _stored_opportunity_external_id(
                     str(audit.external_id or ""), audit.provider
                 ),
-                str(audit.stat_type or "").strip(),
+                str(audit.stat_type or "").strip().casefold(),
+                str(audit.sport or "").strip().upper(),
+                str(audit.event_id or "").strip(),
             ) in linked
         ]
 

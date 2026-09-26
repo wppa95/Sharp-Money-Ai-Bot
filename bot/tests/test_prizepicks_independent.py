@@ -42,6 +42,7 @@ def _opportunity(provider: str) -> dict:
         "decision_tier": "A",
         "confidence": 78,
         "game_time": datetime.utcnow(),
+        "game_id": f"game-{provider.lower()}",
         "provider": provider,
         "bet_quality_score": 78,
     }

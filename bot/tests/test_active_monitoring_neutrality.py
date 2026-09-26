@@ -148,6 +148,7 @@ async def test_funnel_evaluation_floor_covers_directional_and_delivered_rows(db)
                 result="PENDING",
                 provider="Underdog",
                 alert_sent=True,
+                game_id="event-1",
                 detected_at=now,
             )
         )
@@ -165,6 +166,32 @@ async def test_funnel_evaluation_floor_covers_directional_and_delivered_rows(db)
                 attempted_at=now,
             )
         )
+        session.add_all([
+            TelegramDeliveryAudit(
+                provider="Underdog",
+                sport="NHL",
+                player_name="Directional",
+                stat_type="Hits",
+                external_id="directional-without-candidate-telemetry",
+                event_id="event-1",
+                delivery_key="delivery-key-wrong-sport",
+                line_value=1.5,
+                outcome="sent",
+                attempted_at=now,
+            ),
+            TelegramDeliveryAudit(
+                provider="Underdog",
+                sport="MLB",
+                player_name="Directional",
+                stat_type="Hits",
+                external_id="directional-without-candidate-telemetry",
+                event_id="event-2",
+                delivery_key="delivery-key-wrong-event",
+                line_value=1.5,
+                outcome="sent",
+                attempted_at=now,
+            ),
+        ])
         await session.commit()
 
     summary = await db.get_funnel_summary()
@@ -178,6 +205,8 @@ async def test_funnel_evaluation_floor_covers_directional_and_delivered_rows(db)
     assert summary["evaluated_by_sport"]["MLB"] >= (
         summary["delivered_by_sport"]["MLB"]
     )
+    assert summary["delivered"] == 1
+    assert summary["delivered_by_sport"] == {"MLB": 1}
 
 
 @pytest.mark.asyncio

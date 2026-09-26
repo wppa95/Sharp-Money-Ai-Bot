@@ -61,6 +61,7 @@ async def _log_opp(db, *, external_id: str, stat_type: str, recommendation: str 
         decision_tier      = "S",
         confidence         = 90,
         game_time          = _future_game(),
+        game_id            = f"game-{external_id}",
         provider           = "Underdog",
         bet_quality_score  = 90,
     )

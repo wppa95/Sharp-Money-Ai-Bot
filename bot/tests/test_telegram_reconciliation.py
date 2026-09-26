@@ -49,6 +49,7 @@ async def test_reconciliation_separates_provider_and_recipient_counts(db):
             decision_tier="S",
             confidence=90,
             provider="Underdog",
+            game_id="game-ud-1",
             detected_at=now,
             alert_sent=True,
             alert_sent_at=now,
@@ -121,10 +122,12 @@ async def _log_actionable_opportunity(
     player_name: str = "Traceable Player",
     stat_type: str = "Hits",
     provider: str = "Underdog",
+    game_id: str = "",
 ):
     from database import PropOpportunityLog
 
     now = datetime.utcnow()
+    opportunity_game_id = game_id or f"game-{external_id}"
     await db.track_prop_records(
         [{
             "external_id": external_id,
@@ -134,7 +137,7 @@ async def _log_actionable_opportunity(
             "stat_type": stat_type,
             "line_value": 0.5,
             "game_time": now + timedelta(hours=3),
-            "game_id": f"game-{external_id}",
+            "game_id": opportunity_game_id,
             "provider": provider,
         }]
     )
@@ -150,6 +153,7 @@ async def _log_actionable_opportunity(
             decision_tier="A",
             confidence=85,
             provider=provider,
+            game_id=opportunity_game_id,
             detected_at=now,
             alert_sent=False,
         ))
@@ -201,7 +205,9 @@ async def test_successful_play_persists_exact_source_and_event_and_marks_opportu
     from database import PropOpportunityLog, TelegramDeliveryAudit
     from sqlalchemy import select
 
-    await _log_actionable_opportunity(db, external_id="play-source-1")
+    await _log_actionable_opportunity(
+        db, external_id="play-source-1", game_id="game-1"
+    )
     result = await _deliver_traceable_play(
         db,
         source_id="play-source-1",
@@ -250,7 +256,9 @@ async def test_successful_play_marks_only_the_exact_source_opportunity(db):
     from database import PropOpportunityLog
     from sqlalchemy import select
 
-    await _log_actionable_opportunity(db, external_id="play-source-a")
+    await _log_actionable_opportunity(
+        db, external_id="play-source-a", game_id="game-a"
+    )
     await _log_actionable_opportunity(db, external_id="play-source-b")
     await _deliver_traceable_play(
         db,
@@ -434,6 +442,7 @@ async def test_reconciliation_flags_replayed_audit_identity(db):
             decision_tier="A",
             confidence=80,
             provider="Underdog",
+            game_id="game-same-1",
             detected_at=now,
             alert_sent=True,
             alert_sent_at=now,
@@ -479,6 +488,7 @@ async def test_incomplete_success_audit_is_unknown_not_confirmed(db):
             decision_tier="A",
             confidence=80,
             provider="Underdog",
+            game_id="game-incomplete",
             detected_at=now,
             alert_sent=True,
             alert_sent_at=now,
@@ -524,6 +534,7 @@ async def test_alert_history_is_newest_first_and_preserves_audit_line(db):
             decision_tier="A",
             confidence=80,
             provider="Underdog",
+            game_id="game-moving",
             detected_at=now,
             alert_sent=True,
             alert_sent_at=now,
