@@ -79,7 +79,10 @@ from engine.evidence_memory import (
 )
 from providers import FailureType, get_health_monitor
 from engine.delivery_gates import directional_evidence_gate as _directional_evidence_gate
-from engine.sport_policy import is_disallowed_football_sport
+from engine.sport_policy import (
+    is_disallowed_football_sport,
+    is_football_related_sport,
+)
 from engine.player_props_pipeline import (
     canonicalize_player_props,
     persist_canonical_player_props,
@@ -4024,6 +4027,14 @@ def _has_delivery_evidence(
         return False
     if not history_is_available(validation, decision, intelligence_trace):
         return is_history_optional_sport(sport)
+
+    if is_football_related_sport(sport):
+        return history_supports_delivery(
+            validation,
+            decision,
+            intelligence_trace,
+            require_primary=True,
+        )
 
     history_values = (
         (validation,)

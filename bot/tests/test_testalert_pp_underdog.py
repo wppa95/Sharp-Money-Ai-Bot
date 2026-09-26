@@ -465,6 +465,38 @@ class TestDeliverUnderdog:
         assert "History:</b>\n   N/A" not in sent_messages[0]
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize("sport", ["NFL", "CFB"])
+    async def test_gridiron_mixed_completed_history_can_deliver(self, sport):
+        sent_messages: list[str] = []
+
+        async def capture(chat_id, text, **kwargs):
+            sent_messages.append(text)
+            return MagicMock()
+
+        mock_bot = MagicMock()
+        mock_bot.send_message = AsyncMock(side_effect=capture)
+        delivery = AlertDelivery(_make_db_mock(), mock_bot, [1])
+        validation = SimpleNamespace(
+            has_supporting_data=True,
+            data_source="real+propline",
+            n_real_games=3,
+            n_supplemental_games=2,
+        )
+        result = await delivery.deliver_underdog(
+            player_name="Supported Player",
+            team="TEAM",
+            sport=sport,
+            stat_type="Passing Yards" if sport == "NFL" else "Rushing Yards",
+            old_line=10.5,
+            new_line=11.5,
+            validation=validation,
+            decision=SimpleNamespace(recommendation="OVER", confidence=75),
+        )
+
+        assert result.sent is True
+        assert sent_messages
+
+    @pytest.mark.asyncio
     @pytest.mark.parametrize(
         "sport",
         ["NFL", "NCAAF", "CFB", "CFL", "AFL", "RUGBY", "americanfootball_nfl"],

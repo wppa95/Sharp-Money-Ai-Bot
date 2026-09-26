@@ -701,24 +701,12 @@ def _has_strong_underdog_evidence(
         return is_history_optional_sport(sport)
 
     if _is_gridiron_sport(sport):
-        source_values = []
-        for value in (validation, decision, intelligence_trace):
-            if isinstance(value, dict):
-                source_values.extend(
-                    value.get(key)
-                    for key in ("data_source", "evidence_source", "source")
-                )
-            elif value is not None:
-                source_values.extend(
-                    getattr(value, key, None)
-                    for key in ("data_source", "evidence_source", "source")
-                )
-        if any(
-            "propline" in str(source_value or "").lower()
-            or "prop_line" in str(source_value or "").lower()
-            for source_value in source_values
-        ):
-            return False
+        return history_supports_delivery(
+            validation,
+            decision,
+            intelligence_trace,
+            require_primary=True,
+        )
 
     history_values = (
         (validation,)
