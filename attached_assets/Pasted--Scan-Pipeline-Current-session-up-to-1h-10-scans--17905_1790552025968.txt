@@ -1,0 +1,75 @@
+━━━━━━━━━━━━━━━━━━
+📡 Scan Pipeline
+━━━━━━━━━━━━━━━━━━
+
+
+Current session (up to 1h)  ·  10 scans · ~6.0min between scans
+
+📡 Full Monitoring Pipeline
+
+📥 Fetched from Underdog:          17,419
+🚫 Removed from feed:              322
+👁 Prop observations (cumulative scan total): 16,207
+   └─ Not re-alerted / below movement threshold: 0
+   └─ New first-appearance:        0
+   └─ Line moved (re-scored):      16,201
+
+🔬 Scored this period:             18,781
+   ├─ New:                         0
+   ├─ Line moved:                  16,201
+   └─ Full-pool rotation:           2,580
+🎯 Qualified directional candidates: 2,262
+📤 Delivered to Telegram — current-session scan sends: 0
+
+━━━━━━━━━━━━━━━━━━
+🌐 Full-Pool Rescan Rotation  (last batch)
+━━━━━━━━━━━━━━━━━━
+
+Rotation:           #94  (✅ complete — next started)
+Next rotation:      #95
+Progress:           100.0%
+Coverage:           2,580 / 2,580 active props
+Active source IDs:  2,580
+Uncovered remainder: 0
+🔬 Rescored:        2,580
+📤 Sent:            0
+
+━━━━━━━━━━━━━━━━━━
+🔭 Tracking & Grading Funnel
+━━━━━━━━━━━━━━━━━━
+
+Scan = feed observations/evaluations. Tracking, delivery, and grading use the same durable opportunity records; they are stages, not a second alert path.
+
+📥 Active tracked props: 2,639
+🧾 Historical observations: 15,048
+🔬 Evaluated candidates: 16,207
+🎯 Directional OVER/UNDER opportunities: 162
+✅ Actionable persisted: 162
+   └─ Evidence basis: settled results 18 · historical-average fallback 144 · unavailable 0
+🔬 Rescored: 18,781
+📈 Line movers: 16,201
+📤 Confirmed Telegram deliveries (last 1h): 0
+⏳ Pending grading (tracked props): 3,570
+🏁 Resolved tracked outcomes: 0
+   └─ HIT / MISS / PUSH: 0 / 0 / 0
+
+
+────────────────
+
+⚽ Sport Funnel Breakdown
+
+
+Sport   Obs  Act Eval  Dir  Del
+---------------- ---------------
+WNBA  10744  924  2520   40    0
+TENNIS 1688  681  5490    1    0
+NFL     681  533  5339  106    0
+NBA    1512  128   128    0    0
+DOTA    140  127  1270   13    0
+NHL      89   89     0    0    0
+CS       95   75   788    1    0
+VAL      60   60   600    0    0
+LOL      21   20   200    1    0
+MLS      18    2     2    0    0
+
+━━━━━━━━━━━━━━━━━━
