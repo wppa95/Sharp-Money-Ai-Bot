@@ -291,13 +291,14 @@ def is_historical_average_source(value: Any) -> bool:
 def has_strict_directional_history(
     value: Any,
     *,
+    over_min_rate: float = 0.70,
     under_max_over_rate: float = 0.40,
 ) -> bool:
     """Require every displayed history window to support the direction.
 
-    Hit rates are stored as OVER rates. OVER needs at least 70% in every
-    window. The existing analyst-view UNDER cutoff defaults to 40%; callers
-    with a stricter delivery policy can provide a lower cutoff.
+    Hit rates are stored as OVER rates. OVER needs at least ``over_min_rate``
+    in every window. The existing analyst-view UNDER cutoff defaults to 40%;
+    callers with a stricter delivery policy can provide a lower cutoff.
     Missing windows are not treated as passing evidence.
     """
     if value is None:
@@ -330,7 +331,7 @@ def has_strict_directional_history(
                 return False
 
         over_rate = float(over_count) / float(games)
-        if recommendation == "OVER" and over_rate < 0.70:
+        if recommendation == "OVER" and over_rate < over_min_rate:
             return False
         if recommendation == "UNDER" and over_rate > under_max_over_rate:
             return False
@@ -342,6 +343,7 @@ def has_strong_directional_history(
     value: Any,
     direction: Any = None,
     *,
+    over_min_rate: float = 0.70,
     under_max_over_rate: float = 0.40,
 ) -> bool:
     """Return whether *value* contains complete, directionally strong history.
@@ -396,6 +398,7 @@ def has_strong_directional_history(
 
     return has_strict_directional_history(
         payload,
+        over_min_rate=over_min_rate,
         under_max_over_rate=under_max_over_rate,
     )
 
@@ -407,12 +410,14 @@ def has_qualifying_pick_history(
     """Require qualifying directional history in every required window.
 
     Shared by automatic delivery and the /picks and /slip commands: OVER must
-    be at least 70%, while UNDER must be at most 35% OVER-rate.
+    be at least 75%, while UNDER must be at most 25% OVER-rate, in every
+    required window.
     """
     return has_strong_directional_history(
         value,
         direction,
-        under_max_over_rate=0.35,
+        over_min_rate=0.75,
+        under_max_over_rate=0.25,
     )
 
 

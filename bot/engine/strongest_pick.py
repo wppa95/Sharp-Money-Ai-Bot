@@ -309,7 +309,7 @@ def is_strong_actionable_pick(
     """Return whether a candidate meets the shared strongest-pick contract.
 
     Every sport needs complete directional history meeting the shared
-    70% OVER / 35% UNDER thresholds.
+    75% OVER / 25% UNDER thresholds.
     """
     direction = _direction(candidate)
     if direction not in {"OVER", "UNDER"}:
