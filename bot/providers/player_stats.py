@@ -395,6 +395,37 @@ class PlayerStatsProvider:
         stat_type: str,
         instrumentation=None,
     ) -> list[RawGameResult]:
+        """Fetch and validate rows for exactly one player/stat target."""
+        raw_rows = await self._fetch_results_unchecked(
+            player_name,
+            sport,
+            stat_type,
+            instrumentation=instrumentation,
+        )
+        usable_rows = validate_player_result_rows(
+            raw_rows,
+            player_name=player_name,
+            sport=sport,
+            stat_type=stat_type,
+        )
+        rejected = max(0, len(raw_rows or []) - len(usable_rows))
+        if rejected:
+            logger.warning(
+                "PlayerStatsProvider: rejected %d unusable row(s) for %r %s/%s",
+                rejected,
+                player_name,
+                sport,
+                stat_type,
+            )
+        return usable_rows
+
+    async def _fetch_results_unchecked(
+        self,
+        player_name: str,
+        sport: str,
+        stat_type: str,
+        instrumentation=None,
+    ) -> list[RawGameResult]:
         """
         Fetch recent game results for *player_name* × *stat_type* in *sport*.
 
@@ -1107,6 +1138,78 @@ def _parse_date(raw: Optional[str]) -> Optional[str]:
 
 def _normalize(name: str) -> str:
     return name.lower().strip()
+
+
+def validate_player_result_rows(
+    rows,
+    *,
+    player_name: str,
+    sport: str,
+    stat_type: str,
+) -> list[RawGameResult]:
+    """Return only complete, correctly-scoped rows safe for history storage."""
+    from datetime import date
+    from math import isfinite
+
+    if not isinstance(rows, (list, tuple)):
+        return []
+
+    expected_player = _normalize(str(player_name or ""))
+    expected_sport = str(sport or "").strip().upper()
+    expected_stat = str(stat_type or "").strip().lower()
+    if not expected_player or not expected_sport or not expected_stat:
+        return []
+
+    usable: list[RawGameResult] = []
+    for row in rows:
+        row_player = str(getattr(row, "player_name", "") or "").strip()
+        row_sport = str(getattr(row, "sport", "") or "").strip().upper()
+        row_stat = str(getattr(row, "stat_type", "") or "").strip().lower()
+        source = str(getattr(row, "source", "") or "").strip()
+        raw_date = getattr(row, "game_date", None)
+        raw_value = getattr(row, "actual_value", None)
+
+        if (
+            not row_player
+            or _normalize(row_player) != expected_player
+            or row_sport != expected_sport
+            or row_stat != expected_stat
+            or not source
+            or raw_date is None
+            or isinstance(raw_value, bool)
+        ):
+            continue
+
+        try:
+            if isinstance(raw_date, datetime):
+                parsed_date = raw_date.date()
+            elif isinstance(raw_date, date):
+                parsed_date = raw_date
+            else:
+                date_text = str(raw_date).strip()
+                parsed_date = datetime.fromisoformat(
+                    date_text.replace("Z", "+00:00")
+                ).date()
+            actual_value = float(raw_value)
+        except (TypeError, ValueError, OverflowError):
+            continue
+        if not isfinite(actual_value):
+            continue
+
+        opponent = getattr(row, "opponent", None)
+        usable.append(
+            RawGameResult(
+                player_name=row_player,
+                sport=row_sport,
+                stat_type=row_stat,
+                game_date=parsed_date.isoformat(),
+                actual_value=actual_value,
+                opponent=str(opponent) if opponent is not None else None,
+                source=source,
+                game_id=str(getattr(row, "game_id", "") or ""),
+            )
+        )
+    return usable
 
 
 def _names_match(api_name: str, query_name: str, threshold: float = 0.82) -> bool:

@@ -155,7 +155,19 @@ async def test_player_history_persists_completed_result_independently():
     context = SimpleNamespace(bot_data={"db": db})
 
     fake_provider = MagicMock()
-    fake_provider.fetch_results = AsyncMock(return_value=[SimpleNamespace()])
+    fake_provider.fetch_results = AsyncMock(
+        return_value=[
+            SimpleNamespace(
+                player_name="Player One",
+                sport="NBA",
+                stat_type="points",
+                game_date="2026-09-20",
+                actual_value=12,
+                opponent=None,
+                source="test",
+            )
+        ]
+    )
     with patch("providers.player_stats.PlayerStatsProvider", return_value=fake_provider):
         await player_history_collector_job(context)
 
@@ -163,6 +175,31 @@ async def test_player_history_persists_completed_result_independently():
             "Player One", "NBA", "points"
     )
     db.upsert_player_result.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_player_history_does_not_persist_unusable_single_player_rows():
+    snapshot = SimpleNamespace(
+        player_name="Player One",
+        sport="NBA",
+        stat_type="points",
+    )
+    db = MagicMock()
+    db.get_active_underdog_snapshot_per_prop = AsyncMock(
+        return_value={("Player One", "NBA", "points"): snapshot}
+    )
+    db.upsert_player_results_bulk = AsyncMock()
+    provider = MagicMock()
+    provider.fetch_results = AsyncMock(return_value=[SimpleNamespace()])
+    context = SimpleNamespace(bot_data={"db": db})
+
+    with patch("providers.player_stats.PlayerStatsProvider", return_value=provider):
+        await player_history_collector_job(context)
+
+    provider.fetch_results.assert_awaited_once_with(
+        "Player One", "NBA", "points"
+    )
+    db.upsert_player_results_bulk.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -201,7 +238,9 @@ async def test_history_collector_never_calls_scheduled_propline_history():
 
 @pytest.mark.asyncio
 async def test_dota_without_propline_market_falls_back_to_player_stats():
-    dota_row = SimpleNamespace(
+    from providers.player_stats import RawGameResult
+
+    dota_row = RawGameResult(
         player_name="DOTA Alias",
         sport="DOTA",
         stat_type="kills",
@@ -582,7 +621,21 @@ async def test_player_history_attempts_and_persists_full_active_book():
     db.upsert_player_results_bulk = AsyncMock()
     db.upsert_player_result = AsyncMock()
     provider = MagicMock()
-    provider.fetch_results = AsyncMock(return_value=[SimpleNamespace()])
+
+    async def fetch_one(player, sport, stat):
+        return [
+            SimpleNamespace(
+                player_name=player,
+                sport=sport,
+                stat_type=stat,
+                game_date="2026-09-20",
+                actual_value=1,
+                opponent=None,
+                source="test",
+            )
+        ]
+
+    provider.fetch_results = AsyncMock(side_effect=fetch_one)
     context = SimpleNamespace(bot_data={"db": db})
 
     with patch(
@@ -601,8 +654,6 @@ async def test_player_history_attempts_and_persists_full_active_book():
 
 @pytest.mark.asyncio
 async def test_player_history_fetches_targets_concurrently_then_commits_batches():
-    first_result = SimpleNamespace()
-    second_result = SimpleNamespace()
     snapshots = {
         ("First Player", "points"): SimpleNamespace(
             player_name="First Player", sport="NBA", stat_type="points"
@@ -616,14 +667,22 @@ async def test_player_history_fetches_targets_concurrently_then_commits_batches(
     db.upsert_player_results_bulk = AsyncMock()
     context = SimpleNamespace(bot_data={"db": db})
     provider = MagicMock()
-    provider.fetch_results = AsyncMock(return_value=[first_result])
 
     events: list[str] = []
 
-    async def fetch(*args):
+    async def fetch(player, sport, stat):
         events.append("fetch")
-        result = first_result if len(events) == 1 else second_result
-        return [result]
+        return [
+            SimpleNamespace(
+                player_name=player,
+                sport=sport,
+                stat_type=stat,
+                game_date="2026-09-20",
+                actual_value=10,
+                opponent=None,
+                source="test",
+            )
+        ]
 
     async def commit(batch):
         events.append(f"commit:{len(batch)}")
@@ -775,7 +834,15 @@ async def test_player_history_waits_for_blocked_writer_and_retains_results(caplo
         sport="NBA",
         stat_type="points",
     )
-    result = SimpleNamespace()
+    result = SimpleNamespace(
+        player_name="Blocked Writer",
+        sport="NBA",
+        stat_type="points",
+        game_date="2026-09-20",
+        actual_value=10,
+        opponent=None,
+        source="test",
+    )
     db = MagicMock()
     db.get_active_underdog_snapshot_per_prop = AsyncMock(
         return_value={("Blocked Writer", "points"): snapshot}

@@ -771,6 +771,8 @@ async def player_history_collector_job(context) -> None:
                     remaining = cycle_deadline - time.monotonic()
                     if remaining <= 0:
                         return "deadline", None
+                    from providers.player_stats import validate_player_result_rows
+
                     if sport == "DOTA":
                         propline_result = await fetch_dota_propline(
                             player,
@@ -780,11 +782,18 @@ async def player_history_collector_job(context) -> None:
                         )
                         if propline_result is not None:
                             propline_status, propline_coverage = propline_result
-                            if (
-                                propline_status == "ok"
-                                and getattr(propline_coverage, "rows", None)
-                            ):
-                                return propline_result
+                            propline_rows = validate_player_result_rows(
+                                getattr(propline_coverage, "rows", None),
+                                player_name=player,
+                                sport=sport,
+                                stat_type=stat,
+                            )
+                            if propline_status == "ok" and propline_rows:
+                                return "ok", SimpleNamespace(
+                                    rows=propline_rows,
+                                    status="usable",
+                                    provider="PropLine",
+                                )
                             # Missing history, an unsupported PropLine market,
                             # or a provider error must not suppress the public
                             # DOTA stats request. The cycle deadline is checked
@@ -796,9 +805,24 @@ async def player_history_collector_job(context) -> None:
                             remaining,
                         ),
                     )
+                    usable_rows = validate_player_result_rows(
+                        raw,
+                        player_name=player,
+                        sport=sport,
+                        stat_type=stat,
+                    )
+                    if len(usable_rows) != len(raw or []):
+                        logger.debug(
+                            "player_history_collector_job: rejected %d "
+                            "unusable result row(s) for %s/%s/%s",
+                            len(raw or []) - len(usable_rows),
+                            player,
+                            sport,
+                            stat,
+                        )
                     coverage = SimpleNamespace(
-                        rows=list(raw or []),
-                        status="usable" if raw else "",
+                        rows=usable_rows,
+                        status="usable" if usable_rows else "",
                     )
                     return "ok", coverage
                 except asyncio.TimeoutError:
