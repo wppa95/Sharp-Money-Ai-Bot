@@ -233,13 +233,24 @@ def build_advisory_from_pipeline(
     return (analyst or EvidenceBoundAnalyst()).analyze(snapshot)
 
 
-def analyst_grade(prediction: Optional[str], result: Optional[str]) -> Optional[str]:
-    """Translate the stored OVER-perspective result to analyst perspective."""
+def analyst_grade(
+    prediction: Optional[str],
+    result: Optional[str],
+    recommendation: Optional[str],
+) -> Optional[str]:
+    """Translate the stored pick result to the analyst's predicted direction."""
 
     prediction = str(prediction or "").upper()
     result = str(result or "").upper()
-    if prediction not in {"OVER", "UNDER"} or result not in {"HIT", "MISS", "PUSH"}:
+    recommendation = str(recommendation or "").upper()
+    if (
+        prediction not in {"OVER", "UNDER"}
+        or recommendation not in {"OVER", "UNDER"}
+        or result not in {"HIT", "MISS", "PUSH"}
+    ):
         return None
     if result == "PUSH":
         return "PUSH"
-    return result if prediction == "OVER" else ("MISS" if result == "HIT" else "HIT")
+    if prediction == recommendation:
+        return result
+    return "MISS" if result == "HIT" else "HIT"

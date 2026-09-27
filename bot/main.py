@@ -1222,9 +1222,10 @@ async def _grade_opportunities_job(context) -> None:
 
     Finds PENDING rows in prop_opportunity_log whose event is old enough to
     resolve, looks up the actual player stat in player_game_results, and
-    records HIT / MISS / PUSH from the OVER perspective:
-      HIT  → actual_value > line_value
-      MISS → actual_value < line_value
+    records HIT / MISS / PUSH from the recommendation's perspective:
+      OVER HIT  → actual_value > line_value
+      UNDER HIT → actual_value < line_value
+      MISS      → the recommended side did not clear the line
       PUSH → actual_value == line_value
     """
     db: Optional[Database] = context.bot_data.get("db")

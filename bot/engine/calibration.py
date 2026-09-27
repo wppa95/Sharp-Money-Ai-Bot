@@ -529,17 +529,12 @@ def _prop_tier(record, score: int) -> str:
 
 
 def _prop_bet_outcome(record) -> str:
-    """Convert OVER-perspective settlement into bet-perspective outcome."""
+    """Translate the stored directional opportunity result to WIN/LOSS."""
     result = str(getattr(record, "result", "") or "").upper()
-    recommendation = str(
-        getattr(record, "recommendation", "") or ""
-    ).upper()
     if result == "PUSH":
         return "PUSH"
     if result not in {"HIT", "MISS"}:
         return ""
-    if recommendation == "UNDER":
-        return "WIN" if result == "MISS" else "LOSS"
     return "WIN" if result == "HIT" else "LOSS"
 
 def _confidence_to_tier(confidence: int) -> str:

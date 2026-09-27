@@ -15,6 +15,7 @@ from database import (
     PropTrackingLog,
 )
 from engine.backtesting import BacktestEngine
+from engine.calibration import _prop_bet_outcome
 
 
 @pytest.fixture()
@@ -69,7 +70,7 @@ async def test_directional_tracking_and_grading_do_not_require_delivery(db):
     assert await db.count_actionable_pick_records() == 0
 
     await db.grade_opportunity(undelivered_id, "HIT", 25.0)
-    await db.grade_opportunity(prizepicks_id, "MISS", 18.0)
+    await db.grade_opportunity(prizepicks_id, "HIT", 18.0)
     resolved = await db.get_resolved_tracked_opportunities(limit=10)
 
     assert {row.external_id for row in resolved} == {"ud-1", "pp-1"}
@@ -129,6 +130,19 @@ async def test_backtest_preserves_provider_identity_and_under_direction(db):
             stat_type="Hits",
             line_value=1.5,
             recommendation="UNDER",
+            result="HIT",
+            confidence=75,
+            bet_quality_score=None,
+        ),
+        SimpleNamespace(
+            external_id="pp-backtest-miss",
+            game_id="pp-game-miss",
+            player_name="PP Player",
+            provider="PrizePicks",
+            sport="MLB",
+            stat_type="Hits",
+            line_value=1.5,
+            recommendation="UNDER",
             result="MISS",
             confidence=75,
             bet_quality_score=None,
@@ -137,10 +151,21 @@ async def test_backtest_preserves_provider_identity_and_under_direction(db):
 
     report = BacktestEngine().run_prop_opportunities(opportunities)
 
-    assert report.total_evaluated == 2
+    assert report.total_evaluated == 3
     assert report.overall.wins == 2
+    assert report.overall.losses == 1
     assert report.by_provider["Underdog"].wins == 1
     assert report.by_provider["PrizePicks"].wins == 1
+    assert report.by_provider["PrizePicks"].losses == 1
+
+
+def test_calibration_uses_directional_result_without_flipping_under():
+    assert _prop_bet_outcome(
+        SimpleNamespace(recommendation="UNDER", result="HIT")
+    ) == "WIN"
+    assert _prop_bet_outcome(
+        SimpleNamespace(recommendation="UNDER", result="MISS")
+    ) == "LOSS"
 
 
 @pytest.mark.asyncio

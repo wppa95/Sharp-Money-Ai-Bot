@@ -89,12 +89,14 @@ async def test_performance_summary_joins_clv_and_maps_under_direction(db):
     await _opportunity(db, "over-hit")
     await _opportunity(db, "over-miss")
     await _opportunity(db, "under-hit", recommendation="UNDER")
+    await _opportunity(db, "under-miss", recommendation="UNDER")
     await _opportunity(db, "no-clv")
 
     for external_id, result in (
         ("over-hit", "HIT"),
         ("over-miss", "MISS"),
-        ("under-hit", "MISS"),  # raw result MISS is a directional UNDER hit
+        ("under-hit", "HIT"),  # Stored result already reflects UNDER direction.
+        ("under-miss", "MISS"),
         ("no-clv", "HIT"),
     ):
         row = await _fetch_opportunity(db, external_id)
@@ -108,14 +110,14 @@ async def test_performance_summary_joins_clv_and_maps_under_direction(db):
     row = summary["by_sport"]["MLB"]
 
     assert row["hit"] == 3
-    assert row["miss"] == 1
+    assert row["miss"] == 2
     assert row["clv_hit_count"] == 2
     assert row["clv_hit_avg"] == pytest.approx(3.5)
     assert row["clv_miss_count"] == 1
     assert row["clv_miss_avg"] == pytest.approx(-2.0)
     assert row["clv_push_count"] == 0
     assert row["clv_count"] == 3
-    assert row["clv_coverage_pct"] == pytest.approx(75.0)
+    assert row["clv_coverage_pct"] == pytest.approx(60.0)
 
 
 @pytest.mark.asyncio

@@ -22,7 +22,7 @@
 - [Market-only signals are non-actionable](market-signal-bypass.md) — line movement remains monitoring context; no directional recommendation or delivery without legitimate player-result evidence.
 - [V3.1 stability pass](v31-stability-pass.md) — OOM fix: _MARKET_FIRST_ALERT TTL eviction, known_keys 60d filter, gc.collect, VmRSS measurement; state recovery: _init_state_from_db on cold start; 3090 tests Aug 2026.
 - [V3.1 cleanup pass — 5 gate fixes](v31-cleanup-pass.md) — BQ≥85 gate (MLB/NFL); relaxed non-strict stars/conf; _is_game_live_or_past helper (all 3 paths); ET time format; max_instances=1 explicit; 3129 tests Aug 2026.
-- [Telegram pick grading (alert_sent)](telegram-pick-grading.md) — alert_sent+alert_sent_at on PropOpportunityLog; mark_opportunity_alert_sent(); get_telegram_pick_performance(); 3 engine paths marked; /rollups updated; 3158 tests Aug 2026.
+- [Telegram pick/result semantics](telegram-pick-grading.md) — delivered-only stats filter alert_sent; opportunity HIT/MISS already reflect OVER/UNDER direction; neutral tracking results stay separate.
 - [Pipeline bottleneck fix (standing path + esports HFS)](pipeline-bottleneck-fix.md) — two root causes: _HFS excluded esports stats; _processed_keys blocked standing path for sub-threshold movers; 3179 tests Aug 2026.
 - [Phase 2 Core fixes](phase2-core-fixes.md) — props=0 (#114), /restarts removed (#115), auto-grading fetch loop (#116), decision_tier clarity (#113); 3256 tests Aug 2026.
 - [Post-freeze bugs 117-120](bugs-117-120.md) — BQ gate 85→95 (#117); new-prop dedup gate (#118); funnel label + /status DB counter (#119); Tier 1 gate verified correct (#120); 3288 tests Aug 2026.

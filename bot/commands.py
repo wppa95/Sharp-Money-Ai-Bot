@@ -4177,11 +4177,11 @@ async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if tracking_counts:
             wins = (
                 tracking_counts.get("OVER", {}).get("HIT", 0)
-                + tracking_counts.get("UNDER", {}).get("MISS", 0)
+                + tracking_counts.get("UNDER", {}).get("HIT", 0)
             )
             losses = (
                 tracking_counts.get("OVER", {}).get("MISS", 0)
-                + tracking_counts.get("UNDER", {}).get("HIT", 0)
+                + tracking_counts.get("UNDER", {}).get("MISS", 0)
             )
             pushes = (
                 tracking_counts.get("OVER", {}).get("PUSH", 0)
@@ -4536,10 +4536,9 @@ async def cmd_tracking(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     play_graded = play_hit + play_miss + play_push
     play_total  = play_graded + play_pending
 
-    # For UNDER picks: HIT from OVER perspective = the UNDER actually failed
-    # so we flip for display of "correct picks"
-    under_hit_correct  = _n(counts, "UNDER", "MISS")   # over missed = under cleared
-    over_hit_correct   = _n(counts, "OVER",  "HIT")    # over hit = over cleared
+    # Stored HIT/MISS already reflect whether the recorded direction won.
+    under_hit_correct  = _n(counts, "UNDER", "HIT")
+    over_hit_correct   = _n(counts, "OVER",  "HIT")
     play_correct       = over_hit_correct + under_hit_correct
 
     lines += [
@@ -4563,8 +4562,8 @@ async def cmd_tracking(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
                 f"  <i>OVER  picks: {o_hit}/{o_tot} ({_hit_rate(o_hit, o_tot)})</i>"
             )
         if _n(counts, "UNDER", "HIT") or _n(counts, "UNDER", "MISS"):
-            u_hit  = _n(counts, "UNDER", "MISS")   # OVER miss = UNDER hit
-            u_miss = _n(counts, "UNDER", "HIT")
+            u_hit  = _n(counts, "UNDER", "HIT")
+            u_miss = _n(counts, "UNDER", "MISS")
             u_tot  = u_hit + u_miss + _n(counts, "UNDER", "PUSH")
             lines.append(
                 f"  <i>UNDER picks: {u_hit}/{u_tot} ({_hit_rate(u_hit, u_tot)})</i>"
@@ -4578,7 +4577,7 @@ async def cmd_tracking(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         for sport, sport_data in sorted(by_sport.items()):
             s_correct = (
                 _n(sport_data, "OVER",  "HIT")
-                + _n(sport_data, "UNDER", "MISS")
+                + _n(sport_data, "UNDER", "HIT")
             )
             s_graded = sum(
                 _n(sport_data, rec, res)
@@ -4619,7 +4618,7 @@ async def cmd_tracking(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             provider_data = by_provider.get(provider, {})
             p_correct = (
                 _n(provider_data, "OVER", "HIT")
-                + _n(provider_data, "UNDER", "MISS")
+                + _n(provider_data, "UNDER", "HIT")
             )
             p_resolved = sum(
                 _n(provider_data, rec, res)
@@ -4645,7 +4644,7 @@ async def cmd_tracking(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         "",
         "━━━━━━━━━━━━━━━━━━",
         "<i>Results graded every 1 h from stored game stats.</i>",
-        "<i>OVER perspective: HIT = actual &gt; line, MISS = actual &lt; line.</i>",
+        "<i>HIT means the recorded OVER or UNDER pick won; MISS means it lost.</i>",
     ]
 
     try:
@@ -5618,8 +5617,7 @@ async def cmd_player(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         return
 
     # Keep monitoring, directional, delivery, and settlement populations
-    # separate. Opportunity results are stored from the OVER perspective, so
-    # an UNDER MISS is a correct pick.
+    # separate. Directional opportunity results already reflect the pick side.
     tracked_rows = [r for r in rows if getattr(r, "tracked_observation", False)]
     directional_rows = [
         r for r in rows
@@ -5632,16 +5630,7 @@ async def cmd_player(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         r for r in directional_rows
         if str(getattr(r, "result", "") or "").upper() in {"HIT", "MISS", "PUSH"}
     ]
-    hits = sum(
-        1 for r in graded
-        if (
-            str(r.recommendation).upper() == "OVER"
-            and str(r.result).upper() == "HIT"
-        ) or (
-            str(r.recommendation).upper() == "UNDER"
-            and str(r.result).upper() == "MISS"
-        )
-    )
+    hits = sum(1 for r in graded if str(r.result).upper() == "HIT")
     pushes = sum(1 for r in graded if str(r.result).upper() == "PUSH")
     misses = len(graded) - hits - pushes
     pending = sum(

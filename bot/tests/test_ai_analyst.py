@@ -12,6 +12,7 @@ from engine.ai_analyst import (
     AnalystInput,
     EvidenceBoundAnalyst,
     build_advisory_from_pipeline,
+    analyst_grade,
 )
 
 
@@ -88,6 +89,21 @@ def test_provider_contract_is_model_agnostic():
     assert result.model_version == "test-1"
 
 
+@pytest.mark.parametrize(
+    ("prediction", "result", "recommendation", "expected"),
+    [
+        ("UNDER", "MISS", "OVER", "HIT"),
+        ("UNDER", "HIT", "UNDER", "HIT"),
+        ("OVER", "HIT", "UNDER", "MISS"),
+        ("OVER", "MISS", "UNDER", "HIT"),
+    ],
+)
+def test_analyst_grade_translates_from_stored_pick_direction(
+    prediction, result, recommendation, expected
+):
+    assert analyst_grade(prediction, result, recommendation) == expected
+
+
 @pytest.fixture
 async def db():
     database = Database("sqlite+aiosqlite:///:memory:")
@@ -144,11 +160,12 @@ async def test_prediction_persists_and_grades_for_supported_sports(
         assert row.analyst_model_version == "1"
         row_id = row.id
 
-    # Results are stored from the OVER perspective; UNDER turns an OVER MISS
-    # into an analyst HIT.
-    await db.grade_opportunity(row_id, "MISS", 8.0)
+    # The stored result reflects the original UNDER recommendation, so a MISS
+    # means this UNDER analyst call lost.
+    await db.grade_opportunity(row_id, "MISS", 12.0)
     report = await db.get_analyst_performance(
         group_by="sport", sport=sport, direction="UNDER"
     )
-    assert report["buckets"][sport]["hits"] == 1
-    assert report["buckets"][sport]["hit_rate"] == 100.0
+    assert report["buckets"][sport]["hits"] == 0
+    assert report["buckets"][sport]["misses"] == 1
+    assert report["buckets"][sport]["hit_rate"] == 0.0

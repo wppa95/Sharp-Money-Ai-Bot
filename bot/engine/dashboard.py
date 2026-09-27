@@ -1224,10 +1224,8 @@ class DashboardEngine:
                     )
                     if result_val == "PUSH":
                         source_counts["P"] += cnt
-                    elif rec_val == "OVER":
-                        source_counts["W" if result_val == "HIT" else "L"] += cnt
                     else:
-                        source_counts["W" if result_val == "MISS" else "L"] += cnt
+                        source_counts["W" if result_val == "HIT" else "L"] += cnt
 
             r.intelligence_panel = ip
         except Exception:

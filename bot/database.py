@@ -50,11 +50,15 @@ _PRIZEPICKS_EXTERNAL_PREFIX = "PrizePicks::"
 _TELEGRAM_DELIVERY_KEY_VERSION = "v1"
 
 
-def _analyst_grade(prediction: Optional[str], result: Optional[str]) -> Optional[str]:
+def _analyst_grade(
+    prediction: Optional[str],
+    result: Optional[str],
+    recommendation: Optional[str],
+) -> Optional[str]:
     """Derive analyst outcome from the authoritative stored result."""
     from engine.ai_analyst import analyst_grade
 
-    return analyst_grade(prediction, result)
+    return analyst_grade(prediction, result, recommendation)
 
 # Keep both Database objects (monitoring and history) on an explicit, bounded
 # SQLite pool.  The process-wide session gate below makes that capacity a
@@ -1024,17 +1028,14 @@ class PropOpportunityLog(Base):
     evaluation produces an OVER or UNDER direction. Universal ingestion
     tracking is stored separately in PropTrackingLog.
 
-    ``result`` is stored from the OVER perspective for consistent analysis:
-      "HIT"     → actual_value > line_value  (over cleared)
-      "MISS"    → actual_value < line_value  (over failed)
+    ``result`` is stored from the recorded recommendation's perspective:
+      "HIT"     → the recommended OVER or UNDER cleared the line
+      "MISS"    → the recommended OVER or UNDER failed to clear the line
       "PUSH"    → actual_value == line_value
       "PENDING" → game not yet complete / result not yet available
 
-    Interpretation per recommendation:
-      PLAY OVER  + HIT  → ✅ correct pick
-      PLAY OVER  + MISS → ❌ incorrect pick
-      PLAY UNDER + MISS → ✅ correct pick  (under cleared = over failed)
-      PLAY UNDER + HIT  → ❌ incorrect pick
+    Recommendation-less neutral observations live in PropTrackingLog and use
+    their own OVER-baseline settlement labels.
     """
     __tablename__ = "prop_opportunity_log"
 
@@ -2828,12 +2829,12 @@ class Database:
                 row["graded"] += count
                 if outcome == "PUSH":
                     row["push"] += count
-                elif (recommendation == "OVER" and outcome == "HIT") or (
-                    recommendation == "UNDER" and outcome == "MISS"
-                ):
+                elif outcome == "HIT":
                     row["hit"] += count
-                else:
+                elif outcome == "MISS":
                     row["miss"] += count
+                else:
+                    row["void"] += count
             else:
                 row["void"] += count
 
@@ -2899,16 +2900,9 @@ class Database:
             # results only; pending picks do not make the denominator larger.
             if outcome not in {"HIT", "MISS", "PUSH"}:
                 continue
-            directional_outcome = (
-                "HIT"
-                if outcome == "PUSH"
-                else (
-                    "HIT"
-                    if (recommendation == "OVER" and outcome == "HIT")
-                    or (recommendation == "UNDER" and outcome == "MISS")
-                    else "MISS"
-                )
-            )
+            # PropOpportunityLog outcomes already reflect the recorded
+            # recommendation; do not invert UNDER results a second time.
+            directional_outcome = outcome
             for target, key in (
                 (by_sport, sport),
                 (by_provider, provider),
@@ -9109,7 +9103,11 @@ class Database:
             existing_result = str(opp_row.result or "").upper()
             if existing_result not in {"", "PENDING"}:
                 return
-            _ai_grade = _analyst_grade(opp_row.analyst_prediction, evidence_result)
+            _ai_grade = _analyst_grade(
+                opp_row.analyst_prediction,
+                evidence_result,
+                opp_row.recommendation,
+            )
             if _ai_grade is not None:
                 values["analyst_grade"] = _ai_grade
                 values["analyst_graded_at"] = datetime.utcnow()
@@ -9220,6 +9218,7 @@ class Database:
                 _ai_grade = _analyst_grade(
                     opp_row.analyst_prediction,
                     outcome,
+                    opp_row.recommendation,
                 )
                 update_params.append(
                     {
@@ -9366,7 +9365,11 @@ class Database:
             bucket["total"] = int(bucket["total"] or 0) + 1
             if row.analyst_grade in {"HIT", "MISS", "PUSH"}:
                 bucket["graded"] = int(bucket["graded"] or 0) + 1
-                name = row.analyst_grade.lower() + "s"
+                name = {
+                    "HIT": "hits",
+                    "MISS": "misses",
+                    "PUSH": "pushes",
+                }[row.analyst_grade]
                 bucket[name] = int(bucket[name] or 0) + 1
 
         for bucket in buckets.values():

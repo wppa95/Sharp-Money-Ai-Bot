@@ -305,9 +305,9 @@ class BacktestEngine:
     def run_prop_opportunities(self, opportunities: list) -> BacktestReport:
         """Replay resolved directional opportunities from persistent tracking.
 
-        PropOpportunityLog stores outcomes from the OVER perspective. Convert
-        those outcomes to WIN/LOSS from the recorded recommendation without
-        applying a Telegram-delivery filter.
+        PropOpportunityLog stores outcomes from the recorded recommendation's
+        perspective. Do not invert UNDER results; no Telegram-delivery filter
+        is applied.
         """
         bt_records: list[BacktestRecord] = []
         for opportunity in opportunities:
@@ -322,10 +322,8 @@ class BacktestEngine:
 
             if result == "PUSH":
                 bet_result = "PUSH"
-            elif recommendation == "OVER":
-                bet_result = "WIN" if result == "HIT" else "LOSS"
             else:
-                bet_result = "WIN" if result == "MISS" else "LOSS"
+                bet_result = "WIN" if result == "HIT" else "LOSS"
 
             quality = getattr(opportunity, "bet_quality_score", None)
             if quality is None:
