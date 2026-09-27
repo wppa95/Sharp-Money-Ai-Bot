@@ -19,7 +19,7 @@ def _future(minutes: int = 60) -> datetime:
 
 
 def _directional_history(direction: str = "OVER") -> dict:
-    over = 70 if direction == "OVER" else 30
+    over = 75 if direction == "OVER" else 25
     windows = ("l5", "l10", "l15", "l20", "l30", "season")
     return {
         "recommendation": direction,

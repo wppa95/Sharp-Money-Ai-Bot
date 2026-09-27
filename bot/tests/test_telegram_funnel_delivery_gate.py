@@ -27,7 +27,7 @@ def _future_game() -> datetime:
 def _directional_decision(
     direction: str,
     *,
-    over_rate: float = 0.70,
+    over_rate: float = 0.75,
     l30_over_rate: float | None = None,
 ) -> SimpleNamespace:
     windows = ("l5", "l10", "l15", "l20", "l30", "season")

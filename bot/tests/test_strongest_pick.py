@@ -346,14 +346,14 @@ def test_strong_mode_keeps_consistent_history_and_ranks_it_first():
     strong = _candidate("Underdog", "Sal Stewart", "Hits", confidence=85, line=0.5)
     strong["sport"] = "MLB"
     strong["decision"] = _decision_with_windows(
-        "OVER", [0.8, 0.7, 0.8, 0.8, 0.8, 0.8]
+        "OVER", [0.8, 0.75, 0.8, 0.8, 0.8, 0.8]
     )
     weaker_strong = _candidate(
         "Underdog", "William Contreras", "Hits", confidence=75, line=0.5
     )
     weaker_strong["sport"] = "MLB"
     weaker_strong["decision"] = _decision_with_windows(
-        "OVER", [0.7, 0.7, 0.7, 0.7, 0.7, 0.7]
+        "OVER", [0.75, 0.75, 0.75, 0.75, 0.75, 0.75]
     )
 
     selected = select_strongest_actionable_picks(
@@ -402,10 +402,10 @@ def test_strong_mode_uses_computed_hit_rates_when_decision_omits_windows():
 @pytest.mark.parametrize(
     "direction,rates,expected",
     [
-        ("OVER", [0.70] * 6, True),
-        ("OVER", [0.70, 0.70, 0.70, 0.70, 0.69, 0.70], False),
-        ("UNDER", [0.35] * 6, True),
-        ("UNDER", [0.35, 0.35, 0.35, 0.35, 0.36, 0.35], False),
+        ("OVER", [0.75] * 6, True),
+        ("OVER", [0.75, 0.75, 0.75, 0.75, 0.74, 0.75], False),
+        ("UNDER", [0.25] * 6, True),
+        ("UNDER", [0.25, 0.25, 0.25, 0.25, 0.26, 0.25], False),
     ],
 )
 def test_strong_pick_applies_same_cutoffs_across_sports(

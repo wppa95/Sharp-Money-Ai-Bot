@@ -416,7 +416,7 @@ async def test_funnel_sport_breakdown_uses_aligned_columns_and_active_sort():
     table = message.split("Sport Funnel Breakdown", 1)[1]
 
     assert "<pre>" in table
-    assert re.search(r"Sport\s+Obs\s+Act\s+Eval\s+Dir\s+Del", table)
+    assert re.search(r"Sport\s+Obs\s+Active\s+Eval\s+Dir\s+Del", table)
     data_rows = [
         line for line in table.split("<pre>", 1)[1].split("</pre>", 1)[0].splitlines()[2:]
     ]
@@ -425,7 +425,7 @@ async def test_funnel_sport_breakdown_uses_aligned_columns_and_active_sort():
         "NFL", "MLB", "Soccer", "NBA", "FIFA",
     ]
     header = table.split("<pre>", 1)[1].splitlines()[0]
-    assert "Act Eval" in header
+    assert "Active   Eval" in header
     assert "MLB" in data_rows[1]
     assert "1,234" not in data_rows[1]
     assert "FIFA" in data_rows[-1]

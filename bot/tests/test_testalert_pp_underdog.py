@@ -106,7 +106,7 @@ def _directional_history(
     over_rate: float | None = None,
 ) -> dict:
     if over_rate is None:
-        over_rate = 0.70 if direction == "OVER" else 0.30
+        over_rate = 0.75 if direction == "OVER" else 0.25
     over = round(over_rate * 100)
     windows = ("l5", "l10", "l15", "l20", "l30", "season")
     return {

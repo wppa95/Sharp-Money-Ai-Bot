@@ -41,9 +41,11 @@ def _propline_rows() -> list[RawGameResult]:
 def _directional_history(
     direction: str = "OVER",
     *,
-    over_rate: float = 0.70,
+    over_rate: float | None = None,
 ) -> dict:
     """Complete six-window history meeting the universal delivery cutoff."""
+    if over_rate is None:
+        over_rate = 0.75 if direction.upper() == "OVER" else 0.25
     windows = ("l5", "l10", "l15", "l20", "l30", "season")
     over = round(over_rate * 100)
     return {
@@ -498,7 +500,7 @@ def test_telegram_delivery_requires_strong_over_in_every_window():
                 for window in ("l5", "l10", "l15", "l20", "l30", "season")
             },
             **{
-                f"{window}_over": 7
+                f"{window}_over": 8
                 for window in ("l5", "l10", "l15", "l20", "l30", "season")
             },
         },
@@ -524,8 +526,8 @@ def test_telegram_delivery_requires_strong_under_in_every_window():
                 for window in ("l5", "l10", "l15", "l20", "l30", "season")
             },
             **{
-                # 3/10 OVER = 30%, so the complementary UNDER count is 7/10.
-                f"{window}_under": 7
+                # 2/10 OVER = 20%, so the complementary UNDER count is 8/10.
+                f"{window}_under": 8
                 for window in ("l5", "l10", "l15", "l20", "l30", "season")
             },
         },
