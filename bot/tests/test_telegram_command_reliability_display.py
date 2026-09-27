@@ -579,6 +579,8 @@ async def test_funnel_provider_populations_and_zero_directional_sport_stay_separ
     assert "Soccer" in message.split("Sport Funnel Breakdown", 1)[1]
     assert "Persisted directional records (not send-approved): <b>2</b>" in message
     assert "Actionable persisted" not in message
+    sport_table = message.split("<pre>", 1)[1].split("</pre>", 1)[0]
+    assert "Active" in sport_table.splitlines()[0]
 @pytest.mark.asyncio
 async def test_alert_history_preserves_uppercase_provider_pick_labels():
     update, context = _update_and_context()
