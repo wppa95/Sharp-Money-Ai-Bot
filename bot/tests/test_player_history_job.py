@@ -200,10 +200,7 @@ async def test_history_collector_never_calls_scheduled_propline_history():
 
 
 @pytest.mark.asyncio
-async def test_dota_history_prefers_configured_propline_results_over_opendota(
-    caplog,
-):
-    caplog.set_level("INFO")
+async def test_dota_without_propline_market_falls_back_to_player_stats():
     dota_row = SimpleNamespace(
         player_name="DOTA Alias",
         sport="DOTA",
@@ -211,7 +208,7 @@ async def test_dota_history_prefers_configured_propline_results_over_opendota(
         game_date="2026-09-15",
         actual_value=24.0,
         opponent=None,
-        source="propline_event_stats",
+        source="opendota_series",
         game_id="dota-event-1",
     )
     snapshot = SimpleNamespace(
@@ -227,31 +224,10 @@ async def test_dota_history_prefers_configured_propline_results_over_opendota(
     )
     db.upsert_player_results_bulk = AsyncMock()
     primary_provider = MagicMock()
-    primary_provider.fetch_results = AsyncMock(
-        side_effect=AssertionError("OpenDota must not be used when PropLine is configured")
-    )
+    primary_provider.fetch_results = AsyncMock(return_value=[dota_row])
     scheduled_provider = MagicMock()
     scheduled_provider._propline_client = SimpleNamespace(is_configured=True)
-
-    async def supplement(
-        _db,
-        player_name,
-        sport,
-        stat_type,
-        *,
-        min_samples,
-        source_provider,
-    ):
-        assert (player_name, sport, stat_type) == (
-            "DOTA Alias",
-            "DOTA",
-            "kills",
-        )
-        assert min_samples == 5
-        assert source_provider == "PrizePicks"
-        return [dota_row]
-
-    scheduled_provider.supplement_missing_results = supplement
+    scheduled_provider.supplement_missing_results = AsyncMock(return_value=[])
     context = SimpleNamespace(
         bot_data={
             "db": db,
@@ -265,10 +241,13 @@ async def test_dota_history_prefers_configured_propline_results_over_opendota(
     ):
         await player_history_collector_job(context)
 
-    primary_provider.fetch_results.assert_not_awaited()
+    # DOTA has no documented PropLine player-market mapping. Empty history
+    # must fall through to OpenDota instead of ending the lookup.
+    scheduled_provider.supplement_missing_results.assert_not_awaited()
+    primary_provider.fetch_results.assert_awaited_once_with(
+        "DOTA Alias", "DOTA", "kills"
+    )
     db.upsert_player_results_bulk.assert_awaited_once_with([dota_row])
-    assert "propline_attempts_by_sport={'DOTA': 1}" in caplog.text
-    assert "propline_coverage_by_sport={'DOTA': {'kills': 1}}" in caplog.text
 
 
 @pytest.mark.asyncio

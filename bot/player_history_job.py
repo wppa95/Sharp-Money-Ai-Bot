@@ -684,14 +684,21 @@ async def player_history_collector_job(context) -> None:
             source_provider: str,
             remaining: float,
         ):
-            """Use PropLine's verified DOTA result path when configured.
+            """Use PropLine for DOTA only when its market is documented.
 
             OpenDota requires a resolvable public handle and is not the source
             of truth for PropLine observations.  PropLine's esports event
             stats path joins final events and player stats by explicit IDs,
-            which covers feed names such as aliases and avoids silently
-            attributing unrelated OpenDota matches.
+            which covers feed names such as aliases. If PropLine has no exact
+            market or usable rows, the caller falls back to OpenDota history.
             """
+            from providers.propline import official_player_market_for
+
+            # DOTA currently has no documented PropLine player-market mapping.
+            # Do not spend a quota request on a guessed market; None tells the
+            # caller to use the public OpenDota player-stats route instead.
+            if not official_player_market_for(stat, sport="DOTA"):
+                return None
             supplement = getattr(
                 history_provider, "supplement_missing_results", None
             )
@@ -746,6 +753,10 @@ async def player_history_collector_job(context) -> None:
                 "DOTA", {}
             ).setdefault(market, {})
             market_coverage["rows"] = market_coverage.get("rows", 0) + row_count
+            if not row_count:
+                # An empty/unsupported history response is not a successful
+                # provider route. Let PlayerStatsProvider try OpenDota below.
+                return None
             return "ok", SimpleNamespace(
                 rows=list(rows or ()),
                 status="usable" if rows else "empty",
@@ -768,7 +779,16 @@ async def player_history_collector_job(context) -> None:
                             remaining,
                         )
                         if propline_result is not None:
-                            return propline_result
+                            propline_status, propline_coverage = propline_result
+                            if (
+                                propline_status == "ok"
+                                and getattr(propline_coverage, "rows", None)
+                            ):
+                                return propline_result
+                            # Missing history, an unsupported PropLine market,
+                            # or a provider error must not suppress the public
+                            # DOTA stats request. The cycle deadline is checked
+                            # again immediately before that request.
                     raw = await asyncio.wait_for(
                         provider.fetch_results(player, sport, stat),
                         timeout=min(

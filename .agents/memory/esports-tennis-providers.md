@@ -11,6 +11,13 @@ description: How CS/DOTA/Tennis game-result history is sourced; data availabilit
 - Fantasy points approximated: `kills×4 + assists×2 + deaths×(−2) + last_hits×0.15 + gpm×0.05`
   - Produces ~40–130 per game; exact Underdog formula is proprietary.
 
+## DOTA history fallback
+- PropLine may be queried only when `official_player_market_for()` has an exact DOTA market mapping and the result is usable. Otherwise fall back to OpenDota; never send guessed market keys.
+
+**Why:** The shared esports catalog can have no DOTA player-market mapping, and an empty `unknown_market` response must not suppress the public player-stats route.
+
+**How to apply:** Preserve the OpenDota map/series semantics below. If OpenDota cannot resolve a player handle, keep history unavailable until a verified identity mapping exists; do not guess account IDs.
+
 ## Multi-map stat scaling
 - "Kills on Maps 1+2" = cumulative over 2 games. OpenDota gives per-game data.
 - **Decision**: store `per_game_value × map_count` so the stored value is directly comparable to the cumulative line.
