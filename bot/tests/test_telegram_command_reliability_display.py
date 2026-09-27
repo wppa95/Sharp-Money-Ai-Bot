@@ -577,6 +577,8 @@ async def test_funnel_provider_populations_and_zero_directional_sport_stay_separ
     db.get_telegram_reconciliation.assert_not_awaited()
     assert "Soccer" in message
     assert "Soccer" in message.split("Sport Funnel Breakdown", 1)[1]
+    assert "Persisted directional records (not send-approved): <b>2</b>" in message
+    assert "Actionable persisted" not in message
 @pytest.mark.asyncio
 async def test_alert_history_preserves_uppercase_provider_pick_labels():
     update, context = _update_and_context()

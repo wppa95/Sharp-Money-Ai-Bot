@@ -5425,7 +5425,8 @@ async def cmd_funnel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             f"🧾 Historical observations: <b>{tracked_observations:,}</b>",
             f"🔬 Evaluated candidates: <b>{evaluated_total:,}</b>",
             f"🎯 Directional OVER/UNDER opportunities: <b>{directional_total:,}</b>",
-            f"✅ Actionable persisted: <b>{int(summary.get('actionable_total', directional_total) or 0):,}</b>",
+            f"📌 Persisted directional records (not send-approved): "
+            f"<b>{int(summary.get('actionable_total', directional_total) or 0):,}</b>",
             (
                 "   └─ Evidence basis: "
                 f"settled results <b>{int(evidence_by_source.get('settled_results', 0) or 0):,}</b> · "
