@@ -11,7 +11,7 @@ Underdog opportunity writes must derive event identity from the snapshot's suppo
 
 Directional opportunity rows used by Telegram must be persisted before send under the same provider source ID passed to the durable delivery-state check and alert-sent update. Keep `:line=<threshold>` identities confined to the tracking ledger unless lookup and send-bookkeeping paths consistently use that identity.
 
-**Why:** The full-pool delivery path previously wrote opportunities after sending and line-qualified their IDs, so the final durable gate could not find an eligible directional row.
+**Why:** The durable delivery guard fails closed when the main scan sends before its batched opportunity write; FPR and regular monitoring have separate delivery lifecycles, so both need an explicit pre-send barrier.
 
 **How to apply:** For every delivery path, verify source-ID equality and persistence order across tracking, opportunity logging, delivery-state lookup, and alert-sent bookkeeping. Keep delivery fail-closed when the required opportunity write fails.
 

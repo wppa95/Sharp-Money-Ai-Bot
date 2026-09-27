@@ -5113,6 +5113,7 @@ async def underdog_job(context) -> None:
     # Candidate telemetry is written in the required post-scan bulk phase.
     _deferred_candidate_batch: list[dict] = []
     _opportunity_batch: list[dict] = []
+    _opportunity_write_ok = True
     # Lifecycle state queues — populated during loop, applied AFTER bridge so
     # PropLineHistory rows exist before we try to update them.
     _lifecycle_alerted:  list[tuple[str, str, str]] = []   # (player, sport, stat_type) → ACTIVE_ALERTED
@@ -6848,6 +6849,41 @@ async def underdog_job(context) -> None:
                 _n_new_prop_sent,
             )
 
+        # Persist each directional opportunity before delivery. The alert path
+        # checks the durable opportunity ledger and fails closed when this row
+        # is not present, so writing this batch after Telegram made every first
+        # alert from the cycle self-block.
+        if _opportunity_batch:
+            if not db:
+                _opportunity_write_ok = False
+                _persistence_ok = False
+                logger.error(
+                    "underdog_job: directional opportunity persistence unavailable; "
+                    "blocking %d Telegram candidates",
+                    len(_delivery_queue),
+                )
+            else:
+                try:
+                    _opportunity_rows = list(_opportunity_batch)
+                    _bulk_opportunities = getattr(
+                        db, "log_prop_opportunity_bulk", None
+                    )
+                    if not callable(_bulk_opportunities):
+                        raise RuntimeError(
+                            "bulk opportunity persistence is unavailable"
+                        )
+                    await _bulk_opportunities(_opportunity_rows)
+                    _opportunity_batch.clear()
+                except Exception as _opportunity_exc:
+                    _opportunity_write_ok = False
+                    _persistence_ok = False
+                    logger.error(
+                        "underdog_job: opportunity bulk write failed; "
+                        "blocking %d Telegram candidates: %s",
+                        len(_delivery_queue),
+                        _opportunity_exc,
+                    )
+
         # ── Ranked delivery phase ──────────────────────────────────────────────────
         # All qualified candidates from new-prop, line-change, and standing paths
         # are attempted in priority order. Ranking does not impose a rolling send
@@ -6857,7 +6893,7 @@ async def underdog_job(context) -> None:
                 "underdog_job: delivery queue before selection — candidates=%d",
                 len(_delivery_queue),
             )
-        if _delivery_queue and chat_ids:
+        if _delivery_queue and chat_ids and _opportunity_write_ok:
             _delivery_queue[:] = _rank_delivery_candidates_by_sport(
                 _delivery_queue
             )
@@ -7497,23 +7533,6 @@ async def underdog_job(context) -> None:
                 # OS allocator before the next scan cycle.  Without this, the allocator
                 # holds freed memory as its own pool, which looks like growth in RSS.
                 gc.collect()
-
-        # ── Directional opportunity bulk write ─────────────────────────────────
-        if _opportunity_batch and db:
-            try:
-                _opportunity_rows = list(_opportunity_batch)
-                _bulk_opportunities = getattr(db, "log_prop_opportunity_bulk", None)
-                if callable(_bulk_opportunities):
-                    await _bulk_opportunities(_opportunity_rows)
-                else:
-                    raise RuntimeError("bulk opportunity persistence is unavailable")
-                _opportunity_batch.clear()
-            except Exception as _opportunity_exc:
-                _persistence_ok = False
-                logger.error(
-                    "underdog_job: opportunity bulk write failed: %s",
-                    _opportunity_exc,
-                )
 
         # ── Bulk MQ score write — update PropLineHistory for /picks and /slip filtering ──
         if _plh_mq_scores and db and not _cycle_budget_exhausted:

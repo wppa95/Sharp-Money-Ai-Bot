@@ -124,7 +124,14 @@ def _make_context(db: MagicMock) -> MagicMock:
     return ctx
 
 
-async def _run_job(snapshots, db, *, deliver_result=None, health: "HealthTracker | None" = None):
+async def _run_job(
+    snapshots,
+    db,
+    *,
+    deliver_result=None,
+    delivery_side_effect=None,
+    health: "HealthTracker | None" = None,
+):
     from alerts import DeliveryResult
     if deliver_result is None:
         deliver_result = DeliveryResult(sent=False)
@@ -137,7 +144,10 @@ async def _run_job(snapshots, db, *, deliver_result=None, health: "HealthTracker
         with patch.object(me, "_ud_full_scan_running", False):
             with patch("market_engine.AlertDelivery") as mock_cls:
                 mock_delivery = MagicMock()
-                mock_delivery.deliver_underdog = AsyncMock(return_value=deliver_result)
+                mock_delivery.deliver_underdog = AsyncMock(
+                    return_value=deliver_result,
+                    side_effect=delivery_side_effect,
+                )
                 mock_cls.return_value = mock_delivery
                 with patch("alerts.broadcast_alert",
                            new_callable=AsyncMock,
@@ -353,6 +363,15 @@ class TestLifecycleTransitionsAfterBridge:
         call_order: list[str] = []
         original_bridge = db.sync_underdog_snapshots_to_prop_history
         original_update = db.update_prop_lifecycle_state
+        original_opportunity_write = db.log_prop_opportunity_bulk
+
+        async def _opportunity_write_spy(rows):
+            call_order.append("opportunity")
+            return await original_opportunity_write(rows)
+
+        async def _delivery_spy(**_kwargs):
+            call_order.append("delivery")
+            return DeliveryResult(sent=True, recipients_sent=1)
 
         async def _bridge_spy(*args, **kwargs):
             call_order.append("bridge")
@@ -366,6 +385,9 @@ class TestLifecycleTransitionsAfterBridge:
 
         db.sync_underdog_snapshots_to_prop_history = _bridge_spy
         db.update_prop_lifecycle_state = _update_spy
+        db.log_prop_opportunity_bulk = AsyncMock(
+            side_effect=_opportunity_write_spy
+        )
 
         with patch("market_engine._fetch_and_compute_hit_rates",
                    new=AsyncMock(return_value=fake_hit_rates)):
@@ -384,8 +406,15 @@ class TestLifecycleTransitionsAfterBridge:
                                   new_callable=lambda: property(lambda self: {99999})):
                     await _run_job(
                         [snap], db,
-                        deliver_result=DeliveryResult(sent=True, recipients_sent=1),
+                        delivery_side_effect=_delivery_spy,
                     )
+
+        assert "opportunity" in call_order
+        assert "delivery" in call_order
+        assert call_order.index("opportunity") < call_order.index("delivery"), (
+            "Directional opportunity must be durable before the Telegram send "
+            f"checks the delivery funnel: {call_order}"
+        )
 
         # Bridge must have run
         assert "bridge" in call_order, (
