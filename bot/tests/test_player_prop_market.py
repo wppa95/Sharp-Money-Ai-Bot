@@ -954,6 +954,25 @@ class TestRunCycleBPlus:
         assert sent == 0
         broadcast.assert_not_called()
 
+    def test_kbo_npb_allow_direction_only_without_history(self):
+        props = [
+            self._prop(sport=sport, player=f"{sport} Player")
+            for sport in ("KBO", "NPB")
+        ]
+        with patch("alerts.broadcast_alert", new_callable=AsyncMock) as broadcast:
+            broadcast.return_value = {"sent": 1}
+            sent = LOOP.run_until_complete(run_player_prop_market_cycle(
+                db=self._make_db(),
+                bot=MagicMock(),
+                chat_ids=[123],
+                scored_props=props,
+                alerted_set={},
+                now=NOW,
+            ))
+
+        assert sent == 2
+        assert broadcast.await_count == 2
+
     def test_weak_b_directional_prop_is_admitted(self):
         """Optional sports need direction, not history or quality metadata."""
         with patch("alerts.broadcast_alert", new_callable=AsyncMock) as m:

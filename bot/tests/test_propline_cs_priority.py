@@ -220,7 +220,7 @@ def test_primary_history_without_propline_is_telegram_deliverable():
 
 
 @pytest.mark.parametrize("sport", ["KBO", "NPB"])
-def test_kbo_npb_need_settled_history_and_do_not_guess_markets(sport):
+def test_kbo_npb_allow_direction_only_but_do_not_guess_markets(sport):
     direction_only = SimpleNamespace(
         recommendation="OVER",
         evidence_source=None,
@@ -228,11 +228,11 @@ def test_kbo_npb_need_settled_history_and_do_not_guess_markets(sport):
     assert market_engine._has_delivery_evidence(
         sport=sport,
         decision=direction_only,
-    ) is False
+    ) is True
     assert _has_strong_underdog_evidence(
         sport=sport,
         decision=direction_only,
-    ) is False
+    ) is True
 
     settled_history = SimpleNamespace(
         evidence_source="propline",
@@ -248,8 +248,8 @@ def test_kbo_npb_need_settled_history_and_do_not_guess_markets(sport):
         decision=settled_history,
     ) is True
 
-    # Scope allowlisting is independent from PropLine's official catalog.
-    # Until it exposes a verified sport/market mapping, do not infer one.
+    # Direction-only Telegram eligibility does not authorize inventing a
+    # PropLine market key for settlement or grading.
     assert official_player_market_for("Hits", sport=sport) is None
 
 

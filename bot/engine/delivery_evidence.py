@@ -24,7 +24,6 @@ _NESTED_KEYS = (
 )
 
 _STRICT_HISTORY_SPORTS = frozenset({"MLB", "NFL", "NBA", "WNBA", "NHL"})
-_UNVERIFIED_MARKET_SPORTS = frozenset({"KBO", "NPB"})
 
 
 def is_history_optional_sport(sport: Any) -> bool:
@@ -545,17 +544,15 @@ def optional_sport_evidence_is_usable(
 ) -> bool:
     """Keep source-integrity checks without requiring optional-sport history.
 
-    Direction-only eligibility permits a missing results payload. If a payload
-    explicitly claims evidence, however, it must be a supported completed
-    source with a sufficient sample. KBO/NPB remain blocked until such evidence
-    exists because their player-market mappings are not verified.
+    Direction-only eligibility permits a missing results payload for every
+    history-optional sport, including KBO and NPB. If a payload explicitly
+    claims evidence, that evidence must still be a supported completed source
+    with a sufficient sample. The sport parameter is retained for callers that
+    share one interface across sport-specific checks.
     """
-    normalized = " ".join(
-        str(sport or "").strip().upper().replace("_", " ").replace("-", " ").split()
-    )
     available = history_is_available(*values)
     if not available:
-        return normalized not in _UNVERIFIED_MARKET_SPORTS
+        return True
     return history_supports_delivery(*values, min_samples=min_samples)
 
 

@@ -637,7 +637,7 @@ def test_non_major_sports_use_direction_without_game_history():
 
     for sport in ("MLB", "NBA", "NFL", "WNBA", "NHL"):
         assert is_history_optional_sport(sport) is False
-    for sport in ("TENNIS", "SOCCER", "FIFA", "CS", "DOTA"):
+    for sport in ("TENNIS", "SOCCER", "FIFA", "CS", "DOTA", "KBO", "NPB"):
         assert is_history_optional_sport(sport) is True
 
     direction_only = types.SimpleNamespace(recommendation="OVER")
@@ -684,6 +684,11 @@ def test_delivery_gates_allow_strong_direction_without_game_history_only_outside
     assert _has_strong_underdog_evidence(
         decision=decision, sport="TENNIS"
     ) is True
+    for sport in ("KBO", "NPB"):
+        assert _has_delivery_evidence(sport=sport, decision=decision) is True
+        assert _has_strong_underdog_evidence(
+            decision=decision, sport=sport
+        ) is True
     assert _has_delivery_evidence(
         sport="TENNIS",
         decision=types.SimpleNamespace(recommendation="OVER", confidence=None),
