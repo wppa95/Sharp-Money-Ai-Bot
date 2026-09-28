@@ -44,17 +44,15 @@ _PLAYER_HISTORY_PERSIST_TIMEOUT_SECONDS = 900.0
 # request per target at once. These workers belong to this invocation; there
 # is no carryover queue or deferred target list.
 _PLAYER_HISTORY_FETCH_CONCURRENCY = 256
-# Do not let a busy SQLite writer consume the whole cadence. Provider calls
-# use the providers' own request timeouts and all selected targets are awaited;
-# target data is never intentionally dropped by this collector.
+# Default bound for cycle-local operations not given a more specific timeout.
 _PLAYER_HISTORY_OPERATION_TIMEOUT_SECONDS = 5.0
 # Sport providers have request timeouts between 6 and 12 seconds. Give one
 # player/stat target enough time to complete its provider route, while the
 # collector's absolute cadence deadline remains the hard upper bound.
 _PLAYER_HISTORY_PROVIDER_TIMEOUT_SECONDS = 12.0
 # Active-target discovery reads the shared SQLite database while full-feed
-# persistence may be draining. Give that read a bounded but realistic window;
-# provider calls retain the shorter timeout above.
+# persistence may be draining. Give that read its own bounded window; provider
+# calls use the separate per-target timeout above.
 _PLAYER_HISTORY_TARGET_DISCOVERY_TIMEOUT_SECONDS = 30.0
 
 # Retained for the legacy rotating-target helper and callers that import it.
@@ -677,6 +675,12 @@ async def player_history_collector_job(context) -> None:
             str, dict[str, dict[str, int]]
         ] = {}
         budget_exhausted = False
+        deadline_targets = 0
+        provider_timeout_targets = 0
+        cycle_deadline_targets = 0
+        provider_timeout_by_sport: dict[str, int] = {}
+        cycle_deadline_by_sport: dict[str, int] = {}
+        provider_timeout_examples: list[str] = []
         fetch_semaphore = asyncio.Semaphore(_PLAYER_HISTORY_FETCH_CONCURRENCY)
         completed_targets: list[tuple[str, str, str]] = []
         history_provider = bot_data.get("player_history_provider")
@@ -894,19 +898,34 @@ async def player_history_collector_job(context) -> None:
                 break
             fetch_results.extend(batch_results)
 
-        deadline_targets = 0
         for (player, sport, stat), (fetch_status, fetch_value) in zip(
             cycle_targets, fetch_results
         ):
             target_counts[sport] = target_counts.get(sport, 0) + 1
             processed += 1
-            if fetch_status == "deadline":
-                budget_exhausted = True
+            if fetch_status in {"provider_timeout", "cycle_deadline"}:
                 deadline_targets += 1
+                if fetch_status == "provider_timeout":
+                    provider_timeout_targets += 1
+                    provider_timeout_by_sport[sport] = (
+                        provider_timeout_by_sport.get(sport, 0) + 1
+                    )
+                    if len(provider_timeout_examples) < 10:
+                        provider_timeout_examples.append(
+                            f"{player}/{sport}/{stat}"
+                        )
+                else:
+                    budget_exhausted = True
+                    cycle_deadline_targets += 1
+                    cycle_deadline_by_sport[sport] = (
+                        cycle_deadline_by_sport.get(sport, 0) + 1
+                    )
                 logger.debug(
-                    "player_history_collector_job: cadence deadline reached "
-                    "for %s/%s/%s",
-                    player, sport, stat,
+                    "player_history_collector_job: %s for %s/%s/%s",
+                    fetch_status,
+                    player,
+                    sport,
+                    stat,
                 )
                 continue
             if fetch_status == "error":
@@ -1047,7 +1066,10 @@ async def player_history_collector_job(context) -> None:
             "player_history_collector_job: done players_ok=%d rows=%d "
             "persisted_rows=%d targets_processed=%d rows_processed=%d "
             "remaining_targets=%d processed=%d remaining=%d errors=%d "
-            "deadline_targets=%d empty_results=%d budget_exhausted=%s "
+            "deadline_targets=%d provider_timeout_targets=%d "
+            "provider_timeout_by_sport=%s provider_timeout_examples=%s "
+            "cycle_deadline_targets=%d "
+            "cycle_deadline_by_sport=%s empty_results=%d budget_exhausted=%s "
             "result_row_cap=none targets_total=%d elapsed=%.1fs "
             "targets_by_sport=%s "
             "players_ok_by_sport=%s rows_by_sport=%s "
@@ -1059,6 +1081,9 @@ async def player_history_collector_job(context) -> None:
             ok, rows, persisted_rows, processed, rows,
             len(cycle_targets) - processed, processed,
             len(cycle_targets) - processed, failed, deadline_targets,
+            provider_timeout_targets, provider_timeout_by_sport,
+            provider_timeout_examples,
+            cycle_deadline_targets, cycle_deadline_by_sport,
             no_result_targets, budget_exhausted, len(cycle_targets),
             time.monotonic() - cycle_started, target_counts,
             ok_by_sport, rows_by_sport, no_result_by_sport,

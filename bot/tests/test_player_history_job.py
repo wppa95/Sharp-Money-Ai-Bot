@@ -881,16 +881,56 @@ async def test_player_history_provider_timeout_cannot_hold_next_cadence(caplog):
     context = SimpleNamespace(bot_data={"db": db})
 
     with (
-        patch("player_history_job._player_history_cadence_budget", return_value=0.03),
+        patch("player_history_job._player_history_cadence_budget", return_value=0.2),
         patch("providers.player_stats.PlayerStatsProvider", return_value=provider),
         caplog.at_level("INFO"),
     ):
         await asyncio.wait_for(
             player_history_collector_job(context),
-            timeout=0.2,
+            timeout=0.5,
         )
 
     assert "budget_exhausted=True" in caplog.text
+    assert "cycle_deadline_targets=1" in caplog.text
+    assert "provider_timeout_targets=0" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_player_history_provider_timeouts_do_not_claim_cycle_budget(caplog):
+    snapshot = SimpleNamespace(
+        player_name="Slow Provider",
+        sport="NBA",
+        stat_type="points",
+    )
+    db = MagicMock()
+    db.get_active_underdog_snapshot_per_prop = AsyncMock(
+        return_value={("Slow Provider", "points"): snapshot}
+    )
+    provider = MagicMock()
+
+    async def slow_fetch(*_args):
+        await asyncio.sleep(0.1)
+        return []
+
+    provider.fetch_results = slow_fetch
+    context = SimpleNamespace(bot_data={"db": db})
+
+    with (
+        patch("player_history_job._player_history_cadence_budget", return_value=1.0),
+        patch(
+            "player_history_job._PLAYER_HISTORY_PROVIDER_TIMEOUT_SECONDS",
+            0.02,
+        ),
+        patch("providers.player_stats.PlayerStatsProvider", return_value=provider),
+        caplog.at_level("INFO"),
+    ):
+        await player_history_collector_job(context)
+
+    assert "deadline_targets=1" in caplog.text
+    assert "provider_timeout_targets=1" in caplog.text
+    assert "provider_timeout_by_sport={'NBA': 1}" in caplog.text
+    assert "cycle_deadline_targets=0" in caplog.text
+    assert "budget_exhausted=False" in caplog.text
 
 
 @pytest.mark.asyncio
