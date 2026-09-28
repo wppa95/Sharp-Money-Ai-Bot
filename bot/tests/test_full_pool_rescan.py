@@ -110,7 +110,6 @@ def _make_db(
     db.log_prop_opportunity                  = AsyncMock()
     db.mark_ud_snapshot_alert_sent           = AsyncMock()
     db.mark_opportunity_alert_sent           = AsyncMock()
-    db.seed_clv_from_ud_confirmation         = AsyncMock()
     return db
 
 

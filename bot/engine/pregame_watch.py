@@ -408,6 +408,8 @@ class PregameWatchEngine:
         Continuous scan — tracks qualifying props not yet alerted, and
         rechecks significant line movement. Telegram output is subject to the
         canonical direction-and-evidence gate.
+        The shared _directional_evidence_gate remains the safety boundary for
+        this compatibility broadcaster.
 
         Alert conditions:
           • First detection of the prop with proxy_match_confidence ≥ 60

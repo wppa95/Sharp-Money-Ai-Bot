@@ -481,7 +481,7 @@ class TestIndependentPrizePicks:
             {"source": "PrizePicks", "confirmed": True, "avg_line": 14.5}
         ) == 14.5
         assert market_engine._prizepicks_line_from_confirmation(
-            {"source": "OddsAPI", "confirmed": True, "avg_line": 14.5}
+            {"source": "Sportsbook", "confirmed": True, "avg_line": 14.5}
         ) is None
         assert market_engine._prizepicks_line_from_confirmation(None) is None
 
@@ -511,7 +511,7 @@ class TestIndependentPrizePicks:
                     )
                 }
 
-        result = await market_engine._get_odds_api_confirmation(
+        result = await market_engine._get_propline_confirmation(
             "WNBA",
             "Kiki Rice",
             "Points",

@@ -1845,9 +1845,8 @@ async def test_propline_observation_reaches_existing_confirmation_boundary(monke
     )
     monkeypatch.setattr(market_engine, "_propline_provider", _Provider())
     monkeypatch.setattr(market_engine, "_confirmation_db", history_db)
-    monkeypatch.setattr(market_engine.config, "ODDS_API_ENABLED", False)
 
-    result = await market_engine._get_odds_api_confirmation(
+    result = await market_engine._get_propline_confirmation(
         "NBA",
         player_name="Alex Example",
         stat_type="points",
@@ -1891,9 +1890,8 @@ async def test_same_cycle_propline_cache_supplements_underdog_without_new_reques
         get_prop_line_history=AsyncMock(return_value=[]),
     )
     monkeypatch.setattr(market_engine, "_confirmation_db", history_db)
-    monkeypatch.setattr(market_engine.config, "ODDS_API_ENABLED", False)
 
-    result = await market_engine._get_odds_api_confirmation(
+    result = await market_engine._get_propline_confirmation(
         "NBA",
         player_name="Alex Example",
         stat_type="points",

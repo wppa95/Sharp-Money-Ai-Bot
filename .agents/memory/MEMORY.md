@@ -2,8 +2,8 @@
 - [Player prop picks/slip framework](picks-slip-framework.md) — /picks and /slip use PropPickAdapter wrapping PropLineHistory+PlayerPropMarketComparison; no PP edge data required; PropPickAdapter implements the slip optimizer interface.
 - [Auto-sent slip outcomes](auto-slip-outcomes.md) — official PropLine results only; combo status is a summary, not an actual payout record.
 - [Async test event loop pattern](async-test-loop.md) — Python 3.11 aiosqlite tests must use module-level asyncio.new_event_loop(); never asyncio.get_event_loop() across test files.
-- [Multi-platform connector architecture](connector-architecture.md) — DK/FD connectors use Odds API filtered by bookmaker key; Underdog uses unofficial /v3/over_under_lines; pick'em isolation enforced by is_pickem flag.
-- [Alert source priority](source-priority.md) — PrizePicks (primary/daily) → Underdog (secondary) → DK/FD MLB ML/Totals (tertiary); never optimise sportsbook alerts ahead of PP work.
+- [Provider and connector architecture](connector-architecture.md) — Underdog owns live pick'em evaluation; PropLine supplies supplemental observations while historical sportsbook identities remain read-only.
+- [Alert source priority](source-priority.md) — Underdog live evaluation → PropLine observations and evidence; retired sportsbook work is out of scope.
 - [Player Prop Validation + Bet Decision Layer](player-validation-layer.md) — validation gates immediate alerts (n≥5); bet decision (OVER/UNDER/PASS) uses market-proxy signals only; season/h2h always null; stored in 4 new DB columns; shown in every alert.
 - [Esports & Tennis stat providers](esports-tennis-providers.md) — DOTA=OpenDota (free), CS=PandaScore (needs PANDASCORE_API_KEY), Tennis=JeffSackmann CSV (free); multi-map stats scaled by map count; UD_ALERT_SPORTS now includes DOTA/TENNIS/CS.
 - [v1.3 Stability architecture](v13-stability.md) — HealthTracker JSON sidecar, PropLineHistory lifecycle_state, clamp_score, /health + /restarts; re-entry detection; PLAYER PROP MARKET ALERT is the active framework; pregame watch foundation added.
@@ -17,7 +17,7 @@
 - [V2.0 incremental fix pass Aug 2026](v20-fix-pass.md) — 6 targeted fixes: type guard in _fetch_and_compute_hit_rates; futures separated from _sport_raw into _sport_futures; /status sport keys filter market qualifiers (winner/championship/etc); DK/FD show "disabled" not "OK·never"; cmd_analyze wrapped in try/except; /alerts window 24h→72h; 2672 tests passing.
 - [Sleeper Stats integration](sleeper-integration.md) — SleeperStatsProvider supplements ESPN gamelog for NFL only (1 game/week = per-game data); NBA/MLB weekly totals stored shadow-only; pick'em lines confirmed inaccessible (all endpoints 404); 55 new tests; 2727 total passing.
 - [Soccer + NHL stat coverage](soccer-nhl-coverage.md) — Soccer uses multi-league ESPN cascade (EPL→LaLiga→Bundesliga→SerieA→Ligue1→MLS→NWSL); NHL uses existing ESPN route + merged goalie stats; both added to UD_ALERT_SPORTS; 2796 tests passing Aug 2026.
-- [Backfill + OddsAPI confirmation](backfill-odds-confirmation.md) — /backfill command grades pending props; OddsAPI confirmation layer for S/A picks (NBA+MLB only, non-blocking, surname fuzzy match); 3006 tests Aug 2026.
+- [Backfill grading](backfill-odds-confirmation.md) — /backfill grades pending props only after supported completed-result evidence is available.
 - [Slip journal + player memory](slip-journal.md) — SlipJournal/SlipJournalLeg tables; /slip create|add|grade|journal subcommands; /player hit-rate history; /slipstats pick+slip performance; get_pick_accuracy_by_sport; 3054 tests Aug 2026.
 - [V1.3 freeze gates + DK/FD removal](v13-freeze-gates.md) — MLB UNDER blocked at all 3 alert paths; C-tier added to line-change gate ("S","A","B","C"); DK/FD connectors removed; sport funnel breakdown in /funnel; 3070 tests Aug 2026.
 - [Market-only signals are non-actionable](market-signal-bypass.md) — line movement remains monitoring context; no directional recommendation or delivery without legitimate player-result evidence.
@@ -42,11 +42,10 @@
 - [S-tier priority override system](priority-override.md) — V3.4-final: 80+ BQ=HIGH PRIORITY (4★); 95+ BQ=override; stars from _bq_stars(conf) not score.total; Strong UNDER signal when direction=UNDER+score≤30; 3981 tests Aug 2026.
 - [V3.5 Reporting Cleanup + Restart Resume](v35-reporting-cleanup.md) — /alerts 24h window, /status daily-only, dashboard Today-only, fast-resume checkpoint (HealthTracker+market_engine), cold-start tests; 4030 tests Aug 2026.
 - [V3.5 Final Diagnosis + Targeted Fixes](v35-final-diagnosis.md) — qualified=intermediate gate (no bug); fast-resume standing-path scan-1 fix; dashboard All-time labels; 16-item lifecycle tests; 4105 tests Aug 2026.
-- [OddsAPI supporting data pass](oddsapi-supporting-data.md) — method alias bug fix (fetch_player_prop_lines); avg_odds CLV field; standing path PASS guard; health monitor registration; 47 new tests; 4152 total Aug 2026.
 - [Dedup restore fallback + funnel fixes](dedup-funnel-fixes.md) — get_recent_alerted_props_for_dedup now includes PLH.first_alert_sent_at as fallback (prevents post-restart dup alerts when POL write failed silently); get_funnel_summary merged to 1 DB session; cmd_funnel _db None guard added; /funnel "Scanned"→"Evaluated" label; 4152 tests Aug 2026.
 - [Credibility fix pass Aug 2026](credibility-fixes.md) — 9-issue spec: re-entry delivery (should_alert=True), ScanCycleLog full pipeline tracking, /funnel HTML escaping, _HFS expansion (Points+Assists/Rebounds, Pts+Rebs+Asts with spaces, Fantasy Points in Games 1+2, etc.), alert freshness timestamp, silent→WARNING logging, /picks delivery status; 4176 tests Aug 2026.
 - [Delivery gate spec (Tier 2)](delivery-gate-spec.md) — MLB/NFL: S+A tier deliver; B/C watchlist; UNDER allowed; no BQ gate; lc-path fast-resume cold_start gate fixed; UD_MLB_MIN_TIER default changed S→A; 4 root causes diagnosed; 4170 tests Aug 2026.
-- [CLV UD confirmation wiring](clv-ud-confirmation-wiring.md) — OddsAPI avg_odds seeded into AlertCLVSeed at alert time; harvest guard changed to `if not seed.bet_odds` (UD seeds with odds now proceed); known bug: clv_result.clv_lead should be clv_result.clv_proxy in harvest job.
+- [The Odds API retirement](odds-api-retirement.md) — no provider clients, requests, schedulers, quota/pacing, confirmations, CLV fetches, or live ingestion may return without an explicit user request; historical rows remain readable.
 - [Final Prop Acceptance Spec](prop-acceptance-spec.md) — MLB UNDER whitelist (7 markets); NFL UNDER fully allowed; Tier 1 A-tier cutoff = 70; 🔥 STRONG UNDER Tier 1 only BQ≥70; _lc_odds_confirm must init at 12-space preamble level; 45 spec tests; 4259 total passing Aug 2026.
 - [Fast Resume removal + stale test resolution](fast-resume-removal.md) — _fast_resume/_FAST_RESUME_THRESHOLD_MINUTES removed from market_engine; standing path gate plain `not is_cold_start`; 11 pre-existing stale tests fixed (BQ label→STRONG BET, _make_decision mock +l5 attrs, _is_prop_deduped +2 args, test_24 +ud_snaps); 4298 passing Aug 2026.
 - [Stale-line freshness guard](stale-line-guard.md) — root cause = Underdog API propagation lag (not a code bug); _ud_line_fresh() + _current_scan_line_map guard all 5 delivery points; 95+ alert adds "verify" disclaimer; 4324 tests Aug 2026.
@@ -59,7 +58,7 @@
 - [MQ hard gate](mq-gate.md) — _mq_passes_delivery_gate() blocks MQ 40-69 (dead zone) always; sub-40 OVER blocked; applied at all 3 collection points AND delivery loop backstop; 8/2 Tier1/Tier2 split uses _TIER2_SPORTS={"NBA","MLB","NFL"}.
 - [Atomic delivery dedup lock](atomic-dedup-lock.md) — _try_claim_delivery_slot() pre-claims dedup slot under asyncio.Lock before any deliver_underdog; threshold 85 for Tier 2 BQ+MQ; lc-path needs dedup gate at collection; conftest clears _prop_market_alerted between tests.
 - [Tier 2 delivery backstop](tier2-delivery-backstop.md) — call-site guards insufficient; broadcast_alert() bypasses deliver_underdog; final backstop inside deliver_underdog() + per-site guards; alerts._TIER2_SPORTS_BLOCK patchable constant.
-- [Scope filter config access bug](scope-filter-config-bug.md) — `import config; config.x` hits MODULE not instance; always use `config.config.x`; _poll_odds_job iterates ud_tier1_sports not active_sports; 4641 tests Aug 2026.
+- [Scope filter config access bug](scope-filter-config-bug.md) — `import config; config.x` hits MODULE not instance; always use `config.config.x`.
 - [Confidence thresholds Aug 2026](conf-threshold-aug2026.md) — UD_MIN_CONF_S=85, UD_MIN_CONF_A=75, UD_NON_STRICT_MIN_CONF_A=75 (raised from 80/70/70).
 - [Player history job spec](player-history-spec.md) — Tier-1 only (filter MLB/NBA/NFL), unlimited player count, 250 API-call cap per 2-min cycle; never add player-count slice to target-build loop.
 - [Tier-1 direction gate (Weak direction fix)](tier1-direction-gate.md) — sport= param on make_ud_bet_decision; Tier-1 uses _B_RATE_TIER1=0.55, Tier-2/empty uses _B_RATE=0.60; all 8 call sites pass sport=.
@@ -70,11 +69,8 @@
 - [Unified monitoring universe](unified-monitoring-universe.md) — every active prop line is continuously scannable; delivery eligibility never creates a rotation or tracking queue.
 - [Directional persistence policy](pass-watchlist-persistence.md) — PASS/no-direction/watchlist are transient scan results; only OVER/UNDER evaluations are persisted.
 - [Provider scope separation](provider-scope-separation.md) — ACTIVE_SPORTS is the Underdog universe; PropLine is internal Underdog evidence, not a user-facing provider.
-- [OddsAPI error pacing](oddsapi-error-pacing.md) — permanent 422 INVALID_MARKET responses must not back off valid shared polling.
-- [OddsAPI strict pacing](oddsapi-strict-pacing.md) — all real cache misses share a persisted local-day cap and minimum request interval.
 - [FPR scheduler starvation](fpr-scheduler-starvation.md) — when Underdog scans exceed the FPR interval, serialized deferrals can prevent live FPR execution without a post-scan handoff.
- - [Provider confirmation boundary](provider-confirmation-boundary.md) — confirmations are read-only corroboration: reuse existing OddsAPI rows/cache, never add polling, scoring, or delivery paths.
- - [Odds API settlement-only scope](odds-api-settlement-only.md) — retain Odds API for explicitly paced settlement/evidence requests; PropLine/Underdog own live markets and player-prop ingestion.
+  - [Provider confirmation boundary](provider-confirmation-boundary.md) — confirmations are read-only PropLine/provider-neutral corroboration; historical sportsbook rows remain reporting-only.
 - [PropLine endpoint safety](propline-endpoint.md) — require an explicit authorized API URL; never send the credential to a guessed host.
 - [Provider history adapter contract](provider-history-adapter.md) — provider-specific history adapters must preserve scorer-required lifecycle fields such as removed.
 - [Provider timestamp normalization](sports-time-normalization.md) — normalize aware instants to UTC before dropping offsets; preserve naive UTC and date-only values.
@@ -130,7 +126,6 @@
 - [PropLine catalog audit boundary](propline-catalog-audit.md) — catalog drift is separate operational evidence; retain unknown identities and resolve them only when a later complete audit maps them.
 - [Opportunity identity and FPR delivery](opportunity-event-identity.md) — keep source IDs stable and persist the directional opportunity before Telegram under the exact ID checked at delivery.
 - [History coverage boundaries](history-coverage-boundaries.md) — batch full-book provider work; report empty sport coverage separately from errors and deadlines.
-- [Odds API player-prop feed](odds-player-prop-feed.md) — sportsbook props supplement the canonical Underdog workflow; h2h/totals polling is retired.
 - [Provider-aware prop ledger](provider-aware-prop-ledger.md) — every supported feed keeps source identity across observation, history, tracking, grading, and reports; sportsbook rows never enter the Underdog alert universe.
 - [Adaptive learning policy](adaptive-learning-policy.md) — provider-aware weights are explicit, audited, bounded ranking adjustments and never qualification or delivery gates.
 - [Optional score reporting](optional-score-reporting.md) — diagnostic ranking output must tolerate missing scores without aborting the monitoring cycle.

@@ -17,7 +17,7 @@ def reporting_timezone() -> ZoneInfo:
     """Return the configured reporting timezone, falling back safely to UTC."""
     name = (
         getattr(config, "REPORTING_TIMEZONE", None)
-        or getattr(config, "ODDS_API_PACING_TIMEZONE", None)
+        or getattr(config, "REPORTING_TIMEZONE", None)
         or "UTC"
     )
     try:

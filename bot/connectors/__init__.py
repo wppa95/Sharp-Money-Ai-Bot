@@ -12,7 +12,7 @@ Public re-exports:
 
 Note: DraftKings and FanDuel connectors were removed (Aug 2026).
 Their snapshots did not feed into Underdog confidence scoring, so
-they provided no marginal value over the existing OddsAPI confirmation
+they provided no marginal value over existing provider corroboration
 layer. Provider rule: only keep providers that improve actionable picks.
 """
 

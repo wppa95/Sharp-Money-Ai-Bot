@@ -31,7 +31,6 @@ from prizepicks import (
     PrizePicksClient,
     compare_pp_to_sportsbook,
     PP_LEAGUE_IDS,
-    PP_STAT_TO_ODDS_API,
     _american_to_implied,
     _fair_prob_multiplicative,
     _prob_per_unit_for,
@@ -288,11 +287,6 @@ class TestPrizePicksLineModel:
         assert PP_LEAGUE_IDS["NBA"] == 2
         assert PP_LEAGUE_IDS["NFL"] == 9
         assert PP_LEAGUE_IDS["MLB"] == 3
-
-    def test_stat_to_odds_api_mapping(self):
-        assert PP_STAT_TO_ODDS_API["Points"]        == "player_points"
-        assert PP_STAT_TO_ODDS_API["Passing Yards"] == "player_pass_yds"
-        assert PP_STAT_TO_ODDS_API["Rebounds"]      == "player_rebounds"
 
 
 # ── Client response parsing ───────────────────────────────────────────────────

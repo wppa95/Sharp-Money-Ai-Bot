@@ -4,17 +4,14 @@ analysis.py — AnalysisEngine orchestrator.
 Wraps VigRemover, EVCalculator, SteamDetector, and AIConfidenceScorer into a
 single entry-point used by main.py and commands.py.
 
-Also owns fetch_live_odds() — the live data feed via The Odds API.
+Live market data is supplied by the active Underdog/PropLine providers.
 """
 
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Optional
-
-import aiohttp
 
 from models import (
     AlertType,
@@ -22,7 +19,6 @@ from models import (
     EVResult,
     FairOdds,
     MarketType,
-    OddsLine,
     OddsMovement,
     Recommendation,
     Sport,
@@ -31,135 +27,6 @@ from models import (
 from config import config
 
 logger = logging.getLogger(__name__)
-
-# ── The Odds API — sport / market key mappings ────────────────────────────────
-
-_SPORT_TO_ODDS_API_KEY: dict[Sport, str] = {
-    Sport.NFL:    "americanfootball_nfl",
-    Sport.NBA:    "basketball_nba",
-    Sport.MLB:    "baseball_mlb",
-    Sport.NHL:    "icehockey_nhl",
-    Sport.NCAAF:  "americanfootball_ncaaf",
-    Sport.NCAAB:  "basketball_ncaab",
-    Sport.UFC:    "mma_mixed_martial_arts",
-    Sport.WNBA:   "basketball_wnba",
-    # Soccer — one Odds API key per league
-    Sport.EPL:        "soccer_epl",
-    Sport.LA_LIGA:    "soccer_spain_la_liga",
-    Sport.SERIE_A:    "soccer_italy_serie_a",
-    Sport.BUNDESLIGA: "soccer_germany_bundesliga",
-    Sport.LIGUE_1:    "soccer_france_ligue_one",
-    Sport.MLS:        "soccer_usa_mls",
-    Sport.UCL:        "soccer_uefa_champs_league",
-    Sport.SOCCER:     "soccer_epl",   # legacy alias — do not activate with EPL
-}
-
-_MARKET_KEY_TO_TYPE: dict[str, MarketType] = {
-    "h2h":    MarketType.MONEYLINE,
-    "totals": MarketType.TOTAL,
-    # "spreads" removed — spreads are not requested (markets="h2h,totals") and
-    # are blocked by alert_scope_filter.py.  Re-add here only when both the
-    # fetch and the scope filter are updated together.
-}
-
-# Player-prop markets to request per sport, keyed by the raw Odds API market
-# name that also appears in prizepicks.PP_STAT_TO_ODDS_API.
-# Priority 1 (default active): NBA, MLB.
-# Priority 2 (enable via PLAYER_PROP_SPORTS env var): soccer leagues.
-# NFL excluded — add Sport.NFL here only if re-enabled.
-_SPORT_PLAYER_PROP_MARKETS: dict[Sport, str] = {
-    # Priority 1: sports actively cross-matched against PrizePicks / Underdog.
-    # NBA is included so props are ready when the season opens; if NBA is
-    # not in PLAYER_PROP_SPORTS the entry is never reached.
-    Sport.NBA: (
-        "player_points,player_rebounds,player_assists,"
-        "player_threes,player_steals,player_blocks"
-    ),
-    Sport.MLB: "player_hits,player_pitcher_strikeouts,player_total_bases",
-    Sport.WNBA: (
-        "player_points,player_rebounds,player_assists,"
-        "player_threes,player_steals,player_blocks"
-    ),
-    Sport.NFL: (
-        "player_pass_yds,player_pass_tds,player_pass_completions,"
-        "player_rush_yds,player_rush_tds,player_receptions,"
-        "player_reception_yds,player_reception_tds"
-    ),
-    Sport.NHL: (
-        "player_points,player_assists,player_goals,"
-        "player_shots_on_goal,player_blocked_shots"
-    ),
-    # Soccer leagues removed: soccer player-prop alerts are out of scope and
-    # fetching them consumes quota that blocks MLB/NBA HIGH-priority calls.
-    # Re-add here only when soccer prop delivery is enabled in
-    # alert_scope_filter.py.
-}
-
-# Explicit coverage contract for the sportsbook confirmation feed.  This is
-# intentionally separate from the Odds API sport-key map: a sport may have a
-# general Odds API key while player-prop availability is still unverified.
-SPORTSBOOK_PLAYER_PROP_COVERAGE: dict[str, dict[str, object]] = {
-    "MLB": {"status": "validated", "markets": _SPORT_PLAYER_PROP_MARKETS[Sport.MLB]},
-    "NBA": {"status": "validated", "markets": _SPORT_PLAYER_PROP_MARKETS[Sport.NBA]},
-    "WNBA": {"status": "validated", "markets": _SPORT_PLAYER_PROP_MARKETS[Sport.WNBA]},
-    "NFL": {"status": "validated", "markets": _SPORT_PLAYER_PROP_MARKETS[Sport.NFL]},
-    "NHL": {"status": "validated", "markets": _SPORT_PLAYER_PROP_MARKETS[Sport.NHL]},
-    # No speculative market requests: these remain visible as unverified.
-    "EPL": {"status": "unverified", "markets": "", "reason": "player props not validated"},
-    "LaLiga": {"status": "unverified", "markets": "", "reason": "player props not validated"},
-    "SerieA": {"status": "unverified", "markets": "", "reason": "player props not validated"},
-    "Bundesliga": {"status": "unverified", "markets": "", "reason": "player props not validated"},
-    "Ligue1": {"status": "unverified", "markets": "", "reason": "player props not validated"},
-    "MLS": {"status": "unverified", "markets": "", "reason": "player props not validated"},
-    "UCL": {"status": "unverified", "markets": "", "reason": "player props not validated"},
-    "TENNIS": {"status": "unverified", "markets": "", "reason": "sport not mapped"},
-}
-
-_ODDS_MARKET_TO_PROP_STAT: dict[str, str] = {
-    "player_points": "Points",
-    "player_rebounds": "Rebounds",
-    "player_assists": "Assists",
-    "player_threes": "3-PT Made",
-    "player_steals": "Steals",
-    "player_blocks": "Blocks",
-    "player_hits": "Hits",
-    "player_pitcher_strikeouts": "Pitcher Strikeouts",
-    "player_total_bases": "Total Bases",
-    "player_pass_yds": "Passing Yards",
-    "player_pass_tds": "Passing Touchdowns",
-    "player_pass_completions": "Pass Completions",
-    "player_rush_yds": "Rushing Yards",
-    "player_rush_tds": "Rushing Touchdowns",
-    "player_receptions": "Receptions",
-    "player_reception_yds": "Receiving Yards",
-    "player_reception_tds": "Receiving Touchdowns",
-    "player_goals": "Goals",
-    "player_shots_on_goal": "Shots on Goal",
-    "player_blocked_shots": "Blocked Shots",
-}
-
-_ODDS_API_BASE = "https://api.the-odds-api.com/v4"
-
-
-# ── Player-prop result dataclass ──────────────────────────────────────────────
-
-@dataclass
-class PlayerPropLine:
-    """A single sportsbook player-prop outcome from The Odds API."""
-    sportsbook:   str
-    sport:        Sport
-    market_key:   str            # raw Odds API key, e.g. "player_points"
-    event:        str
-    player_name:  str
-    description:  str            # "Over" or "Under" (from outcome description)
-    american_odds: int
-    line:         Optional[float]
-    event_start:  Optional[datetime]
-    # Observation time is distinct from event_start and lets confirmation
-    # reject stale cached rows without treating game time as fetch time.
-    observed_at:  datetime = field(default_factory=datetime.utcnow)
-    event_id:      str = ""
-
 
 # ── Vig removal ───────────────────────────────────────────────────────────────
 
@@ -360,7 +227,7 @@ class AIConfidenceScorer:
       0–39   → 1★   (weak / noise)
 
     Future signals (add when data available):
-      • Liquidity / volume (Odds API doesn't expose volume yet)
+      • Liquidity / volume (some provider feeds do not expose volume)
       • Timing proximity to game start
       • PrizePicks lag confirmation
     """
@@ -497,9 +364,6 @@ class AnalysisEngine:
     """
     Orchestrates vig removal, EV calculation, steam detection, and confidence
     scoring into a single EVOpportunity output.
-
-    Also provides fetch_live_odds() which calls The Odds API to retrieve live
-    sportsbook odds as a flat list of OddsLine objects.
     """
 
     def __init__(self) -> None:
@@ -580,213 +444,9 @@ class AnalysisEngine:
             reason_codes=reason_codes,
         )
 
-    # ── Live data feed ─────────────────────────────────────────────────────────
-
-    async def fetch_live_odds(
-        self, sport: Sport, markets: str = "h2h,totals",
-    ) -> list[OddsLine]:
-        """
-        Fetch live odds from The Odds API (https://the-odds-api.com).
-
-        Returns a flat list of OddsLine objects — one per outcome per book per
-        requested market. The default preserves the existing h2h/totals API;
-        sportsbook moneyline/total polling passes markets="h2h,totals".
-        Returns an empty list when the API key is missing or the request fails.
-        """
-        if not config.ODDS_API_KEY:
-            logger.warning(
-                "ODDS_API_KEY not configured; skipping live odds fetch for %s", sport
-            )
-            return []
-
-        sport_key = _SPORT_TO_ODDS_API_KEY.get(sport)
-        if not sport_key:
-            logger.debug("No Odds API key mapping for sport %s", sport)
-            return []
-
-        # Route through the shared OddsApiCache so every call is:
-        #   1. Budget-guarded (usage tracker blocks over-quota calls)
-        #   2. Deduplicated (TTL cache — DK & FD share one fetch per sport)
-        #   3. Health-monitored (quota headers recorded automatically)
-        # This eliminates the direct aiohttp path that previously bypassed all
-        # three controls and caused repeated 401-spam in the logs.
-        try:
-            from providers.odds_cache import get_odds_cache, OddsApiError
-            cache = get_odds_cache()
-            if cache is None:
-                logger.warning(
-                    "OddsApiCache not yet initialised; skipping live odds for %s", sport
-                )
-                return []
-            data: list[dict] = await cache.get_or_fetch(
-                sport_key,
-                api_key=config.ODDS_API_KEY,
-                markets=markets,
-                regions="us",
-                odds_format="american",
-            )
-        except OddsApiError as exc:
-            logger.error("Odds API request failed for %s: %s", sport, exc)
-            return []
-        except Exception as exc:
-            logger.exception("Unexpected error fetching odds for %s: %s", sport, exc)
-            return []
-
-        lines: list[OddsLine] = []
-        for event in data:
-            away = event.get("away_team", "Away")
-            home = event.get("home_team", "Home")
-            event_name = f"{away} @ {home}"
-            event_id = str(event.get("id") or event_name)
-
-            commence_str = event.get("commence_time")
-            try:
-                event_start: Optional[datetime] = (
-                    datetime.fromisoformat(commence_str.replace("Z", "+00:00"))
-                    if commence_str
-                    else None
-                )
-            except ValueError:
-                event_start = None
-
-            for bookmaker in event.get("bookmakers", []):
-                book_title = bookmaker.get("title") or bookmaker.get("key", "Unknown")
-                for market in bookmaker.get("markets", []):
-                    mtype = _MARKET_KEY_TO_TYPE.get(market.get("key", ""))
-                    if mtype is None:
-                        continue
-                    for outcome in market.get("outcomes", []):
-                        try:
-                            lines.append(
-                                OddsLine(
-                                    sportsbook=book_title,
-                                    sport=sport,
-                                    market_type=mtype,
-                                    event=event_name,
-                                    selection=outcome["name"],
-                                    american_odds=int(outcome["price"]),
-                                    line=outcome.get("point"),
-                                    event_start=event_start,
-                                )
-                            )
-                        except (KeyError, TypeError, ValueError) as exc:
-                            logger.debug("Skipping malformed outcome: %s", exc)
-
-        logger.info("Fetched %d odds lines for %s", len(lines), sport)
-        return lines
-
-    async def fetch_player_prop_odds(self, sport: Sport) -> list[PlayerPropLine]:
-        """
-        Fetch player-prop odds from The Odds API for *sport*.
-
-        Only runs for sports listed in _SPORT_PLAYER_PROP_MARKETS.  Returns a
-        flat list of PlayerPropLine objects — one per outcome per book per
-        market.  Results are budget-guarded and TTL-cached via OddsApiCache
-        (same path as fetch_live_odds).
-
-        These rows are stored in odds_records with market_type = the raw Odds
-        API key (e.g. "player_points") so find_player_prop_odds() can match
-        them against PrizePicks lines via PP_STAT_TO_ODDS_API.
-        """
-        if not config.ODDS_API_KEY:
-            logger.warning(
-                "ODDS_API_KEY not configured; skipping player prop fetch for %s", sport
-            )
-            return []
-
-        markets = _SPORT_PLAYER_PROP_MARKETS.get(sport)
-        if not markets:
-            logger.debug("No player-prop market mapping for sport %s", sport)
-            return []
-
-        sport_key = _SPORT_TO_ODDS_API_KEY.get(sport)
-        if not sport_key:
-            logger.debug("No Odds API key mapping for sport %s", sport)
-            return []
-
-        try:
-            from providers.odds_cache import get_odds_cache, OddsApiError
-            cache = get_odds_cache()
-            if cache is None:
-                logger.warning(
-                    "OddsApiCache not initialised; skipping player props for %s", sport
-                )
-                return []
-            data: list[dict] = await cache.get_or_fetch(
-                sport_key,
-                api_key=config.ODDS_API_KEY,
-                markets=markets,
-                regions="us",
-                odds_format="american",
-            )
-        except OddsApiError as exc:
-            logger.error("Odds API player-prop request failed for %s: %s", sport, exc)
-            return []
-        except Exception as exc:
-            logger.exception("Unexpected error fetching player props for %s: %s", sport, exc)
-            return []
-
-        lines: list[PlayerPropLine] = []
-        for event in data:
-            away = event.get("away_team", "Away")
-            home = event.get("home_team", "Home")
-            event_name = f"{away} @ {home}"
-            event_id = str(event.get("id") or event_name)
-
-            commence_str = event.get("commence_time")
-            try:
-                event_start: Optional[datetime] = (
-                    datetime.fromisoformat(commence_str.replace("Z", "+00:00"))
-                    if commence_str
-                    else None
-                )
-            except ValueError:
-                event_start = None
-
-            for bookmaker in event.get("bookmakers", []):
-                book_title = bookmaker.get("title") or bookmaker.get("key", "Unknown")
-                for market in bookmaker.get("markets", []):
-                    market_key = market.get("key", "")
-                    if not market_key.startswith("player_"):
-                        continue
-                    for outcome in market.get("outcomes", []):
-                        try:
-                            lines.append(
-                                PlayerPropLine(
-                                    sportsbook=book_title,
-                                    sport=sport,
-                                    market_key=market_key,
-                                    event=event_name,
-                                    player_name=outcome["name"],
-                                    description=outcome.get("description", ""),
-                                    american_odds=int(outcome["price"]),
-                                    line=outcome.get("point"),
-                                    event_start=event_start,
-                                    observed_at=datetime.utcnow(),
-                                    event_id=event_id,
-                                )
-                            )
-                        except (KeyError, TypeError, ValueError) as exc:
-                            logger.debug("Skipping malformed player prop outcome: %s", exc)
-
-        logger.info("Fetched %d player prop lines for %s", len(lines), sport)
-        return lines
-
-    # ── Future integration stubs ───────────────────────────────────────────────
-
-    async def fetch_player_prop_lines(self, sport: Sport) -> list["PlayerPropLine"]:
-        """
-        Alias for fetch_player_prop_odds(), called by
-        market_engine._get_odds_api_confirmation().
-
-        Uses the shared OddsApiCache (TTL=55s) so repeated calls within the
-        same scan cycle cost zero extra API credits.
-        """
-        return await self.fetch_player_prop_odds(sport)
-
-    async def fetch_prizepicks_lines(self, sport: Sport) -> list[OddsLine]:
-        """PLACEHOLDER: Fetch PrizePicks player prop lines."""
-        logger.debug("fetch_prizepicks_lines called for %s (not yet implemented)", sport)
+    async def fetch_prizepicks_lines(self, sport: Sport) -> list[object]:
+        """PropLine owns PrizePicks ingestion; this legacy engine has no feed."""
+        logger.debug("fetch_prizepicks_lines called for %s; use PropLine provider", sport)
         return []
 
     async def run_ml_model(self, opportunity: EVOpportunity) -> int:

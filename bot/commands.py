@@ -404,23 +404,18 @@ _db: Optional[Database] = None
 _engine: Optional[AnalysisEngine] = None
 _alert_chat_ids: list[int] = []
 _total_alerts_sent: int = 0
-# SeasonChecker instance passed from main.py — typed as object to avoid a
-# circular import; duck-typed at call sites via hasattr checks.
-_season_checker: Optional[object] = None
 
 
 def init_handlers(
     db: Database,
     analysis_engine: AnalysisEngine,
     alert_chat_ids: list[int],
-    season_checker: Optional[object] = None,
 ) -> None:
     """Call this once from main.py after the database and engine are ready."""
-    global _db, _engine, _alert_chat_ids, _season_checker
+    global _db, _engine, _alert_chat_ids
     _db             = db
     _engine         = analysis_engine
     _alert_chat_ids = alert_chat_ids
-    _season_checker = season_checker
 
 
 def _uptime_str() -> str:
@@ -562,30 +557,7 @@ def _fmt_provider_status_line(provider_name: str, display_name: str) -> str:
                 detail = f" ({h.quota_remaining:,} req remaining)"
             elif h.error_msg:
                 detail = f" — {h.error_msg[:50]}"
-            pace = ""
-            if provider_name == "OddsAPI":
-                try:
-                    from providers.quota_pacing import get_quota_pacer
-                    pacer = get_quota_pacer()
-                    if pacer is not None:
-                        telemetry = pacer.telemetry()
-                        next_request = (
-                            "now"
-                            if telemetry.seconds_until_eligible <= 0
-                            and telemetry.status == "READY"
-                            else (
-                                f"{telemetry.seconds_until_eligible / 60:.0f}m"
-                                if telemetry.seconds_until_eligible > 0
-                                else "provider reset"
-                            )
-                        )
-                        pace = (
-                            f" · {telemetry.daily_count}/{telemetry.daily_limit} today"
-                            f" · next {next_request}"
-                        )
-                except ImportError:
-                    pass
-            return f"  {display_name}:  {h.status_emoji} {h.status.value}{detail}{pace}"
+            return f"  {display_name}:  {h.status_emoji} {h.status.value}{detail}"
     except ImportError:
         pass
     return f"  {display_name}:  ⚪ not tracked"
@@ -618,8 +590,6 @@ async def cmd_health(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
 
         _JOB_LABELS = {
             "underdog_monitor":      "Underdog monitor",
-            "budget_checker":        "Budget checker",
-            "season_checker":        "Season checker",
             "opportunity_grader":    "Opportunity grader",
             "player_history_collector": "Player history",
             "prop_history_pruner":   "History pruner",
@@ -5018,7 +4988,7 @@ async def cmd_config(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         "",
         "<b>Poll Intervals</b>",
         f"  Shared Player Props monitor: <code>{config.UNDERDOG_POLL_INTERVAL}s ({config.UNDERDOG_POLL_INTERVAL // 60} min)</code>",
-        f"  Season check:      <code>{config.SEASON_CHECK_INTERVAL}s</code>",
+        "  Season check:      <code>retired (PropLine/Underdog feed)</code>",
         "",
         "<i>Secrets are never shown. Restart the bot after changing env vars.</i>",
     ]

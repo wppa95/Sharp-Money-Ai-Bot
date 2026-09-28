@@ -22,8 +22,8 @@ class Sport(str, enum.Enum):
     NCAAB = "NCAAB"
     UFC = "UFC"
     WNBA = "WNBA"
-    # Soccer leagues (one enum member per league — each maps to its own
-    # Odds API sport key). SOCCER is kept as a legacy alias for EPL.
+    # Soccer leagues (one enum member per league). SOCCER is kept as a legacy
+    # alias for EPL.
     EPL = "EPL"
     LA_LIGA = "LaLiga"
     SERIE_A = "SerieA"

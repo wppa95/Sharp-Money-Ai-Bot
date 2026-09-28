@@ -30,11 +30,10 @@ Three stage counters added to `underdog_job`:
 
 Emitted in `underdog_job [debug summary]` INFO line as a per-sport table.
 
-## DK/FD disabled by default
-`DRAFTKINGS_ENABLED` and `FANDUEL_ENABLED` defaults changed to `"false"` (config.py).
-Re-enable with env vars when adding back provider-by-provider.
-
-**Why:** Underdog-only validation phase; doc explicitly prioritizes Underdog pipeline before adding other providers.
+## Retired sportsbook sources
+DraftKings, FanDuel, and The Odds API are retired. Their historical rows may
+remain available for reporting, but they are not live alert sources and must
+not be reintroduced without an explicit user request.
 
 ## Key invariant
 `_market_move_sent` is initialized at the per-prop variable block (alongside `ud_result`) so all code paths are safe regardless of which scoring branch runs.

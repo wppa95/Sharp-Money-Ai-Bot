@@ -45,45 +45,10 @@ class Config:
     # Minimum AI confidence score (0–100) to include in alert
     MIN_AI_CONFIDENCE: int = int(os.environ.get("MIN_AI_CONFIDENCE", "60"))
 
-    # ── Polling / Job intervals (seconds) ─────────────────────────────────────
-    ODDS_POLL_INTERVAL: int = int(os.environ.get("ODDS_POLL_INTERVAL", "60"))
-    STEAM_CHECK_INTERVAL: int = int(os.environ.get("STEAM_CHECK_INTERVAL", "30"))
-
     # ── External APIs ─────────────────────────────────────────────────────────
-    ODDS_API_KEY: str = os.environ.get("ODDS_API_KEY", "")
-    # Odds API is an optional supplemental source. PropLine remains the primary
-    # player-prop feed; strict quota pacing below limits Odds API usage.
-    ODDS_API_ENABLED: bool = os.environ.get("ODDS_API_ENABLED", "false").lower() not in (
-        "false", "0", "no", "off"
-    )
-    # Legacy OddsAPI scope, retained for compatibility while the provider is
-    # disabled. ACTIVE_SPORTS may contain provider-only identifiers.
-    ODDS_API_SPORTS_RAW: str = os.environ.get(
-        "ODDS_API_SPORTS",
-        "MLB,NBA,NHL,NCAAB,UFC,WNBA,EPL,LaLiga,SerieA,"
-        "Bundesliga,Ligue1,MLS,UCL",
-    )
-    # Legacy quota values retained for compatibility with old status readers.
-    ODDS_API_QUOTA_LIMIT: int = int(os.environ.get("ODDS_API_QUOTA_LIMIT", "500"))
-    ODDS_API_DAILY_LIMIT: int = int(os.environ.get("ODDS_API_DAILY_LIMIT", "16"))
-    ODDS_API_MIN_REQUEST_INTERVAL: float = float(
-        os.environ.get("ODDS_API_MIN_REQUEST_INTERVAL", str(60 * 60))
-    )
-    ODDS_API_PACING_TIMEZONE: str = os.environ.get(
-        "ODDS_API_PACING_TIMEZONE", "America/Chicago"
-    )
     # All user-facing "today"/calendar-day reports use this timezone.
     REPORTING_TIMEZONE: str = os.environ.get(
         "REPORTING_TIMEZONE", "America/Chicago"
-    )
-    ODDS_API_PACING_STATE_FILE: str = os.environ.get(
-        "ODDS_API_PACING_STATE_FILE",
-        os.path.join(os.path.dirname(__file__), "data", "odds_api_pacing.json"),
-    )
-    # Retained for compatibility with older configuration readers.  Strict
-    # pacing does not use an adaptive maximum interval or deadline.
-    ODDS_API_MAX_REQUEST_INTERVAL: int = int(
-        os.environ.get("ODDS_API_MAX_REQUEST_INTERVAL", "900")
     )
     # PrizePicks uses a public API — no key required. Field reserved for future
     # authenticated endpoints.
@@ -195,8 +160,7 @@ class Config:
     )
 
     # ── Player-prop source settings ────────────────────────────────────────────
-    # PropLine supplies PrizePicks and supplemental Underdog observations.
-    # DraftKings/FanDuel confirmation is opt-in and disabled by default.
+    # PropLine supplies PrizePicks and any explicitly configured book sources.
     DRAFTKINGS_ENABLED: bool = os.environ.get("DRAFTKINGS_ENABLED", "false").lower() not in (
         "false", "0", "no", "off"
     )
@@ -204,9 +168,6 @@ class Config:
         "false", "0", "no", "off"
     )
     UNDERDOG_ENABLED:   bool = os.environ.get("UNDERDOG_ENABLED",   "true").lower() == "true"
-    SPORTSBOOK_CONFIRMATION_ENABLED: bool = os.environ.get(
-        "SPORTSBOOK_CONFIRMATION_ENABLED", "false"
-    ).lower() not in ("false", "0", "no", "off")
 
     # Polling intervals for multi-platform connectors (seconds)
     CONNECTOR_POLL_INTERVAL:  int = int(os.environ.get("CONNECTOR_POLL_INTERVAL",  "120"))
@@ -357,20 +318,6 @@ class Config:
     # Dedup windows for new alert types (seconds)
     INEFFICIENCY_DEDUP_WINDOW: int = int(os.environ.get("INEFFICIENCY_DEDUP_WINDOW", "1800"))
     CLV_DEDUP_WINDOW:          int = int(os.environ.get("CLV_DEDUP_WINDOW",           "3600"))
-
-    # ── Season / market-status check ─────────────────────────────────────────
-    # How often to refresh the /v4/sports active-market cache (seconds).
-    # Default: 3600 (1 hour).  Set to 0 to disable automatic skipping.
-    SEASON_CHECK_INTERVAL: int = int(os.environ.get("SEASON_CHECK_INTERVAL", "3600"))
-
-    # ── Legacy Odds API cache ────────────────────────────────────────────────
-    # Retained for compatibility; no Odds API requests are made while disabled.
-    ODDS_API_CACHE_TTL: int = int(os.environ.get("ODDS_API_CACHE_TTL", "55"))
-
-    # ── Legacy API budget management ─────────────────────────────────────────
-    ODDS_API_MONTHLY_BUDGET: int = int(
-        os.environ.get("ODDS_API_MONTHLY_BUDGET", str(ODDS_API_QUOTA_LIMIT))
-    )
 
     # ── Alert limits ─────────────────────────────────────────────────────────
     # Maximum PrizePicks A/B-tier alerts sent per calendar day (UTC).

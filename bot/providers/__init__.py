@@ -1,8 +1,8 @@
 """
 providers/ — Production data infrastructure.
 
-Exports the shared health monitor, Odds API cache, game-results framework,
-and API usage tracker used across all data connectors.
+Exports the shared health monitor, provider-neutral game-results framework,
+and provider usage tracker used across data connectors.
 """
 
 from .base import FailureType, ProviderHealth, ProviderStatus
@@ -11,7 +11,13 @@ from .health_monitor import (
     get_health_monitor,
     init_health_monitor,
 )
-from .odds_cache import OddsApiCache, OddsApiError, get_odds_cache, init_odds_cache
+from .game_results import (
+    GameResult,
+    GameResultsProvider,
+    OddsApiResultsProvider,
+    PropGradeResult,
+    grade_pp_pick,
+)
 from .usage_tracker import (
     ApiUsageTracker,
     CallPriority,
@@ -71,10 +77,11 @@ __all__ = [
     "ProviderHealthMonitor",
     "get_health_monitor",
     "init_health_monitor",
-    "OddsApiCache",
-    "OddsApiError",
-    "get_odds_cache",
-    "init_odds_cache",
+    "GameResult",
+    "GameResultsProvider",
+    "OddsApiResultsProvider",
+    "PropGradeResult",
+    "grade_pp_pick",
     "ApiUsageTracker",
     "CallPriority",
     "UsageStats",

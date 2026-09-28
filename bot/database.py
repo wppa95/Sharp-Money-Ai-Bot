@@ -1062,7 +1062,7 @@ class AlertCLVSeed(Base):
 
     When an alert is sent, a seed is created with the odds at that moment.
     After the event closes, a harvester job reads these seeds, fetches
-    closing odds (via OddsAPI or manual entry), computes CLV, and stores
+    closing odds (via retained records or manual entry), computes CLV, and stores
     the result in clv_records.
 
     ``clv_computed`` is False until the harvest job processes the seed.
@@ -4075,7 +4075,7 @@ class Database:
         Find sportsbook player-prop OddsRecords for a player + stat combination.
 
         Matches records whose ``selection`` column contains the player name
-        (case-insensitive) and whose ``market_type`` equals the Odds API stat
+        (case-insensitive) and whose ``market_type`` equals the stored stat key
         string (e.g. "player_points").
         """
         async with self.session() as s:
@@ -6153,72 +6153,6 @@ class Database:
             result = await s.execute(stmt)
             await s.commit()
             return result.rowcount if result.rowcount >= 0 else len(rows)
-
-    async def seed_clv_from_ud_confirmation(
-        self,
-        *,
-        source_id: int,
-        sport: str,
-        stat_type: str,
-        player_name: str,
-        line: float,
-        game_time: "Optional[datetime]",
-        tier: str,
-        avg_odds: int,
-        alerted_at: "Optional[datetime]" = None,
-    ) -> bool:
-        """
-        Create or update an AlertCLVSeed for an Underdog S/A alert that has
-        OddsAPI market confirmation with real sportsbook odds.
-
-        Unlike ``seed_clv_from_ud_snapshots`` (which sets bet_odds=None and is
-        immediately expired by the harvest job), this method sets bet_odds to
-        ``avg_odds`` from the OddsAPI confirmation so the seed survives until a
-        closing line is available.
-
-        Uses ON CONFLICT DO UPDATE so that if a seed was already created by the
-        periodic seed job (bet_odds=NULL), it is upgraded with the real market
-        odds — ensuring at most one CLV seed per alert.
-
-        Returns True if the seed was inserted or upgraded.
-        """
-        from sqlalchemy.dialects.sqlite import insert as sqlite_insert
-
-        selection = f"{player_name} {stat_type} {line:g}"
-        now = alerted_at or datetime.utcnow()
-
-        row = dict(
-            source_table     = "underdog_snapshots",
-            source_id        = source_id,
-            alert_type       = "UNDERDOG",
-            sport            = sport or "",
-            market_type      = stat_type or "",
-            event            = f"{player_name} {sport}",
-            selection        = selection,
-            bet_odds         = avg_odds,
-            counterpart_odds = None,
-            tier             = tier or "",
-            game_time        = game_time,
-            alerted_at       = now,
-            clv_pct          = None,
-            clv_computed     = False,
-        )
-
-        async with self.session() as s:
-            stmt = (
-                sqlite_insert(AlertCLVSeed)
-                .values([row])
-                .on_conflict_do_update(
-                    index_elements=["source_table", "source_id"],
-                    # Only overwrite bet_odds when the existing row has none —
-                    # never overwrite a seed that already has real odds or is computed.
-                    set_={"bet_odds": avg_odds},
-                    where=AlertCLVSeed.bet_odds.is_(None),
-                )
-            )
-            result = await s.execute(stmt)
-            await s.commit()
-            return result.rowcount > 0
 
     # ── Underdog snapshots ───────────────────────────────────────────────────
 

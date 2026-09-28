@@ -1,6 +1,6 @@
 ---
 name: Provider-aware prop ledger
-description: Durable boundary for combining pick'em and sportsbook player-prop feeds without conflating evidence or delivery.
+description: Durable boundary for combining player-prop observations without conflating evidence or delivery.
 ---
 
 All supported player-prop feeds should enter one canonical observation/history/tracking lifecycle while retaining provider identity in every source and report population. Sportsbook observations can support evidence and settlement tracking, but must not silently become Underdog alert candidates.
@@ -9,18 +9,10 @@ All supported player-prop feeds should enter one canonical observation/history/t
 
 **How to apply:** Normalize provider rows once, persist immutable observations plus current history and neutral tracking, preserve provider-aware identities through grading and rollups, and keep provider delivery gates separate from the shared ledger.
 
-PropLine is the configured observation feed for PrizePicks, DraftKings, FanDuel,
-and supplemental Underdog rows. The native Underdog connector remains active
-and primary; the legacy Odds API player-prop polling job must not create new
-DK/FD rows.
-
-**Why:** Routing DK/FD through the same PropLine feed preserves one source
-contract and prevents pacing limits on the legacy Odds API path from creating
-provider gaps.
-
-**How to apply:** Keep the four bookmaker keys configured at the PropLine
-request boundary, map each to its provider label before persistence, and never
-allow supplemental PropLine rows to enter a separate Telegram delivery lane.
+PropLine is the configured supplemental observation feed for PrizePicks and
+Underdog rows. The native Underdog connector remains active and primary.
+Historical sportsbook identities may remain in the ledger but are not live
+inputs and must not create new rows.
 
 When a provider is disabled, do not construct its client, register its usage
 budget, or schedule its polling/status jobs; compatibility callbacks may remain

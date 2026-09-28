@@ -127,7 +127,7 @@ def build_historical_market_evidence(candidate: Any) -> dict[str, Any]:
                     },
                 })
 
-    for key in ("line_history", "market_comparison", "cross_source", "odds_confirmation", "clv"):
+    for key in ("line_history", "market_comparison", "cross_source", "clv"):
         value = trace.get(key)
         if value not in (None, "", {}, [], ()):
             items.append({"source": key, "value": value})

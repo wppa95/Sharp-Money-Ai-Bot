@@ -1,26 +1,24 @@
 """
 providers/usage_tracker.py — API credit usage tracking and budget enforcement.
 
-Tracks outgoing Odds API request counts (our own per-day counter), enforces a
-configurable monthly budget, and fires Telegram warning alerts at configured
+Tracks optional outgoing provider request counts (our own per-day counter),
+enforces configurable monthly budgets, and fires warning alerts at configured
 thresholds (default 75 % / 90 % / 100 %).
 
 The *authoritative* quota remaining (from x-requests-remaining headers) lives in
 the health monitor.  This module adds:
   - our own day/month counts that survive across sessions (JSON file)
   - call-priority levels so non-essential calls are dropped first
-  - active-sport filtering via a registered SeasonChecker
   - threshold tracking (which warnings have already been sent this month)
 
 Call-priority levels
 ---------------------
-  CRITICAL (1) — PrizePicks pipeline: never blocked, uses no Odds API quota
-  HIGH     (2) — Player prop markets + game lines for any configured active sport
+    CRITICAL (1) — primary feed: never blocked
+    HIGH     (2) — high-priority provider requests
   MEDIUM   (3) — Reserved (currently unused in infer_call_priority)
   LOW      (4) — Everything else (inactive sports, unconfigured markets)
 
-Priority is sport-agnostic: any sport present in ACTIVE_SPORTS config
-automatically receives HIGH priority for its Odds API calls without code changes.
+Priority is provider-neutral and based on the market type supplied by the caller.
 
 Budget-enforcement rules (against budget_pct = quota_used / monthly_budget × 100)
 --------------------------
@@ -54,48 +52,25 @@ WARN_THRESHOLDS: tuple[int, ...] = (75, 90, 100)
 # ── Priority levels ────────────────────────────────────────────────────────────
 
 class CallPriority(IntEnum):
-    """Priority of a single Odds API call — lower value = higher priority."""
+    """Priority of a provider call — lower value = higher priority."""
 
-    CRITICAL = 1   # PrizePicks (no Odds API cost, guard kept for uniformity)
-    HIGH     = 2   # Player props + game lines for any configured active sport
+    CRITICAL = 1   # Primary provider requests
+    HIGH     = 2   # Important provider requests
     MEDIUM   = 3   # Reserved — kept for backward compatibility; not used by infer_call_priority
-    LOW      = 4   # Everything else (inactive sports, unconfigured markets)
+    LOW      = 4   # Everything else
 
 
 def infer_call_priority(sport_key: str, markets: str) -> CallPriority:
     """
     Derive a CallPriority from the sport key and markets query string.
 
-    Priority is **sport-agnostic**: adding a sport to ``ACTIVE_SPORTS`` config
-    automatically elevates its Odds API calls to HIGH without code changes.
-
     Rules (in order):
       1. Any ``"player_props"`` or ``"player_"`` market → HIGH (all sports)
-      2. Game-line call for a sport whose Odds API key is in the active
-         configured sports (``config.active_sports``) → HIGH
-      3. Everything else → LOW
+      2. Everything else → LOW
     """
     # ── 1. Player props are always HIGH regardless of sport ───────────────────
     if "player_props" in markets or "player_" in markets:
         return CallPriority.HIGH
-
-    # ── 2. Game lines for any configured active sport → HIGH ──────────────────
-    # Build the set of Odds API sport keys for the currently active sports so
-    # priority is driven by config rather than hard-coded sport names.
-    try:
-        from config import config as _cfg
-        from models import Sport
-        from engine.analysis import _SPORT_TO_ODDS_API_KEY
-        active_odds_keys: frozenset[str] = frozenset(
-            odds_key.lower()
-            for sp, odds_key in _SPORT_TO_ODDS_API_KEY.items()
-            if isinstance(sp, Sport) and sp.value in _cfg.active_sports
-        )
-        if sport_key.lower() in active_odds_keys:
-            return CallPriority.HIGH
-    except Exception:
-        # Fail open: if the config/model import fails, fall through to LOW
-        pass
 
     return CallPriority.LOW
 
@@ -169,17 +144,11 @@ class ApiUsageTracker:
         self._last_request:   dict[str, datetime]        = {}
         # thresholds already warned this calendar month — reset on new month
         self._warned:         dict[str, set[int]]        = {}
-        # optional SeasonChecker for active-sport filtering
-        self._season_checker  = None
         self._current_month   = date.today().strftime("%Y-%m")
 
         self._load()
 
     # ── Public interface ───────────────────────────────────────────────────────
-
-    def set_season_checker(self, checker) -> None:
-        """Register a SeasonChecker for active-sport filtering in should_allow()."""
-        self._season_checker = checker
 
     def record_request(
         self,
@@ -213,28 +182,9 @@ class ApiUsageTracker:
         """
         Return ``(allowed: bool, reason: str)``.
 
-        Two checks are applied (in order):
-
-        1. **Active-sport filter** — if a SeasonChecker is registered and
-           *sport_key* is not in the active-season set, block the call.
-           (Only applied to MEDIUM and LOW priority; HIGH/CRITICAL always pass.)
-
-        2. **Budget enforcement** — uses the authoritative quota from the
-           health monitor when available, falls back to our own month count.
+        The configured provider budget uses authoritative quota data when
+        available, falling back to the tracker's own month count.
         """
-        # ── 1. Active-sport filter ────────────────────────────────────────────
-        if (
-            sport_key is not None
-            and priority.value >= CallPriority.MEDIUM.value
-            and self._season_checker is not None
-            and hasattr(self._season_checker, "get_active_sport_keys")
-        ):
-            active_keys = self._season_checker.get_active_sport_keys()
-            # fail-open: if cache is empty the checker returns empty frozenset
-            if active_keys and sport_key not in active_keys:
-                return False, f"sport {sport_key!r} not in season"
-
-        # ── 2. Budget enforcement ─────────────────────────────────────────────
         budget     = self._budgets.get(provider, 0)
         if budget <= 0:
             return True, ""   # unlimited
@@ -414,14 +364,13 @@ def init_usage_tracker(
     ----------
     monthly_budgets:
         Provider name → monthly request cap.  Defaults to
-        ``{"OddsAPI": 500}`` (The Odds API free tier).
+        Empty by default; providers may supply their own budgets.
     data_dir:
         Directory for ``api_usage.json`` persistence.
     """
     global _tracker
     if monthly_budgets is None:
-        from config import config as _cfg
-        monthly_budgets = {"OddsAPI": _cfg.ODDS_API_MONTHLY_BUDGET}
+        monthly_budgets = {}
     _tracker = ApiUsageTracker(monthly_budgets=monthly_budgets, data_dir=data_dir)
     logger.info(
         "ApiUsageTracker initialised — budgets: %s",

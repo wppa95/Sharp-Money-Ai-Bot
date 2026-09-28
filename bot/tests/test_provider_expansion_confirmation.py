@@ -14,9 +14,7 @@ sys.path.insert(0, ".")
 
 @pytest.fixture(autouse=True)
 def enable_legacy_sportsbook_confirmation(monkeypatch):
-    """Keep the reusable confirmation implementation covered behind opt-in."""
-    import config
-    monkeypatch.setattr(config.config, "SPORTSBOOK_CONFIRMATION_ENABLED", True)
+    """PropLine corroboration no longer needs a sportsbook feature flag."""
 
 from connectors.underdog import UnderdogConnector
 from engine.provider_confirmation import (
@@ -119,31 +117,3 @@ def test_confirmation_rejects_wrong_side_ambiguous_name_and_stale_data():
     assert confirm_market(
         target, observations, now=now, max_age_seconds=4 * 60 * 60,
     ) is None
-
-
-@pytest.mark.asyncio
-async def test_game_confirmation_uses_persisted_odds_rows_without_polling():
-    # Kept async so callers can use the same shape as the market-engine path.
-    from market_engine import _get_odds_api_confirmation, init_odds_confirmation
-
-    db = SimpleNamespace(
-        get_odds_window=AsyncMock(return_value=[
-            SimpleNamespace(
-                sportsbook="DraftKings", sport="NFL",
-                market_type="Total (O/U)", event="Chiefs @ Raiders",
-                selection="Over", line=44.5, american_odds=-110,
-                recorded_at=datetime.utcnow(),
-            ),
-        ])
-    )
-    init_odds_confirmation(None, db)
-    try:
-        result = await _get_odds_api_confirmation(
-            "NFL", market_type="total", direction="OVER", line=44.5,
-            event="Chiefs @ Raiders",
-        )
-        assert result is not None
-        assert result["confirmed"] is True
-        db.get_odds_window.assert_awaited_once()
-    finally:
-        init_odds_confirmation(None)

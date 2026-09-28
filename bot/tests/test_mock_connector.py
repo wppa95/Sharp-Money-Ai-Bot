@@ -2,7 +2,7 @@
 tests/test_mock_connector.py — Full pipeline tests using MockOddsConnector.
 
 Verifies that mock odds feed → analysis engines → Telegram alerts all
-work correctly without consuming any Odds API credits.
+work correctly without consuming external-provider quota.
 
 Coverage
 --------

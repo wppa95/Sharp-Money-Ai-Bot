@@ -1,6 +1,6 @@
 # Sharp Money +EV Detection Bot — v1.0
 
-A professional sports-betting intelligence Telegram bot that monitors live sportsbook odds, detects steam moves and positive-expected-value opportunities, and delivers richly formatted alerts automatically.
+A sports-betting Telegram bot that monitors Underdog player props and PropLine observations, evaluates directional evidence, and delivers alerts automatically.
 
 ---
 
@@ -8,7 +8,6 @@ A professional sports-betting intelligence Telegram bot that monitors live sport
 
 - **Run:** `Sharp Money Bot` workflow (or `python bot/main.py`)
 - **Required secret:** `TELEGRAM_TOKEN` (set in Replit Secrets)
-- **Optional secret:** `ODDS_API_KEY` — The Odds API key for live data (without it the polling jobs no-op gracefully)
 - The bot polls Telegram continuously; keep the workflow running
 
 ---
@@ -19,7 +18,7 @@ A professional sports-betting intelligence Telegram bot that monitors live sport
 |---|---|
 | Bot framework | python-telegram-bot 22 (async, APScheduler job queue) |
 | Database | SQLAlchemy 2 + aiosqlite (async SQLite) |
-| HTTP client | aiohttp (live odds fetch) |
+| HTTP client | aiohttp (Underdog and PropLine provider requests) |
 | Runtime | Python 3.11 |
 | Config | python-dotenv (local dev) |
 | Tests | pytest + pytest-asyncio |
@@ -53,10 +52,10 @@ bot/
 
 ## Completed modules — v1.0 baseline
 
-### 1. Odds pipeline (`engine/analysis.py`, `main.py`)
-- `fetch_live_odds(sport)` — async call to The Odds API (h2h, spreads, totals)
-- `_poll_odds_job` — APScheduler job, runs every `ODDS_POLL_INTERVAL` seconds (default 60s)
-- Stores each fetched line as an `OddsRecord` in SQLite with timestamp
+### 1. Player-prop ingestion (`connectors/underdog.py`, `providers/propline.py`, `main.py`)
+- Underdog supplies the live player-prop projections used by the monitoring cycle.
+- PropLine supplies PrizePicks observations and settled player-result evidence.
+- The shared pipeline evaluates and tracks directional opportunities without The Odds API.
 
 ### 2. Fair probability engine (`engine/fair_probability.py`, `engine/analysis.py → VigRemover`)
 - Four devig methods: **multiplicative** (default), additive, power-iteration, odds-ratio
@@ -127,8 +126,8 @@ Steps: **filter** → **dedup** (DB-backed, configurable window) → **format** 
 
 ### 9. Telegram integration (`main.py`, `commands.py`)
 Background jobs:
-- `_poll_odds_job` (every 60s) — fetch → store → detect +EV → `AlertDelivery.deliver_ev()`
-- `_steam_check_job` (every 30s) — window query → group by book → detect steam → `AlertDelivery.deliver_steam()`
+- `underdog_monitor` — fetches current Underdog projections and runs the shared player-prop evaluation.
+- `opportunity_grader` — grades tracked picks from supported completed-result evidence.
 
 Commands:
 | Command | What it does |
@@ -146,10 +145,8 @@ Modular connector framework + cross-book analysis engines:
 
 **Connectors** (`bot/connectors/`):
 - `BaseConnector` — abstract interface: `fetch()`, `health_check()`, `enabled`, `is_pickem`
-- `DraftKingsConnector` — DraftKings odds via The Odds API, tracks opening vs. current per session
-- `FanDuelConnector` — FanDuel odds via The Odds API, same normalization layer as DraftKings
 - `UnderdogConnector` — Underdog Fantasy pick'em projections; detects line movement, value changes, removals
-- `ConnectorRegistry` — manages all connectors, fetches in parallel, routes sportsbook vs. pick'em
+- `ConnectorRegistry` — manages configured connectors and keeps pick'em data separate from sportsbook data
 - All output normalized to `MarketSnapshot` (sport, event, market_type, selection, odds, sportsbook, timestamp, game_time, opening_odds, is_pickem)
 
 **Consensus Engine** (`bot/engine/consensus.py`):
@@ -307,9 +304,7 @@ All settings in `bot/config.py` — override via environment variables:
 | Variable | Default | Description |
 |---|---|---|
 | `TELEGRAM_TOKEN` | — | **Required.** Bot token from @BotFather |
-| `ODDS_API_KEY` | — | The Odds API key (live data) |
 | `ALLOWED_USER_IDS` | (empty) | Comma-separated Telegram user IDs for alerts |
-| `ODDS_POLL_INTERVAL` | `60` | Seconds between odds fetches |
 | `STEAM_CHECK_INTERVAL` | `30` | Seconds between steam scans |
 | `MIN_EV_THRESHOLD` | `3.0` | Minimum EV% to alert |
 | `MIN_STEAM_SCORE` | `70` | Minimum steam score (0–100) to alert |
@@ -407,6 +402,6 @@ source for confirmed PP data.
 - Documentation changes do not require calling `markTaskInProgress`
 - Test suite is the source of truth for pipeline correctness — run before merging any engine changes
 - Sharp book list is configurable via `SHARP_BOOKS` env var; defaults cover the primary sharp/respected books
-- **Alert source priority: PrizePicks (primary, daily use) → Underdog (secondary) → DraftKings/FanDuel MLB ML/Totals (tertiary)**
+- **Alert source priority: PrizePicks via PropLine and Underdog; no sportsbook-odds provider is configured**
 - Do not spend development effort optimising sportsbook alerts before PrizePicks analysis is complete
 - PrizePicks features ship first; Underdog enhancements second; sportsbook scope changes last

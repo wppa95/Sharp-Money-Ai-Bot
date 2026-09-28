@@ -3,7 +3,7 @@ name: PropLine zero-observation diagnosis
 description: How to distinguish an empty PrizePicks sport slate from an ingestion regression
 ---
 
-The authorized PropLine odds feed uses an Odds-API-style event envelope:
+The authorized PropLine feed uses a bookmaker/player-prop event envelope:
 events contain `bookmakers`, the PrizePicks bookmaker contains `player_*`
 markets, and each outcome carries the player in `description`, direction in
 `name`, and the line in `point`. The normalizer accepts this shape.

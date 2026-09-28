@@ -47,7 +47,9 @@ description: Frozen stable v1.2 baseline — all modules, key decisions, and tes
 
 **Why:** The original `get_pending_clv_seeds()` required `game_time.isnot(None)`, which meant EV seeds were never processed. The stale-hours fallback allows the harvest job to clean them up.
 
-**How to apply:** When sportsbook polling is re-enabled and EV records start storing `game_time`, the harvest job will automatically use real closing odds instead of expiring.
+**How to apply:** Without provider-neutral closing odds and a valid game time,
+the harvest job expires the seed. Existing historical CLV remains readable;
+retired sportsbook polling is not a future activation path.
 
 ### OddsRecord column naming
 **Rule:** `OddsRecord` uses `recorded_at` (not `fetched_at`) for its timestamp column.

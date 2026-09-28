@@ -486,7 +486,7 @@ def confirm_market(
         "source": (
             "PrizePicks"
             if unique and all(row.provider_key == "prizepicks" for row in unique)
-            else "OddsAPI"
+            else "Sportsbook"
         ),
         "notes": (
             f"{len(unique)} book{'s' if len(unique) != 1 else ''}"

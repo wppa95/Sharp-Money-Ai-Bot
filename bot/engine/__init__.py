@@ -94,7 +94,6 @@ from .backtesting import (
     run_backtest,
 )
 
-from .season_check import SeasonChecker
 
 # ── Framework v3.0 foundation layers ─────────────────────────────────────────
 
@@ -207,7 +206,6 @@ __all__ = [
     # analysis
     "AnalysisEngine",
     # season check
-    "SeasonChecker",
     # ranking / decision
     "RankingTier",
     "RankingDecision",

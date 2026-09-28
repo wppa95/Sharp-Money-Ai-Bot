@@ -750,7 +750,7 @@ class TestPersistenceVerification:
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# OddsAPI / DK / FD remain disabled
+# Legacy sportsbook confirmation remains retired.
 # ═══════════════════════════════════════════════════════════════════════════
 
 class TestSportsbookDisabled:

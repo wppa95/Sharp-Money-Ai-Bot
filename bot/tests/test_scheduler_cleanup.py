@@ -5,6 +5,7 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
+import pytest
 
 MAIN_SOURCE = Path(__file__).parents[1].joinpath("main.py").read_text()
 MAIN_TREE = ast.parse(MAIN_SOURCE)
@@ -76,12 +77,10 @@ def test_required_monitoring_and_maintenance_jobs_remain_registered():
     names = {name for name, _, _ in _registered_repeating_jobs()}
 
     assert {
-        "odds_poller",
         "underdog_monitor",
         "full_pool_rescan",
         "clv_seeder",
         "clv_harvester",
-        "budget_checker",
         "prop_history_pruner",
         "heartbeat",
     } <= names
@@ -105,6 +104,6 @@ def test_monitoring_jobs_use_non_overlapping_coordinator():
         name: call for name, _, call in _registered_repeating_jobs()
     }
 
-    for name in ("odds_poller", "underdog_monitor"):
+    for name in ("underdog_monitor",):
         kwargs = _job_kwargs(jobs[name])
         assert "max_instances" not in kwargs

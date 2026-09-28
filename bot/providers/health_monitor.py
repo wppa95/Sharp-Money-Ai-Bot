@@ -1,8 +1,8 @@
 """
 providers/health_monitor.py — ProviderHealthMonitor singleton.
 
-Tracks the real-time health of every data provider (PrizePicks, Odds API,
-Underdog) based on success/failure signals from connectors and the Odds API
+Tracks the real-time health of configured data providers (PrizePicks,
+Underdog, PropLine) based on success/failure signals from connectors and
 cache.  Results are surfaced in /status and /dashboard.
 
 Status derivation rules
@@ -84,13 +84,11 @@ class ProviderHealthMonitor:
 
         monitor = init_health_monitor()
         monitor.register("PrizePicks")
-        monitor.register("OddsAPI")
-
         # In a connector on success:
-        monitor.record_success("OddsAPI", quota_remaining=450, quota_used=50)
+        monitor.record_success("PropLine")
 
         # In a connector on failure:
-        monitor.record_failure("OddsAPI", "401 OUT_OF_USAGE_CREDITS", FailureType.QUOTA)
+        monitor.record_failure("PropLine", "provider unavailable", FailureType.HTTP_ERROR)
 
         # In /status:
         for name, health in monitor.get_all_health().items():

@@ -41,26 +41,6 @@ PP_LEAGUE_IDS: dict[str, int] = {
     "MLS":   7,
 }
 
-# PrizePicks stat name → The Odds API player-prop market name
-PP_STAT_TO_ODDS_API: dict[str, str] = {
-    "Points":           "player_points",
-    "Rebounds":         "player_rebounds",
-    "Assists":          "player_assists",
-    "Steals":           "player_steals",
-    "Blocks":           "player_blocks",
-    "Threes Made":      "player_threes",
-    "Passing Yards":    "player_pass_yds",
-    "Rushing Yards":    "player_rush_yds",
-    "Receiving Yards":  "player_reception_yds",
-    "Receptions":       "player_receptions",
-    "Touchdowns":       "player_pass_tds",
-    "Shots on Goal":    "player_shots_on_target",
-    "Goals":            "player_goal_scorer_anytime",
-    "Hits":             "player_hits",
-    "Strikeouts":       "player_pitcher_strikeouts",
-    "Bases":            "player_total_bases",
-}
-
 # Approximate probability change per 1 stat unit near the median.
 # Used to adjust fair probability from sportsbook line to PP line.
 # Derived from typical per-sport stat standard deviations.

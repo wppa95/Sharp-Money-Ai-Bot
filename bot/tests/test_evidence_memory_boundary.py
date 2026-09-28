@@ -200,7 +200,7 @@ async def test_production_confirmation_uses_keyed_memory_not_database_pool():
     )
     market_engine._cache_propline_evidence([prop])
 
-    result = await market_engine._get_odds_api_confirmation(
+    result = await market_engine._get_propline_confirmation(
         "NBA",
         "Player One",
         "Points",

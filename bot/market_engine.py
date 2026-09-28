@@ -904,24 +904,15 @@ def _active_job_names() -> set[str]:
 # Module-level registry — set by init_market_engine()
 _registry: Optional[ConnectorRegistry] = None
 
-# ── OddsAPI confirmation engine ───────────────────────────────────────────────
-# Set once at startup via init_odds_confirmation(); used by
-# _get_odds_api_confirmation() to read already-persisted provider data.
-_analysis_engine: Optional[object] = None
+# ── PropLine confirmation state ────────────────────────────────────────────────
+# Confirmation reads only already-persisted PropLine observations.
 _confirmation_db: Optional[Database] = None
 _propline_provider: Optional[object] = None
-_confirmation_engine_initialized = False
-_confirmation_db_initialized = False
-_SPORTSBOOK_CONFIRMATION_BOOKS = frozenset({"draftkings", "fanduel"})
 
-
-def _sportsbook_key(value: object) -> str:
-    return "".join(ch for ch in str(value or "").lower() if ch.isalnum())
-
-
-def _sportsbook_confirmation_enabled() -> bool:
-    """Return the temporary gate for DK/FanDuel confirmation."""
-    return bool(getattr(config, "SPORTSBOOK_CONFIRMATION_ENABLED", False))
+def init_propline_confirmation(db: Optional[Database] = None) -> None:
+    """Set the existing database used for read-only PropLine corroboration."""
+    global _confirmation_db
+    _confirmation_db = db
 
 
 def _supports_history_enrichment(db: object) -> bool:
@@ -933,35 +924,6 @@ def _supports_history_enrichment(db: object) -> bool:
         and inspect.iscoroutinefunction(getattr(db, "upsert_player_result", None))
     )
 
-
-def init_odds_confirmation(engine: object, db: Optional[Database] = None) -> None:
-    """Store the existing analysis/DB services used for confirmation.
-
-    The optional DB reference is used for already-polled h2h/totals rows and
-    persisted PrizePicks snapshots; it never creates another polling cycle.
-    One-argument callers remain supported for the existing sportsbook tests
-    and integrations.
-    """
-    global _analysis_engine, _confirmation_db, _propline_provider
-    global _confirmation_engine_initialized, _confirmation_db_initialized
-    _analysis_engine = engine
-    _confirmation_db = db
-    _confirmation_engine_initialized = engine is not None
-    _confirmation_db_initialized = db is not None
-    try:
-        from providers.propline import PropLinePrizePicksProvider
-        _propline_provider = PropLinePrizePicksProvider(
-            bookmaker=str(
-                getattr(config, "PROPLINE_UNDERDOG_BOOKMAKER", "underdog")
-                or "underdog"
-            ).strip()
-            or "underdog"
-        )
-    except Exception:
-        # Provider setup is optional; the existing OddsAPI confirmation path
-        # must remain available even if PropLine dependencies/configuration
-        # are unavailable.
-        _propline_provider = None
 
 # ── Player results integration ────────────────────────────────────────────────
 # Singleton provider and per-day fetch dedup cache.
@@ -1329,8 +1291,7 @@ async def reset_monitoring_runtime_state() -> None:
     global _player_history_persistence_running, _prop_market_alerted
     global _failed_required_persistence_batches
     global _ud_scan_state, _ud_known_keys, _ud_scan_db_id, _prop_dedup_lock
-    global _snapshot_cache, _analysis_engine, _confirmation_db, _propline_provider
-    global _confirmation_engine_initialized, _confirmation_db_initialized
+    global _snapshot_cache, _confirmation_db, _propline_provider
     global _propline_current_observations, _propline_evidence_by_identity
     global _propline_empty_sport_until, _propline_empty_feed_streak
 
@@ -1381,11 +1342,8 @@ async def reset_monitoring_runtime_state() -> None:
     _snapshot_cache.clear()
     from engine.evidence_memory import clear as clear_evidence_memory
     clear_evidence_memory()
-    _analysis_engine = None
     _confirmation_db = None
     _propline_provider = None
-    _confirmation_engine_initialized = False
-    _confirmation_db_initialized = False
     _propline_current_observations.clear()
     _propline_evidence_by_identity.clear()
     _propline_empty_sport_until.clear()
@@ -2011,27 +1969,7 @@ def _is_futures_stat(stat_type: str) -> bool:
     return any(kw in low for kw in _FUTURES_STAT_KEYWORDS)
 
 
-# ── OddsAPI stat-type → market-key mapping ────────────────────────────────────
-# Maps Underdog stat_type (lowercase) → OddsAPI player-prop market key.
-# Only sports with entries in _SPORT_PLAYER_PROP_MARKETS (NBA + MLB) are queried.
-_UD_TO_ODDS_API_MARKET: dict[str, str] = {
-    "points":                  "player_points",
-    "rebounds":                "player_rebounds",
-    "assists":                 "player_assists",
-    "3-pointers made":         "player_threes",
-    "three-pointers made":     "player_threes",
-    "3pt made":                "player_threes",
-    "3-pt made":               "player_threes",
-    "steals":                  "player_steals",
-    "blocks":                  "player_blocks",
-    "hits":                    "player_hits",
-    "pitcher strikeouts":      "player_pitcher_strikeouts",
-    "strikeouts":              "player_pitcher_strikeouts",
-    "total bases":             "player_total_bases",
-}
-
-
-async def _get_odds_api_confirmation(
+async def _get_propline_confirmation(
     sport: str,
     player_name: str = "",
     stat_type: str = "",
@@ -2048,32 +1986,14 @@ async def _get_odds_api_confirmation(
     event_id: str = "",
 ) -> Optional[dict]:
     """
-    Query optional DraftKings/FanDuel observations as a non-blocking
-    confirmation signal.  The sportsbook path is currently disabled by an
-    explicit safety gate; PropLine PrizePicks corroboration remains available.
-
-    Player props use the existing cached player-prop fetch.  Moneyline and
-    totals use h2h/totals OddsRecord rows written by the existing OddsAPI
-    poller only when the future sportsbook opt-in is enabled, so this function
-    never starts a second polling cycle.
-
-    Returns None when:
-      • the source is disabled/unavailable or no safe match exists
-      • any provider/database exception or timeout
+    Read the current persisted PropLine PrizePicks observations for a matching
+    player prop. This is corroboration only: it starts no provider request and
+    does not use historical sportsbook rows as current evidence.
     """
     normalized_market = normalize_market(market_type)
-    sportsbook_confirmation_enabled = _sportsbook_confirmation_enabled()
-    explicit_sportsbook_engine = (
-        _analysis_engine is not None
-        and (
-            _confirmation_engine_initialized
-            or sportsbook_confirmation_enabled
-        )
-    )
+    if normalized_market != "player_prop":
+        return None
     source_db = db or _confirmation_db
-    explicit_game_database = source_db is not None and (
-        db is not None or _confirmation_db_initialized
-    )
     pp_identity = (
         normalize_name(player_name),
         str(sport or "").strip().upper(),
@@ -2111,40 +2031,7 @@ async def _get_odds_api_confirmation(
             )
         )
     )
-    if (
-        not getattr(config, "ODDS_API_ENABLED", True)
-        and not pp_available
-        and not explicit_sportsbook_engine
-        and not (
-            normalized_market in {"moneyline", "total"}
-            and explicit_game_database
-        )
-    ):
-        return None
-    if (
-        normalized_market == "player_prop"
-        and _analysis_engine is None
-        and not pp_available
-    ):
-        return None
-
-    allowed_books = set()
-    if sportsbook_confirmation_enabled or explicit_sportsbook_engine:
-        if getattr(config, "DRAFTKINGS_ENABLED", False):
-            allowed_books.add("draftkings")
-        if getattr(config, "FANDUEL_ENABLED", False):
-            allowed_books.add("fanduel")
-        # The confirmation opt-in is itself the legacy DK/FD permission.
-        # Keep the individual flags as narrowing controls when configured,
-        # while preserving compatibility with callers that only enable the
-        # explicit confirmation gate.
-        if not allowed_books:
-            allowed_books.update(_SPORTSBOOK_CONFIRMATION_BOOKS)
-    elif normalized_market in {"moneyline", "total"} and explicit_game_database:
-        # Game confirmation is read-only: persisted OddsRecord rows remain
-        # usable even when the live Odds API poller is disabled.
-        allowed_books.update(_SPORTSBOOK_CONFIRMATION_BOOKS)
-    if not allowed_books and not pp_available:
+    if not pp_available:
         return None
 
     target = ConfirmationTarget(
@@ -2297,117 +2184,9 @@ async def _get_odds_api_confirmation(
                 except Exception as _pp_exc:
                     logger.debug("PropLine PrizePicks confirmation skipped: %s", type(_pp_exc).__name__)
 
-            if not sportsbook_confirmation_enabled and not explicit_sportsbook_engine:
-                return None
-            if (
-                not getattr(config, "ODDS_API_ENABLED", True)
-                and not explicit_sportsbook_engine
-            ):
-                return None
-            from engine.analysis import Sport as _Sport
-            try:
-                sport_enum = _Sport(sport)
-            except ValueError:
-                return None
-            market_key = _UD_TO_ODDS_API_MARKET.get(stat_type.lower().strip())
-            if not market_key:
-                return None
-            lines = await _asyncio.wait_for(
-                _analysis_engine.fetch_player_prop_lines(sport_enum),
-                timeout=5.0,
-            )
-            observations = [
-                observation_from_record(
-                    row,
-                    provider=getattr(row, "sportsbook", ""),
-                    sport=sport,
-                    market_type=getattr(row, "market_key", market_key),
-                    player=getattr(row, "player_name", ""),
-                    stat_type=stat_type,
-                    direction=getattr(row, "description", ""),
-                    line=getattr(row, "line", None),
-                    odds=getattr(row, "american_odds", None),
-                )
-                for row in lines
-            ]
-        else:
-            source_db = db or _confirmation_db
-            if source_db is None:
-                return None
-            # The existing h2h/totals poller records both books.  A short
-            # freshness window prevents an old event from being presented as
-            # current confirmation while tolerating normal poll gaps.
-            rows = await _asyncio.wait_for(
-                source_db.get_odds_window(
-                    sport,
-                    datetime.utcnow() - timedelta(hours=4),
-                ),
-                timeout=5.0,
-            )
-            observations = [
-                observation_from_record(row)
-                for row in rows
-                if normalize_market(getattr(row, "market_type", "")) == normalized_market
-            ]
+            return None
     except Exception:
         return None
-
-    if normalized_market == "player_prop":
-        # Preserve the established display semantics: num_books counts books
-        # that carry the same player/stat market, while avg_line/confirmed
-        # only use the requested side.
-        from engine.provider_confirmation import _matches_identity as _matches
-        identity_target = replace(target, direction="")
-        identity_rows = [
-            row for row in observations
-            if row.provider_key in {b.replace(" ", "") for b in allowed_books}
-            and _matches(identity_target, row, candidate_names={
-                normalize_name(getattr(candidate, "player", ""))
-                for candidate in observations
-            })
-        ]
-        directional = [
-            row for row in identity_rows
-            if row.direction == direction.strip().upper()
-        ]
-        if not identity_rows:
-            return None
-        by_provider = {row.provider_key: row for row in identity_rows}
-        book_lines = [row.line for row in directional if row.line is not None]
-        book_odds = [row.odds for row in directional if row.odds not in (None, 0)]
-        num_books = len(by_provider)
-        avg_line = sum(book_lines) / len(book_lines) if book_lines else None
-        avg_odds = round(sum(book_odds) / len(book_odds)) if book_odds else None
-        line_delta = abs(avg_line - line) if avg_line is not None else None
-        diff = avg_line - line if avg_line is not None else None
-        notes = f"{num_books} book{'s' if num_books != 1 else ''}"
-        if avg_line is None:
-            notes += " · no direct line match"
-        elif abs(diff or 0) < 0.05:
-            notes += f" · avg {avg_line:.1f} ✅"
-        else:
-            notes += f" · avg {avg_line:.1f} ({diff:+.1f} vs UD)"
-        return {
-            "market_type": normalized_market,
-            "num_books": num_books,
-            "directional_books": len(book_lines),
-            "avg_line": avg_line,
-            "avg_odds": avg_odds,
-            "line_delta": line_delta,
-            "notes": notes,
-            "confirmed": avg_line is not None,
-            "strong_confirmation": len(book_lines) >= 2 and line_delta is not None and line_delta <= 0.5,
-        }
-
-    result = confirm_market(
-        target,
-        observations,
-        allowed_providers=allowed_books,
-        max_age_seconds=4 * 60 * 60,
-    )
-    if result is None:
-        return None
-    return result
 
 
 def _get_player_stats_provider():
@@ -5849,13 +5628,13 @@ async def underdog_job(context) -> None:
                             _np_intel_trace = _np_intel.intelligence_trace
                         except Exception:
                             pass
-                    # OddsAPI market confirmation — optional, non-blocking
+                    # PropLine corroboration — optional, non-blocking
                     _np_odds_confirm: Optional[dict] = None
                     if (decision is not None
                             and decision.recommendation in ("OVER", "UNDER")):
                         try:
                             _np_odds_confirm = await _await_cycle_budget(
-                                _get_odds_api_confirmation(
+                                _get_propline_confirmation(
                                     snap.sport or "UNKNOWN",
                                     player,
                                     stat_type,
@@ -6341,13 +6120,13 @@ async def underdog_job(context) -> None:
                             _lc_intel_trace = _lc_intel.intelligence_trace
                     except (NameError, Exception):
                         pass
-                    # OddsAPI market confirmation — non-blocking, directional, non-removal
+                    # PropLine corroboration — non-blocking, directional, non-removal
                     if (not is_removed
                             and decision is not None
                             and decision.recommendation in ("OVER", "UNDER")):
                         try:
                             _lc_odds_confirm = await _await_cycle_budget(
-                                _get_odds_api_confirmation(
+                                _get_propline_confirmation(
                                     snap.sport or "UNKNOWN",
                                     player,
                                     stat_type,
@@ -6784,11 +6563,11 @@ async def underdog_job(context) -> None:
                         _s_intel_trace = _s_intel.intelligence_trace
                     except Exception:
                         pass
-                # OddsAPI market confirmation is optional and non-blocking.
+                # PropLine corroboration is optional and non-blocking.
                 _s_odds_confirm: Optional[dict] = None
                 if _sdec.recommendation in ("OVER", "UNDER"):
                     try:
-                        _s_odds_confirm = await _get_odds_api_confirmation(
+                        _s_odds_confirm = await _get_propline_confirmation(
                             _ssport,
                             _sp,
                             _st,
@@ -7158,34 +6937,7 @@ async def underdog_job(context) -> None:
                                 "underdog_job: mark_opportunity_alert_sent [%s] failed: %s",
                                 _dq_path, _dq_mark_exc,
                             )
-                    # CLV seed — S/A picks with confirmed OddsAPI odds
-                    if _dq_odds is not None and _dq_odds.get("avg_odds") is not None:
-                        try:
-                            _dq_snap_id = int(getattr(_dq_snap, "id", 0) or 0)
-                            _clv_seed_kwargs = dict(
-                                source_id   = _dq_snap_id,
-                                sport       = _dq_sport,
-                                stat_type   = _dq_st,
-                                player_name = _dq_player,
-                                line        = _dq_line_val,
-                                game_time   = _dq_snap.game_time,
-                                tier        = _dq_dec.decision_tier if _dq_dec else "",
-                                avg_odds    = _dq_odds["avg_odds"],
-                            )
-                            await _persist_db_write(
-                                db,
-                                "seed Underdog CLV confirmation",
-                                lambda kwargs=_clv_seed_kwargs: db.seed_clv_from_ud_confirmation(
-                                    **kwargs
-                                ),
-                                cycle_timing=_cycle_timing,
-                                operation="seed_clv_from_ud_confirmation",
-                            )
-                        except Exception as _dq_clv_exc:
-                            logger.debug(
-                                "seed_clv_from_ud_confirmation [%s] failed: %s | %s — %s",
-                                _dq_path, _dq_player, _dq_st, _dq_clv_exc,
-                            )
+                    # CLV seed — store a captured price when one is available.
                     # Market first-alert time tracking
                     _mfa_key = f"{_dq_player}__{_dq_st}"
                     if _mfa_key not in _MARKET_FIRST_ALERT:
@@ -8230,7 +7982,7 @@ async def _stable_refresh_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
             _sr_odds_confirm: Optional[dict] = None
             if _sr_dec.recommendation in ("OVER", "UNDER"):
                 try:
-                    _sr_odds_confirm = await _get_odds_api_confirmation(
+                    _sr_odds_confirm = await _get_propline_confirmation(
                         _sr_sport, _sr_player, _sr_stat, _sr_dec.recommendation, _sr_line,
                         team=getattr(_sr_snap, "team", "") or "",
                         event=getattr(_sr_snap, "event", "") or "",
@@ -8336,23 +8088,6 @@ async def _stable_refresh_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                         "stable_refresh: mark_alert_sent failed: %s", _sr_mark_exc,
                     )
                 # CLV seed for S/A picks
-                if (
-                    _sr_odds_confirm is not None
-                    and _sr_odds_confirm.get("avg_odds") is not None
-                ):
-                    try:
-                        await db.seed_clv_from_ud_confirmation(
-                            source_id   = int(getattr(_sr_snap, "id", 0) or 0),
-                            sport       = _sr_sport,
-                            stat_type   = _sr_stat,
-                            player_name = _sr_player,
-                            line        = _sr_line,
-                            game_time   = _sr_snap.game_time,
-                            tier        = _sr_dec.decision_tier,
-                            avg_odds    = _sr_odds_confirm["avg_odds"],
-                        )
-                    except Exception:
-                        pass
                 logger.info(
                     "🎯 STABLE PICK | Player: %s | Sport: %s | Market: %s"
                     " | Line: %.1f | Dir: %s | Tier: %s | Score: %d/100",

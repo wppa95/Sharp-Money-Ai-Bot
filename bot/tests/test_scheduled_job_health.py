@@ -1,5 +1,5 @@
 """
-Tests for health-recording correctness in _budget_check_job and _clv_harvest_job.
+Tests for health-recording correctness in scheduled bot jobs.
 
 Reviewer requirement: every scheduled job must record exactly one run or fail per
 invocation — including no-op/idle paths and all early-return exits.
@@ -33,121 +33,6 @@ def _make_context() -> MagicMock:
     ctx = MagicMock()
     ctx.bot = MagicMock()
     return ctx
-
-
-# ── _budget_check_job ─────────────────────────────────────────────────────────
-
-class TestBudgetCheckJobHealth:
-    """
-    _budget_check_job must call record_job_run on every successful invocation
-    (even no-op runs where no threshold is crossed) and record_job_fail when
-    an exception occurs.
-    """
-
-    def _make_tracker(self, budget_pct: float = 10.0) -> MagicMock:
-        stats = MagicMock()
-        stats.month_budget  = 500
-        stats.budget_pct    = budget_pct
-        stats.budget_bar    = "##--------"
-        stats.quota_used    = None
-        stats.quota_remaining = None
-        stats.month_count   = 50
-        tracker = MagicMock()
-        tracker.get_all_stats.return_value = {"OddsAPI": stats}
-        return tracker
-
-    @pytest.mark.asyncio
-    async def test_no_op_run_records_job_run(self):
-        """Normal idle cycle (no threshold crossed) records a successful run."""
-        health  = _make_health()
-        tracker = self._make_tracker(budget_pct=10.0)   # below all thresholds
-        ctx     = _make_context()
-
-        with patch.object(m, "get_health_tracker", return_value=health):
-            with patch.object(m, "get_usage_tracker", return_value=tracker):
-                with patch.object(m.config.__class__, "allowed_user_ids",
-                                  new_callable=lambda: property(lambda self: {99999})):
-                    with patch("main.broadcast_alert", new_callable=AsyncMock):
-                        await m._budget_check_job(ctx)
-
-        info = health.get_job_info("_budget_check_job")
-        assert info.get("run_count", 0) >= 1, (
-            "record_job_run not called for idle _budget_check_job. job_info=%s" % info
-        )
-        assert info.get("fail_count", 0) == 0
-
-    @pytest.mark.asyncio
-    async def test_threshold_crossed_records_job_run(self):
-        """When a budget alert fires, it still counts as a successful run."""
-        health  = _make_health()
-        tracker = self._make_tracker(budget_pct=80.0)   # crosses 75% threshold
-        ctx     = _make_context()
-
-        with patch.object(m, "get_health_tracker", return_value=health):
-            with patch.object(m, "get_usage_tracker", return_value=tracker):
-                with patch.object(m.config.__class__, "allowed_user_ids",
-                                  new_callable=lambda: property(lambda self: {99999})):
-                    with patch("main.broadcast_alert", new_callable=AsyncMock):
-                        await m._budget_check_job(ctx)
-
-        info = health.get_job_info("_budget_check_job")
-        assert info.get("run_count", 0) >= 1, (
-            "record_job_run not called after budget-alert _budget_check_job"
-        )
-
-    @pytest.mark.asyncio
-    async def test_no_chat_ids_records_job_run(self):
-        """When allowed_user_ids is empty the job exits early; still records a run."""
-        health  = _make_health()
-        tracker = self._make_tracker()
-        ctx     = _make_context()
-
-        with patch.object(m, "get_health_tracker", return_value=health):
-            with patch.object(m, "get_usage_tracker", return_value=tracker):
-                # allowed_user_ids → empty set → chat_ids = []
-                with patch.object(m.config.__class__, "allowed_user_ids",
-                                  new_callable=lambda: property(lambda self: set())):
-                    await m._budget_check_job(ctx)
-
-        info = health.get_job_info("_budget_check_job")
-        assert info.get("run_count", 0) >= 1, (
-            "record_job_run not called when chat_ids is empty"
-        )
-
-    @pytest.mark.asyncio
-    async def test_exception_records_job_fail(self):
-        """An exception inside the budget-check loop records a job failure."""
-        health  = _make_health()
-        tracker = MagicMock()
-        tracker.get_all_stats.side_effect = RuntimeError("tracker broken")
-        ctx     = _make_context()
-
-        with patch.object(m, "get_health_tracker", return_value=health):
-            with patch.object(m, "get_usage_tracker", return_value=tracker):
-                with patch.object(m.config, "ODDS_API_ENABLED", True):
-                    with patch.object(m.config.__class__, "allowed_user_ids",
-                                      new_callable=lambda: property(lambda self: {99999})):
-                        await m._budget_check_job(ctx)
-
-        info = health.get_job_info("_budget_check_job")
-        assert info.get("fail_count", 0) >= 1, (
-            "record_job_fail not called after exception in _budget_check_job"
-        )
-        assert info.get("run_count", 0) == 0
-
-    @pytest.mark.asyncio
-    async def test_no_tracker_records_job_run(self):
-        """When get_usage_tracker() returns None the job exits and records a no-op run."""
-        health = _make_health()
-        ctx    = _make_context()
-        with patch.object(m, "get_usage_tracker", return_value=None):
-            with patch.object(m, "get_health_tracker", return_value=health):
-                await m._budget_check_job(ctx)
-
-        info = health.get_job_info("_budget_check_job")
-        assert info.get("run_count", 0) >= 1, (
-            "record_job_run not called when usage tracker is None"
-        )
 
 
 # ── _heartbeat_job ────────────────────────────────────────────────────────────
@@ -210,27 +95,6 @@ class TestClvSeedJobGuard:
         info = health.get_job_info("_clv_seed_job")
         assert info.get("run_count", 0) >= 1, (
             "record_job_run not called when _db is None in _clv_seed_job. job_info=%s" % info
-        )
-        assert info.get("fail_count", 0) == 0
-
-
-# ── _season_check_job guard ────────────────────────────────────────────────────
-
-class TestSeasonCheckJobGuard:
-    """_season_check_job must record a no-op run when _season_checker is None."""
-
-    @pytest.mark.asyncio
-    async def test_no_checker_records_job_run(self):
-        """When _season_checker is None the job records a successful no-op run."""
-        health = _make_health()
-        ctx    = _make_context()
-        with patch.object(m, "_season_checker", None):
-            with patch.object(m, "get_health_tracker", return_value=health):
-                await m._season_check_job(ctx)
-
-        info = health.get_job_info("_season_check_job")
-        assert info.get("run_count", 0) >= 1, (
-            "record_job_run not called when _season_checker is None. job_info=%s" % info
         )
         assert info.get("fail_count", 0) == 0
 

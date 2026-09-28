@@ -206,7 +206,6 @@ async def test_status_shows_provider_roles_and_separate_history_counts():
     with (
         patch("commands._check_allowed", return_value=True),
         patch("commands._db", db),
-        patch("commands._season_checker", None),
         patch("providers.get_health_monitor", return_value=_health_monitor()),
     ):
         await commands.cmd_status(update, context)
@@ -232,7 +231,6 @@ async def test_status_returns_health_when_one_db_counter_times_out():
     with (
         patch("commands._check_allowed", return_value=True),
         patch("commands._db", db),
-        patch("commands._season_checker", None),
         patch("commands._STATUS_DB_READ_TIMEOUT_SECONDS", 0.01),
         patch("providers.get_health_monitor", return_value=_health_monitor()),
     ):
@@ -265,7 +263,6 @@ async def test_status_survives_counter_cancellation_during_outer_deadline():
     with (
         patch("commands._check_allowed", return_value=True),
         patch("commands._db", db),
-        patch("commands._season_checker", None),
         patch("commands._STATUS_DB_READ_TIMEOUT_SECONDS", 0.01),
         patch("commands._COMMAND_TIMEOUT_SECONDS", 0.02),
         patch("providers.get_health_monitor", return_value=_health_monitor()),

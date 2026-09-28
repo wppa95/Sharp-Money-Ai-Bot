@@ -99,7 +99,7 @@ Line:    Chiefs -3 (−110)
   Change:   -10
 
 🔥 Steam Score:  82/100
-📊 Books Moved:  DraftKings, FanDuel, BetMGM
+📊 Providers:  PrizePicks, Underdog
 
 🕐 2025-01-15 14:32 UTC
 ```
@@ -150,11 +150,11 @@ The engine is pre-wired with placeholder stubs for:
 
 | Feature | Location |
 |---------|----------|
-| Live sportsbook odds | `engine.py → fetch_live_odds()` |
+| Underdog player props | `engine.py → fetch_player_prop_lines()` |
 | PrizePicks monitoring | `engine.py → fetch_prizepicks_lines()` |
 | ML model integration | `engine.py → run_ml_model()` |
 | CLV tracking | `engine.py → compute_clv()` |
-| Background polling job | `main.py → _poll_odds_job()` |
+| Player-prop monitoring cycle | `main.py → underdog_monitor` |
 | Steam sweep job | `main.py → _steam_check_job()` |
 | Public betting % signal | `engine.py → SteamDetector` comments |
 | Discord integration | Add to `alerts.py → broadcast_alert()` |
@@ -175,7 +175,6 @@ Key settings:
 | `MIN_EV_THRESHOLD` | 3.0 | Minimum EV% to flag an opportunity |
 | `MIN_STEAM_SCORE` | 70 | Minimum steam score to fire an alert |
 | `MIN_AI_CONFIDENCE` | 60 | Minimum AI confidence for alerts |
-| `ODDS_POLL_INTERVAL` | 60 | Seconds between odds polls |
 | `STEAM_CHECK_INTERVAL` | 30 | Seconds between steam sweeps |
 | `DATABASE_URL` | SQLite | Full SQLAlchemy async URL |
 | `LOG_LEVEL` | INFO | DEBUG / INFO / WARNING / ERROR |

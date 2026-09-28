@@ -69,14 +69,11 @@ def test_required_jobs_remain_registered_with_underdog_and_grader_timers():
     names = {name for name, _ in _scheduled_jobs()}
 
     assert {
-        "odds_poller",
         "clv_seeder",
         "clv_harvester",
         "player_history_collector",
-        "budget_checker",
         "prop_history_pruner",
         "heartbeat",
-        "season_checker",
         "opportunity_grader",
         "full_pool_rescan",
     } <= names
@@ -86,7 +83,6 @@ def test_scheduled_jobs_use_coordinator_without_max_instances():
     jobs = dict(_scheduled_jobs())
 
     for name in (
-        "odds_poller",
         "underdog_monitor",
         "full_pool_rescan",
     ):

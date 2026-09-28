@@ -1071,7 +1071,7 @@ def format_underdog_change_alert(
     opponent: Optional[str] = None,           # Opponent team / player (when available)
     intelligence_trace: Optional[dict] = None, # prop_intelligence trace from decision_trace
     opening_line: Optional[float] = None,     # First ever line from PropLineHistory
-    market_confirmation: Optional[dict] = None,  # OddsAPI sportsbook confirmation data
+    market_confirmation: Optional[dict] = None,  # optional market confirmation data
     source: str = "Underdog",
 ) -> str:
     """Format a compact player-prop alert with only the actionable details."""
@@ -1173,7 +1173,7 @@ def format_underdog_new_prop_alert(
     low_line_threshold: float = 1.0,
     opponent: Optional[str] = None,           # Opponent team / player (when available)
     intelligence_trace: Optional[dict] = None, # prop_intelligence trace from decision_trace
-    market_confirmation: Optional[dict] = None,  # OddsAPI sportsbook confirmation data
+    market_confirmation: Optional[dict] = None,  # optional market confirmation data
     source: str = "Underdog",
 ) -> str:
     """Format a compact first-appearance player-prop alert."""

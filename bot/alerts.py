@@ -1830,7 +1830,7 @@ class AlertDelivery:
         intelligence_trace: Optional[dict] = None,  # prop_intelligence trace
         opening_line: Optional[float] = None,  # First ever line from PropLineHistory
         market_move_only: bool = False,  # True → send lightweight market-move alert only
-        market_confirmation: Optional[dict] = None,  # OddsAPI sportsbook confirmation data
+        market_confirmation: Optional[dict] = None,  # optional market confirmation data
         high_priority: bool = False,  # Legacy priority-display compatibility flag
         is_moneyline: bool = False,
         game_status: Optional[str] = None,

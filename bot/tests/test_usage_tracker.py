@@ -74,7 +74,6 @@ def _tracker_with_own_count_pct(budgets=None, tmp_dir=None) -> ApiUsageTracker:
     t._daily          = {}
     t._last_request   = {}
     t._warned         = {}
-    t._season_checker = None
     t._current_month  = date.today().strftime("%Y-%m")
     return t
 
@@ -105,20 +104,8 @@ class TestInferCallPriority:
         # Even for a low-priority sport, player_props → HIGH
         assert infer_call_priority("soccer_epl", "player_props,h2h") == CallPriority.HIGH
 
-    def test_mlb_low(self):
-        assert infer_call_priority("baseball_mlb", "h2h") == CallPriority.HIGH
-
-    def test_nba_low_for_legacy_game_line_path(self):
-        assert infer_call_priority("basketball_nba", "h2h,spreads") == CallPriority.HIGH
-
-    def test_nfl_low(self):
-        assert infer_call_priority("americanfootball_nfl", "h2h") == CallPriority.HIGH
-
-    def test_epl_low(self):
-        assert infer_call_priority("soccer_epl", "h2h,totals") == CallPriority.HIGH
-
-    def test_nhl_low(self):
-        assert infer_call_priority("icehockey_nhl", "h2h,spreads") == CallPriority.HIGH
+    def test_non_player_markets_are_low(self):
+        assert infer_call_priority("basketball_nba", "h2h,spreads") == CallPriority.LOW
 
 
 # ── record_request ─────────────────────────────────────────────────────────────
@@ -197,7 +184,7 @@ class TestRecordRequest:
 # ── should_allow ───────────────────────────────────────────────────────────────
 
 class TestShouldAllow:
-    """Budget enforcement + sport filter."""
+    """Provider-budget enforcement."""
 
     def _at_pct(self, pct: float, budget: int = 100):
         """Tracker where own-count gives exactly *pct*% budget used."""
@@ -287,53 +274,6 @@ class TestShouldAllow:
         t = self._at_pct(100)
         allowed, _ = t.should_allow("OddsAPI", CallPriority.CRITICAL)
         assert allowed
-
-    # ── Active-sport filter ───────────────────────────────────────────────────
-
-    def test_sport_filter_blocks_out_of_season(self):
-        t = _tracker_with_own_count_pct()
-        checker = MagicMock()
-        checker.get_active_sport_keys.return_value = frozenset({"baseball_mlb"})
-        t.set_season_checker(checker)
-        allowed, reason = t.should_allow(
-            "OddsAPI", CallPriority.MEDIUM, sport_key="basketball_nba",
-        )
-        assert not allowed
-        assert "basketball_nba" in reason
-
-    def test_sport_filter_allows_in_season(self):
-        t = _tracker_with_own_count_pct()
-        checker = MagicMock()
-        checker.get_active_sport_keys.return_value = frozenset({"baseball_mlb", "basketball_nba"})
-        t.set_season_checker(checker)
-        allowed, _ = t.should_allow(
-            "OddsAPI", CallPriority.MEDIUM, sport_key="basketball_nba",
-        )
-        assert allowed
-
-    def test_sport_filter_fail_open_when_cache_empty(self):
-        """Empty frozenset from checker → fail-open (allow)."""
-        t = _tracker_with_own_count_pct()
-        checker = MagicMock()
-        checker.get_active_sport_keys.return_value = frozenset()
-        t.set_season_checker(checker)
-        allowed, _ = t.should_allow(
-            "OddsAPI", CallPriority.MEDIUM, sport_key="basketball_nba",
-        )
-        assert allowed
-
-    def test_sport_filter_skipped_for_high_priority(self):
-        """HIGH priority calls bypass the sport filter."""
-        t = _tracker_with_own_count_pct()
-        checker = MagicMock()
-        checker.get_active_sport_keys.return_value = frozenset({"baseball_mlb"})
-        t.set_season_checker(checker)
-        # basketball_nba NOT in active keys, but priority is HIGH → should pass
-        allowed, _ = t.should_allow(
-            "OddsAPI", CallPriority.HIGH, sport_key="basketball_nba",
-        )
-        assert allowed
-
 
 # ── get_stats / UsageStats ────────────────────────────────────────────────────
 

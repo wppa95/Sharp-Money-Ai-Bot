@@ -318,8 +318,8 @@ def build_player_prop_market_comparison(
             available  = True,
         ),
     }
-    # The current ledger may also contain sportsbook observations from the
-    # Odds API player-prop ingestion job. Keep them informational: the
+    # The current ledger may also contain configured PropLine book observations.
+    # Keep them informational: the
     # Underdog line remains the only actionable selection.
     for provider in ("DraftKings", "FanDuel"):
         matching = [

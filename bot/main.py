@@ -36,8 +36,6 @@ from database import (
     is_official_underdog_settlement_source,
 )
 from engine import AnalysisEngine
-from engine.season_check import SeasonChecker
-from engine.analysis import _SPORT_TO_ODDS_API_KEY
 from logging_utils import install_credential_redaction
 from models import (
     MarketType,
@@ -92,7 +90,7 @@ from connectors import (
 )
 from market_engine import (
     init_market_engine,
-    init_odds_confirmation,
+    init_propline_confirmation,
     reset_monitoring_runtime_state,
     shutdown_db_persistence_worker,
     underdog_job,
@@ -104,9 +102,6 @@ from player_history_job import (
     propline_read_only_rotation_job,
 )
 from providers import init_health_monitor
-from providers.game_results import OddsApiResultsProvider
-from providers.usage_tracker import init_usage_tracker, get_usage_tracker
-from providers.quota_pacing import init_quota_pacer
 from engine.health import init_health_tracker, get_health_tracker
 
 # ── Logging ───────────────────────────────────────────────────────────────────
@@ -579,70 +574,11 @@ def _sqlite_write_coordinated_job(name: str, callback):
     )
 
 
-def _configured_odds_api_sports() -> list[tuple[str, Sport]]:
-    """Return legacy OddsAPI sports for compatibility callers.
-
-    ``ACTIVE_SPORTS`` is also used as the Underdog scanner scope, so it can
-    contain valid Underdog-only identifiers such as CS, LOL, VAL, and TENNIS.
-    Those identifiers must not be parsed by the sportsbook poller as
-    ``models.Sport`` values.
-    """
-    raw_configured = getattr(config, "ODDS_API_SPORTS_RAW", None)
-    if isinstance(raw_configured, str) and raw_configured.strip():
-        configured_values = raw_configured.split(",")
-    else:
-        # Compatibility for tests and callers that provide the pre-split
-        # ACTIVE_SPORTS-only configuration object.
-        configured_values = getattr(config, "active_sports", [])
-
-    aliases = {
-        "CFB": Sport.NCAAF,
-        "NCAA": Sport.NCAAF,
-        "FOOTBALL": Sport.NFL,
-        "BASKETBALL": Sport.NBA,
-        "BASEBALL": Sport.MLB,
-        "HOCKEY": Sport.NHL,
-    }
-    by_name = {member.value.casefold(): member for member in Sport}
-    supported: list[tuple[str, Sport]] = []
-    ignored: list[str] = []
-    seen_odds_keys: set[str] = set()
-    for raw_value in configured_values:
-        sport_value = str(raw_value).strip()
-        if not sport_value:
-            continue
-        sport = aliases.get(sport_value.upper()) or by_name.get(sport_value.casefold())
-        if sport is None:
-            ignored.append(sport_value)
-            continue
-        odds_key = _SPORT_TO_ODDS_API_KEY.get(sport)
-        if not odds_key:
-            ignored.append(sport_value)
-            continue
-        if odds_key in seen_odds_keys:
-            continue
-        seen_odds_keys.add(odds_key)
-        supported.append((sport_value, sport))
-
-    if ignored:
-        logger.debug(
-            "Legacy OddsAPI scope: ignoring %d unsupported sports: %s",
-            len(ignored),
-            ", ".join(ignored),
-        )
-    return supported
-
 # ── Module-level singletons ────────────────────────────────────────────────────
 # Initialised inside post_init so they live in the bot's event loop.
 _db: Database | None = None
 _history_db: Database | None = None
 _engine: AnalysisEngine | None = None
-_season_checker: SeasonChecker | None = None
-
-# Tracks which budget-warning thresholds have already been alerted this month
-# per provider.  Reset implicitly when get_usage_tracker()._roll_month_if_needed()
-# fires, or on bot restart (acceptable — at worst one duplicate alert per month).
-_last_budget_alerted: dict[str, set[int]] = {}
 
 # aiohttp AppRunner for the HTTP health-check server (started in post_init).
 _health_runner: Optional[Any] = None
@@ -726,7 +662,7 @@ async def _start_health_server() -> None:
 
 async def post_init(application: Application) -> None:
     """Runs once after the bot is initialised but before polling starts."""
-    global _db, _history_db, _engine, _season_checker
+    global _db, _history_db, _engine
 
     logger.info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
     logger.info("  Sharp Money +EV Detection Bot — Starting Up")
@@ -767,42 +703,12 @@ async def post_init(application: Application) -> None:
 
     _engine = AnalysisEngine()
 
-    # ── Odds API pacing (settlement/evidence only) ────────────────────────────
-    # Initialise the shared pacer before any retained Odds API client can be
-    # used.  Odds API is deliberately not a live market, season, or player-prop
-    # feed in production; PropLine/Underdog own those paths.
-    if config.ODDS_API_ENABLED:
-        init_quota_pacer(
-            quota_limit=config.ODDS_API_QUOTA_LIMIT,
-            daily_limit=config.ODDS_API_DAILY_LIMIT,
-            min_interval_seconds=config.ODDS_API_MIN_REQUEST_INTERVAL,
-            timezone_name=config.ODDS_API_PACING_TIMEZONE,
-            state_path=config.ODDS_API_PACING_STATE_FILE,
-        )
-        logger.info(
-            "Odds API settlement/evidence pacing enabled "
-            "(daily limit=%d, minimum interval=%ds)",
-            config.ODDS_API_DAILY_LIMIT,
-            config.ODDS_API_MIN_REQUEST_INTERVAL,
-        )
-    else:
-        logger.info("Odds API disabled; using PropLine for all player-prop feeds")
-
-    # The season checker used /v4/sports and therefore consumed the same
-    # scarce quota as settlement evidence.  It is intentionally disabled:
-    # season metadata is not part of the retained Odds API scope.
-    _season_checker = None
-
     # ── Provider health monitor + PropLine feed ─────────────────────────────
     _health_monitor = init_health_monitor()
     from providers.propline import PropLinePrizePicksProvider
     _propline_enabled = PropLinePrizePicksProvider(
         bookmaker=config.PROPLINE_UNDERDOG_BOOKMAKER
     ).is_available()
-    if config.ODDS_API_ENABLED:
-        _health_monitor.register("OddsAPI")
-    else:
-        _health_monitor.register("OddsAPI", disabled=True)
     _health_monitor.register("Underdog", disabled=not config.UNDERDOG_ENABLED)
     logger.info(
         "Provider health monitor initialised "
@@ -824,30 +730,6 @@ async def post_init(application: Application) -> None:
     else:
         logger.info("Discord delivery not configured (required variables absent)")
 
-    # ── API usage tracker + budget enforcement ────────────────────────────────
-    _usage_tracker = init_usage_tracker(
-        monthly_budgets=(
-            {"OddsAPI": config.ODDS_API_MONTHLY_BUDGET}
-            if config.ODDS_API_ENABLED
-            else {}
-        ),
-    )
-    _usage_tracker.set_season_checker(_season_checker)
-    logger.info(
-        "API usage tracker initialised (%s)",
-        "OddsAPI budget active"
-        if config.ODDS_API_ENABLED
-        else "OddsAPI disabled",
-    )
-
-    # Game results provider — only construct it when its upstream is enabled.
-    _results_provider = (
-        OddsApiResultsProvider(api_key=config.ODDS_API_KEY)
-        if config.ODDS_API_ENABLED
-        else None
-    )
-    application.bot_data["results_provider"] = _results_provider
-
     allowed_ids = list(config.allowed_user_ids)
     if not allowed_ids:
         logger.warning(
@@ -857,7 +739,7 @@ async def post_init(application: Application) -> None:
         )
     else:
         logger.info("Alert recipients: %s", allowed_ids)
-    init_handlers(_db, _engine, allowed_ids, season_checker=_season_checker)
+    init_handlers(_db, _engine, allowed_ids)
 
     # ── Multi-platform connector registry ─────────────────────────────────────
     registry = ConnectorRegistry()
@@ -873,10 +755,9 @@ async def post_init(application: Application) -> None:
     ))
 
     init_market_engine(registry)
-    # Keep PropLine/database corroboration available, but do not expose the
-    # AnalysisEngine's Odds API market-fetch methods to the alert path.
-    # Odds API is reserved for explicitly requested settlement/evidence calls.
-    init_odds_confirmation(None, _db)
+    # Confirmation reads only current PropLine observations; it never starts a
+    # separate provider request or promotes historical sportsbook rows to live.
+    init_propline_confirmation(_db)
 
     # Store db reference in bot_data for market engine jobs
     application.bot_data["db"] = _db
@@ -890,19 +771,6 @@ async def post_init(application: Application) -> None:
     # Register background jobs
     jq = application.job_queue
     if jq:
-        # PropLine owns all player-prop ingestion; no Odds API poller is
-        # scheduled while that provider is disabled.
-        if config.ODDS_API_ENABLED:
-            jq.run_repeating(
-                _coordinated_job(
-                    "odds_poller",
-                    _poll_odds_job,
-                    exclusive_group=_SQLITE_WRITE_JOB_GROUP,
-                ),
-                interval=config.PLAYER_PROP_POLL_INTERVAL,
-                first=10,
-                name="odds_poller",
-            )
         # The scheduler-facing callback is constructed with
         # _shared_monitoring_cycle so PropLine ingestion and Underdog scanning
         # retain one monitoring owner.
@@ -980,8 +848,8 @@ async def post_init(application: Application) -> None:
             job_kwargs=_SCAN_JOB_KWARGS,
         )
         # CLV seeding/harvesting are independent database maintenance jobs.
-        # They remain scheduled when Odds API is disabled so existing seeds are
-        # still reconciled without starting any new sportsbook polling.
+        # They remain scheduled after market polling was retired so generic
+        # historical seeds can still be harvested or expire cleanly.
         jq.run_repeating(
             _coordinated_job(
                 "clv_seeder",
@@ -1032,14 +900,6 @@ async def post_init(application: Application) -> None:
             first=150,
             name="propline_read_only_rotation",
         )
-        # API budget check — every 15 minutes, only when an API budget exists.
-        if config.ODDS_API_ENABLED:
-            jq.run_repeating(
-                _coordinated_job("budget_checker", _budget_check_job),
-                interval=900,
-                first=30,
-                name="budget_checker",
-            )
         # PropLineHistory prune — once per day (keeps last 14 days)
         jq.run_repeating(
             _coordinated_job(
@@ -1054,42 +914,19 @@ async def post_init(application: Application) -> None:
         )
         # Heartbeat — every 60 s (keeps HealthTracker alive timestamp current)
         jq.run_repeating(_coordinated_job("heartbeat", _heartbeat_job), interval=60, first=30, name="heartbeat")
-        # Keep the legacy callback registered as a health-visible no-op.  The
-        # season checker itself is disabled because season metadata is outside
-        # the settlement/evidence-only Odds API scope.
-        if config.ODDS_API_ENABLED and config.SEASON_CHECK_INTERVAL > 0:
-            jq.run_repeating(
-                _coordinated_job("season_checker", _season_check_job),
-                interval=config.SEASON_CHECK_INTERVAL,  # default interval=3600
-                first=50,
-                name="season_checker",
-                job_kwargs=_MAINTENANCE_JOB_KWARGS,
-            )
-        _odds_api_status = (
-            "settlement/evidence only (16 calls/day, 60m minimum interval)"
-            if config.ODDS_API_ENABLED
-            else "disabled"
-        )
         logger.info(
             "Jobs scheduled — Underdog every %ds with PropLine feed; "
             "full-pool every %ds; "
             "independent grader: every %ds, "
             "history collector: every %ds, "
-            "season_check: %s, "
             "heartbeat: every 60s "
              "[Unified Player Props cycle enabled=%s; "
-             "PropLine player-prop feed active; Odds API %s; bookmakers=%s]",
+             "PropLine player-prop feed active; bookmakers=%s]",
             config.UNDERDOG_POLL_INTERVAL,
             config.UNDERDOG_POLL_INTERVAL,
             config.OPPORTUNITY_GRADER_INTERVAL,
             config.PLAYER_HISTORY_POLL_INTERVAL,
-            (
-                "disabled (settlement-only)"
-                if config.ODDS_API_ENABLED and config.SEASON_CHECK_INTERVAL > 0
-                else "disabled"
-            ),
              _propline_enabled,
-             _odds_api_status,
              ",".join(getattr(config, "propline_bookmakers", [])),
         )
     else:
@@ -2181,38 +2018,13 @@ async def _heartbeat_job(context) -> None:
 
 # ── Background jobs ────────────────────────────────────────────────────────────
 
-async def _player_props_job(context) -> None:
-    """
-    Keep the legacy Odds API player-prop job disabled.
-
-    PropLine is the configured source for PrizePicks, DraftKings, FanDuel, and
-    supplemental Underdog observations. Underdog's native connector remains
-    active separately. H2H/totals confirmation is a separate path and is not
-    enabled by this player-prop job.
-    """
-    if _db is None or _engine is None:
-        logger.debug("_player_props_job: DB or engine not ready, skipping")
-        return
-    logger.info(
-        "_player_props_job: OddsAPI player-prop polling disabled; "
-        "PropLine observations feed the shared Underdog evaluation, "
-        "persistence, tracking, grading, and source-aware reporting path"
-    )
-    return
-
-
-async def _poll_odds_job(context) -> None:
-    """Compatibility entry point for the retired general Odds API poller."""
-    await _player_props_job(context)
-
-
 async def _steam_check_job(context) -> None:
     """
     Scan the recent odds database for steam / sharp money moves.
 
     Steam detection approach:
-      1. For each active sport, pull all OddsRecords from the last
-         5 × ODDS_POLL_INTERVAL seconds.
+      1. For each active sport, pull all retained OddsRecords from a recent
+         five-minute window.
       2. Group by (event, selection, sportsbook).
       3. For every group with at least two records spanning different poll
          times, compute the odds movement (earliest → latest).
@@ -2229,20 +2041,14 @@ async def _steam_check_job(context) -> None:
     bot      = context.bot
     chat_ids = list(config.allowed_user_ids)
     delivery = AlertDelivery(_db, bot, chat_ids)
-    window   = timedelta(seconds=config.ODDS_POLL_INTERVAL * 5)
+    window   = timedelta(minutes=5)
     since = now - window
 
-    for sport_str, sport in _configured_odds_api_sports():
-
-        # Skip sports that are out of season / have no active markets.
-        if _season_checker is not None:
-            odds_key = _SPORT_TO_ODDS_API_KEY.get(sport)
-            if odds_key and not _season_checker.is_sport_active(odds_key):
-                logger.debug(
-                    "_steam_check_job: skipping %s (%s) — out of season / no active markets",
-                    sport_str, odds_key,
-                )
-                continue
+    for sport_str in getattr(config, "active_sports", []):
+        try:
+            sport = Sport(str(sport_str).upper())
+        except ValueError:
+            continue
 
         # Skip sports whose steam alerts are always blocked by scope.
         # Steam is blocked for all non-MLB sports (and for all steam alert
@@ -2403,8 +2209,8 @@ async def _clv_harvest_job(context) -> None:
                 continue
 
             # Seeds without bet_odds cannot produce CLV% — expire immediately.
-            # Underdog seeds seeded via seed_clv_from_ud_confirmation() DO have
-            # bet_odds (from OddsAPI avg_odds), so they proceed to closing-line lookup.
+            # Provider-neutral seeds without a captured bet price cannot
+            # produce CLV and are expired rather than assigned a proxy value.
             if not seed.bet_odds:
                 expired_ids.append(seed.id)
                 expired += 1
@@ -2497,8 +2303,8 @@ async def _clv_seed_job(context) -> None:
     This is a lightweight read-then-write operation that never modifies
     existing alert data or fires any Telegram messages.
 
-    When sportsbook polling is re-enabled, a separate harvest job will read
-    these seeds, fetch closing odds, compute CLV%, and write clv_records.
+    Available provider-neutral odds may be used for historical CLV. This job
+    does not poll a market provider or create synthetic prices.
 
     Retry policy: up to 3 attempts with exponential backoff (2 s, 4 s) to
     handle any residual SQLite lock contention not already absorbed by WAL
@@ -2571,184 +2377,6 @@ async def _prune_prop_history_job(context) -> None:
         ht = get_health_tracker()
         if ht:
             ht.record_job_fail("_prune_prop_history_job", str(exc))
-async def _budget_check_job(context) -> None:
-    """
-    Run every 15 minutes.  Checks API usage against the pacing budget and
-    sends a Telegram alert the *first* time each threshold (75 / 90 / 100 %)
-    is crossed in a calendar month.
-
-    "Pacing budget" (ODDS_API_MONTHLY_BUDGET) is a self-imposed call cap and
-    is separate from the actual OddsAPI plan quota reported by API headers.
-
-    Alert escalation:
-      ≥ 75 % → ⚠️  warning
-      ≥ 90 % → ⚠️  serious warning; LOW-priority calls now blocked
-      ≥ 100% → 🚨  pacing budget exceeded; LOW + MEDIUM blocked; HIGH + CRITICAL pass
-    """
-    if not config.ODDS_API_ENABLED:
-        _ht = get_health_tracker()
-        if _ht:
-            _ht.record_job_run("_budget_check_job")
-        return
-    _tracker = get_usage_tracker()
-    if _tracker is None:
-        # Tracker not ready — record as successful no-op so /health never shows "never ran"
-        _ht = get_health_tracker()
-        if _ht:
-            _ht.record_job_run("_budget_check_job")
-        return
-
-    bot      = context.bot
-    chat_ids = list(config.allowed_user_ids)
-    if not chat_ids:
-        # No recipients configured — still a successful (no-op) run
-        _ht = get_health_tracker()
-        if _ht:
-            _ht.record_job_run("_budget_check_job")
-        return
-
-    _ht_start = get_health_tracker()
-    if _ht_start:
-        _ht_start.record_job_started("_budget_check_job")
-    try:
-        for provider, stats in _tracker.get_all_stats().items():
-            if stats.month_budget <= 0:
-                continue
-
-            alerted = _last_budget_alerted.setdefault(provider, set())
-
-            for threshold in (75, 90, 100):
-                if stats.budget_pct >= threshold and threshold not in alerted:
-                    alerted.add(threshold)
-
-                    if threshold >= 100:
-                        icon    = "🚨"
-                        heading = "PACING BUDGET EXCEEDED"
-                    elif threshold >= 90:
-                        icon    = "⚠️"
-                        heading = f"PACING BUDGET WARNING — {threshold}%"
-                    else:
-                        icon    = "⚠️"
-                        heading = f"PACING BUDGET WARNING — {threshold}%"
-
-                    # Pacing budget: how many calls made vs the self-imposed cap
-                    pacing_used_str = (
-                        f"{stats.quota_used:,}"
-                        if stats.quota_used is not None
-                        else f"~{stats.month_count:,}"
-                    )
-
-                    # Actual OddsAPI plan quota from response headers (separate concept)
-                    if stats.quota_remaining is not None or stats.quota_used is not None:
-                        r = f"{stats.quota_remaining:,}" if stats.quota_remaining is not None else "?"
-                        u = f"{stats.quota_used:,}"      if stats.quota_used      is not None else "?"
-                        api_quota_line = f"<b>API quota:</b>     {r} remaining  ·  {u} used\n"
-                    else:
-                        api_quota_line = ""
-
-                    # Sport breakdown — which UD alert sports are active
-                    _sport_icons = {
-                        "MLB": "⚾", "WNBA": "🏀", "NBA": "🏀", "NFL": "🏈",
-                        "DOTA": "🎮", "CS": "🖥️", "TENNIS": "🎾",
-                    }
-                    ud_sports     = sorted(config.ud_alert_sports)
-                    active_sp     = sorted(config.active_sports)
-                    sport_lines   = "  ".join(
-                        f"{_sport_icons.get(s, '🔸')}{s}" for s in ud_sports
-                    )
-                    odds_api_sp   = "  ".join(
-                        f"{_sport_icons.get(s, '🔸')}{s}" for s in active_sp
-                    ) or "none"
-
-                    if threshold >= 100:
-                        blocking_section = (
-                            "<b>Blocked:</b>     LOW + MEDIUM priority calls\n"
-                            "<b>Protected:</b>   HIGH + CRITICAL — approved active sports\n"
-                        )
-                        footer = (
-                            "This is your self-imposed pacing cap — the actual OddsAPI plan quota "
-                            "is not exhausted.\n"
-                            "Raise <code>ODDS_API_MONTHLY_BUDGET</code> to allow more calls."
-                        )
-                    elif threshold >= 90:
-                        blocking_section = (
-                            "<b>Blocked:</b>     LOW priority calls\n"
-                            "<b>Protected:</b>   HIGH + CRITICAL — approved active sports\n"
-                        )
-                        footer = "Monitor closely before the end of the month."
-                    else:
-                        blocking_section = ""
-                        footer = "Approaching pacing cap. Monitor before the end of the month."
-
-                    msg = (
-                        f"{icon} <b>{heading}</b>\n"
-                        f"\n"
-                        f"<b>Provider:</b>      {provider}\n"
-                        f"<b>Pacing budget:</b> {pacing_used_str} / {stats.month_budget:,}"
-                        f"  ({stats.budget_pct:.1f}%)\n"
-                        f"<b>Pacing bar:</b>    <code>{stats.budget_bar}</code>\n"
-                        f"{api_quota_line}"
-                        f"\n"
-                        f"{blocking_section}"
-                        f"\n"
-                        f"<b>Alert sports:</b>  {sport_lines}\n"
-                        f"<b>Odds API scope:</b> {odds_api_sp}\n"
-                        f"<i>(DOTA / TENNIS / CS use external APIs — not affected by this cap)</i>\n"
-                        f"\n"
-                        f"<i>{footer}</i>"
-                    )
-
-                    await broadcast_alert(bot, chat_ids, msg)
-                    logger.warning(
-                        "_budget_check_job: %s crossed %d%% pacing threshold "
-                        "(used=%s / pacing_budget=%d, api_quota_remaining=%s)",
-                        provider, threshold, pacing_used_str, stats.month_budget,
-                        stats.quota_remaining if stats.quota_remaining is not None else "unknown",
-                    )
-
-    except Exception as _exc:
-        logger.exception("_budget_check_job: error: %s", _exc)
-        _ht = get_health_tracker()
-        if _ht:
-            _ht.record_job_fail("_budget_check_job", str(_exc))
-        return
-
-    _ht = get_health_tracker()
-    if _ht:
-        _ht.record_job_run("_budget_check_job")
-
-
-# ── Season / market-status refresh job ────────────────────────────────────────
-
-async def _season_check_job(context) -> None:
-    """
-    Periodically refresh the season / market-status cache.
-
-    Calls SeasonChecker.refresh() unconditionally (the job scheduler
-    already manages the interval).  Failures are logged inside the
-    checker and leave the previous cache value intact (fail-open).
-    """
-    if not config.ODDS_API_ENABLED or _season_checker is None:
-        # Checker not ready — record as successful no-op so /health never shows "never ran"
-        _ht = get_health_tracker()
-        if _ht:
-            _ht.record_job_run("_season_check_job")
-        return
-    _ht_start = get_health_tracker()
-    if _ht_start:
-        _ht_start.record_job_started("_season_check_job")
-    try:
-        await _season_checker.refresh()
-        _ht = get_health_tracker()
-        if _ht:
-            _ht.record_job_run("_season_check_job")
-    except Exception as exc:
-        logger.exception("_season_check_job: error: %s", exc)
-        _ht = get_health_tracker()
-        if _ht:
-            _ht.record_job_fail("_season_check_job", str(exc))
-
-
 # ── Pregame market watch job (continuous, all-day) ────────────────────────────
 
 # ── Entry point ────────────────────────────────────────────────────────────────

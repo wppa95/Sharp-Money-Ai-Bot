@@ -109,7 +109,7 @@ OPP_BEST_ODDS  = +115   # best available Raiders line
 OPENING_ODDS   = -130   # Chiefs line before steam
 CURRENT_ODDS   = -155   # Chiefs line after steam
 
-SPORT     = Sport.WNBA   # Tier-1 sport — passes Odds API scope filter
+SPORT     = Sport.WNBA   # Tier-1 sport
 MKT_TYPE  = MarketType.MONEYLINE
 EVENT     = "Las Vegas Aces @ New York Liberty"
 SELECTION = "Las Vegas Aces"

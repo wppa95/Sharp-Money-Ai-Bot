@@ -262,7 +262,6 @@ def _build_minimal_db(
     db.log_prop_opportunity   = AsyncMock(return_value=None)
     db.mark_ud_snapshot_alert_sent = AsyncMock(return_value=None)
     db.mark_opportunity_alert_sent = AsyncMock(return_value=None)
-    db.seed_clv_from_ud_confirmation = AsyncMock(return_value=None)
     db.get_player_results     = AsyncMock(return_value=[])
     db.upsert_player_result   = AsyncMock(return_value=None)
     return db
@@ -605,7 +604,6 @@ class TestStableRefreshJobE2E:
         db.log_prop_opportunity                  = AsyncMock(return_value=None)
         db.mark_ud_snapshot_alert_sent           = AsyncMock(return_value=None)
         db.mark_opportunity_alert_sent           = AsyncMock(return_value=None)
-        db.seed_clv_from_ud_confirmation         = AsyncMock(return_value=None)
         return db
 
     @pytest.mark.asyncio
@@ -777,7 +775,6 @@ class TestWatchlistCursorRotation:
             db.log_prop_opportunity   = AsyncMock(return_value=None)
             db.mark_ud_snapshot_alert_sent = AsyncMock(return_value=None)
             db.mark_opportunity_alert_sent = AsyncMock(return_value=None)
-            db.seed_clv_from_ud_confirmation = AsyncMock(return_value=None)
 
             ctx = _make_context(db)
             with (
@@ -1291,7 +1288,7 @@ class TestWatchlistRescan:
             patch("market_engine._is_game_live_or_past", return_value=False),
             patch("market_engine._ud_line_fresh",     return_value=True),
             patch("market_engine.AlertDelivery") as mock_ad,
-            patch("market_engine._get_odds_api_confirmation", new_callable=AsyncMock, return_value=None),
+            patch("market_engine._get_propline_confirmation", new_callable=AsyncMock, return_value=None),
         ):
             mock_ad.return_value.deliver_underdog = AsyncMock(return_value=delivery)
             from market_engine import _stable_refresh_job
