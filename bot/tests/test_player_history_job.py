@@ -653,6 +653,72 @@ async def test_player_history_attempts_and_persists_full_active_book():
 
 
 @pytest.mark.asyncio
+async def test_player_history_persists_over_legacy_20k_setting_across_sports(caplog):
+    caplog.set_level("INFO")
+    sports = (
+        "NBA",
+        "NFL",
+        "MLB",
+        "WNBA",
+        "NHL",
+        "TENNIS",
+        "DOTA",
+        "MMA",
+    )
+    rows_per_sport = 2_501
+    total_rows = len(sports) * rows_per_sport
+    snapshots = {
+        (f"{sport} Player", "points"): SimpleNamespace(
+            player_name=f"{sport} Player",
+            sport=sport,
+            stat_type="points",
+        )
+        for sport in sports
+    }
+    db = MagicMock()
+    db.get_active_underdog_snapshot_per_prop = AsyncMock(return_value=snapshots)
+    db.upsert_player_results_bulk = AsyncMock()
+    db.upsert_player_result = AsyncMock()
+    provider = MagicMock()
+
+    async def fetch_rows(player, sport, stat):
+        return [
+            SimpleNamespace(
+                player_name=player,
+                sport=sport,
+                stat_type=stat,
+                game_date="2026-09-28",
+                actual_value=float(index),
+                opponent=None,
+                source="test",
+                game_id=f"{sport}-{index}",
+            )
+            for index in range(rows_per_sport)
+        ]
+
+    provider.fetch_results = AsyncMock(side_effect=fetch_rows)
+    context = SimpleNamespace(bot_data={"db": db})
+
+    with (
+        patch("player_history_job._API_CALL_TARGET", 20_000),
+        patch("providers.player_stats.PlayerStatsProvider", return_value=provider),
+        patch("engine.evidence_memory.put_player_results"),
+    ):
+        await player_history_collector_job(context)
+
+    persisted_rows = sum(
+        len(call.args[0]) for call in db.upsert_player_results_bulk.await_args_list
+    )
+    assert provider.fetch_results.await_count == len(sports)
+    assert persisted_rows == total_rows
+    assert persisted_rows > 20_000
+    assert not db.upsert_player_result.await_args_list
+    for sport in sports:
+        assert f"'{sport}': {rows_per_sport}" in caplog.text
+    assert "result_row_cap=none" in caplog.text
+
+
+@pytest.mark.asyncio
 async def test_player_history_fetches_targets_concurrently_then_commits_batches():
     snapshots = {
         ("First Player", "points"): SimpleNamespace(
