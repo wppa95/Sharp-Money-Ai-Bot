@@ -1462,6 +1462,42 @@ class AutoSlipNotification(Base):
     sent_at    = Column(DateTime, nullable=True)
 
 
+class AutoSlipNotificationLeg(Base):
+    """Persist each leg so automatic slips can be graded from official results."""
+    __tablename__ = "auto_slip_notification_legs"
+
+    id                    = Column(Integer, primary_key=True, autoincrement=True)
+    notification_signature = Column(String(64), nullable=False, index=True)
+    combination_signature  = Column(String(64), nullable=False, index=True)
+    leg_index              = Column(Integer, nullable=False)
+    provider               = Column(String(32), nullable=False, default="Underdog")
+    external_id            = Column(String(128), nullable=False, default="")
+    game_id                = Column(String(128), nullable=False, default="")
+    player_name            = Column(String(128), nullable=False)
+    sport                  = Column(String(32), nullable=False, default="")
+    stat_type              = Column(String(64), nullable=False, default="")
+    line_value             = Column(Float, nullable=True)
+    direction              = Column(String(8), nullable=False, default="")
+    game_time              = Column(DateTime, nullable=True)
+    result                 = Column(String(16), nullable=False, default="PENDING")
+    actual_value           = Column(Float, nullable=True)
+    grade_result_source    = Column(String(64), nullable=True)
+    graded_at              = Column(DateTime, nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "notification_signature",
+            "leg_index",
+            name="uq_auto_slip_notification_leg",
+        ),
+        Index(
+            "ix_auto_slip_notification_legs_combo",
+            "combination_signature",
+            "leg_index",
+        ),
+    )
+
+
 # ── Database manager ──────────────────────────────────────────────────────────
 
 class Database:
@@ -11220,9 +11256,11 @@ class Database:
         signature: str,
         slip_size: int,
         *,
+        combination_signature: str = "",
+        legs: Optional[list[dict]] = None,
         stale_after: timedelta = timedelta(minutes=15),
     ) -> bool:
-        """Atomically claim a new slip notification, or reclaim a stale send."""
+        """Claim a send and persist its exact legs, or reclaim a stale send."""
         now = datetime.utcnow()
         cutoff = now - stale_after
         async with self.session() as s:
@@ -11244,17 +11282,50 @@ class Database:
                     )
                     .values(created_at=now, slip_size=slip_size, sent_at=None)
                 )
-                await s.commit()
-                return reclaimed.rowcount == 1
-
-            s.add(
-                AutoSlipNotification(
-                    signature=signature,
-                    slip_size=slip_size,
-                    status="SENDING",
-                    created_at=now,
+                if reclaimed.rowcount != 1:
+                    await s.rollback()
+                    return False
+            else:
+                s.add(
+                    AutoSlipNotification(
+                        signature=signature,
+                        slip_size=slip_size,
+                        status="SENDING",
+                        created_at=now,
+                    )
                 )
-            )
+
+            if legs and combination_signature:
+                existing_legs = await s.execute(
+                    select(func.count())
+                    .select_from(AutoSlipNotificationLeg)
+                    .where(
+                        AutoSlipNotificationLeg.notification_signature
+                        == signature
+                    )
+                )
+                if not (existing_legs.scalar() or 0):
+                    for index, leg in enumerate(legs):
+                        s.add(
+                            AutoSlipNotificationLeg(
+                                notification_signature=signature,
+                                combination_signature=combination_signature,
+                                leg_index=index,
+                                provider=str(leg.get("provider") or "Underdog"),
+                                external_id=str(leg.get("external_id") or ""),
+                                game_id=str(leg.get("game_id") or ""),
+                                player_name=str(leg.get("player_name") or ""),
+                                sport=str(leg.get("sport") or ""),
+                                stat_type=str(leg.get("stat_type") or ""),
+                                line_value=(
+                                    float(leg["line_value"])
+                                    if leg.get("line_value") is not None
+                                    else None
+                                ),
+                                direction=str(leg.get("direction") or "").upper(),
+                                game_time=leg.get("game_time"),
+                            )
+                        )
             try:
                 await s.commit()
             except IntegrityError:
@@ -11280,12 +11351,394 @@ class Database:
         """Release an unsent claim so the next completed scan can retry it."""
         async with self.session() as s:
             await s.execute(
+                delete(AutoSlipNotificationLeg).where(
+                    AutoSlipNotificationLeg.notification_signature == signature
+                )
+            )
+            await s.execute(
                 delete(AutoSlipNotification).where(
                     AutoSlipNotification.signature == signature,
                     AutoSlipNotification.status == "SENDING",
                 )
             )
             await s.commit()
+
+    async def backfill_auto_slip_notification_legs(
+        self,
+        signature: str,
+        combination_signature: str,
+        legs: list[dict],
+    ) -> bool:
+        """Attach current exact leg data to a matching legacy sent notification."""
+        if not legs or not combination_signature:
+            return False
+        async with self.session() as s:
+            result = await s.execute(
+                select(AutoSlipNotification).where(
+                    AutoSlipNotification.signature == signature,
+                    AutoSlipNotification.status == "SENT",
+                )
+            )
+            if result.scalar_one_or_none() is None:
+                return False
+            count = await s.execute(
+                select(func.count())
+                .select_from(AutoSlipNotificationLeg)
+                .where(
+                    AutoSlipNotificationLeg.notification_signature == signature
+                )
+            )
+            if count.scalar():
+                return False
+            for index, leg in enumerate(legs):
+                s.add(
+                    AutoSlipNotificationLeg(
+                        notification_signature=signature,
+                        combination_signature=combination_signature,
+                        leg_index=index,
+                        provider=str(leg.get("provider") or "Underdog"),
+                        external_id=str(leg.get("external_id") or ""),
+                        game_id=str(leg.get("game_id") or ""),
+                        player_name=str(leg.get("player_name") or ""),
+                        sport=str(leg.get("sport") or ""),
+                        stat_type=str(leg.get("stat_type") or ""),
+                        line_value=(
+                            float(leg["line_value"])
+                            if leg.get("line_value") is not None
+                            else None
+                        ),
+                        direction=str(leg.get("direction") or "").upper(),
+                        game_time=leg.get("game_time"),
+                    )
+                )
+            await s.commit()
+            return True
+
+    async def grade_auto_slip_notification_legs(self) -> int:
+        """Grade pending automatic-slip legs from already persisted settlements."""
+        now = datetime.utcnow()
+        async with self.session() as s:
+            pending_result = await s.execute(
+                select(AutoSlipNotificationLeg)
+                .join(
+                    AutoSlipNotification,
+                    AutoSlipNotification.signature
+                    == AutoSlipNotificationLeg.notification_signature,
+                )
+                .where(
+                    AutoSlipNotification.status == "SENT",
+                    AutoSlipNotificationLeg.result == "PENDING",
+                )
+            )
+            pending = list(pending_result.scalars().all())
+            if not pending:
+                return 0
+
+            keys = {
+                (
+                    str(leg.player_name or "").strip().casefold(),
+                    str(leg.sport or "").strip().upper(),
+                    str(leg.stat_type or "").strip().casefold(),
+                )
+                for leg in pending
+            }
+            result_rows_by_key: dict[tuple[str, str, str], list[PlayerGameResult]] = {}
+            key_list = list(keys)
+            trusted_sources = tuple(
+                _UNDERDOG_SETTLEMENT_RESULT_SOURCES | _UNDERDOG_VOID_RESULT_SOURCES
+            )
+            for offset in range(0, len(key_list), 200):
+                batch = key_list[offset : offset + 200]
+                result = await s.execute(
+                    select(PlayerGameResult).where(
+                        tuple_(
+                            func.lower(func.trim(PlayerGameResult.player_name)),
+                            func.upper(func.trim(PlayerGameResult.sport)),
+                            func.lower(func.trim(PlayerGameResult.stat_type)),
+                        ).in_(batch),
+                        func.lower(func.trim(PlayerGameResult.source)).in_(
+                            trusted_sources
+                        ),
+                    )
+                )
+                for row in result.scalars().all():
+                    key = (
+                        str(row.player_name or "").strip().casefold(),
+                        str(row.sport or "").strip().upper(),
+                        str(row.stat_type or "").strip().casefold(),
+                    )
+                    result_rows_by_key.setdefault(key, []).append(row)
+
+            voids_by_identity: dict[tuple[str, str, str], list[PropOpportunityLog]] = {}
+            external_ids = {
+                str(leg.external_id or "").strip()
+                for leg in pending
+                if str(leg.external_id or "").strip()
+            }
+            if external_ids:
+                external_id_list = list(external_ids)
+                for offset in range(0, len(external_id_list), 200):
+                    void_result = await s.execute(
+                        select(PropOpportunityLog).where(
+                            PropOpportunityLog.external_id.in_(
+                                external_id_list[offset : offset + 200]
+                            ),
+                            func.lower(
+                                func.trim(
+                                    func.coalesce(PropOpportunityLog.provider, "")
+                                )
+                            )
+                            == "underdog",
+                            func.upper(func.trim(PropOpportunityLog.result)).in_(
+                                tuple(_VOID_GRADE_RESULTS)
+                            ),
+                            func.lower(
+                                func.trim(
+                                    func.coalesce(
+                                        PropOpportunityLog.grade_result_source, ""
+                                    )
+                                )
+                            ).in_(tuple(_UNDERDOG_VOID_RESULT_SOURCES)),
+                        )
+                    )
+                    for row in void_result.scalars().all():
+                        key = (
+                            str(row.external_id or "").strip(),
+                            str(row.stat_type or "").strip().casefold(),
+                            str(row.game_id or "").strip(),
+                        )
+                        voids_by_identity.setdefault(key, []).append(row)
+
+            graded = 0
+            for leg in pending:
+                if str(leg.provider or "").strip().casefold() != "underdog":
+                    continue
+                event_id = str(leg.game_id or "").strip()
+                if event_id and leg.external_id:
+                    void_rows = voids_by_identity.get(
+                        (
+                            str(leg.external_id).strip(),
+                            str(leg.stat_type or "").strip().casefold(),
+                            event_id,
+                        ),
+                        [],
+                    )
+                    if void_rows:
+                        leg.result = "VOID"
+                        leg.actual_value = None
+                        leg.grade_result_source = str(
+                            void_rows[0].grade_result_source or ""
+                        )
+                        leg.graded_at = now
+                        graded += 1
+                        continue
+
+                key = (
+                    str(leg.player_name or "").strip().casefold(),
+                    str(leg.sport or "").strip().upper(),
+                    str(leg.stat_type or "").strip().casefold(),
+                )
+                candidate_rows = result_rows_by_key.get(key, [])
+                if event_id:
+                    matching = [
+                        row
+                        for row in candidate_rows
+                        if str(row.game_id or "").strip() == event_id
+                    ]
+                else:
+                    game_time = leg.game_time
+                    valid_dates = (
+                        {
+                            game_time.strftime("%Y-%m-%d"),
+                            (game_time - timedelta(days=1)).strftime("%Y-%m-%d"),
+                        }
+                        if game_time is not None
+                        else set()
+                    )
+                    matching = [
+                        row
+                        for row in candidate_rows
+                        if str(row.game_date or "") in valid_dates
+                    ]
+                if not matching:
+                    continue
+                row = max(
+                    matching,
+                    key=lambda candidate: (
+                        (
+                            candidate.fetched_at.isoformat()
+                            if candidate.fetched_at
+                            else ""
+                        ),
+                        candidate.id or 0,
+                    ),
+                )
+                source = str(row.source or "").strip().casefold()
+                if source in _UNDERDOG_VOID_RESULT_SOURCES:
+                    leg.result = "VOID"
+                    leg.actual_value = None
+                else:
+                    if leg.line_value is None:
+                        continue
+                    actual = float(row.actual_value)
+                    if abs(actual - float(leg.line_value)) < 0.01:
+                        outcome = "PUSH"
+                    elif str(leg.direction or "").upper() == "UNDER":
+                        outcome = "HIT" if actual < float(leg.line_value) else "MISS"
+                    elif str(leg.direction or "").upper() == "OVER":
+                        outcome = "HIT" if actual > float(leg.line_value) else "MISS"
+                    else:
+                        continue
+                    leg.result = outcome
+                    leg.actual_value = actual
+                leg.grade_result_source = source
+                leg.graded_at = now
+                graded += 1
+
+            if graded:
+                await s.commit()
+            return graded
+
+    @staticmethod
+    def _auto_slip_combination_result(legs: list[dict]) -> str:
+        results = {str(leg.get("result") or "PENDING").upper() for leg in legs}
+        if "MISS" in results:
+            return "MISS"
+        if "PENDING" in results or not results:
+            return "PENDING"
+        if "VOID" in results:
+            return "VOID"
+        if "PUSH" in results:
+            return "PUSH"
+        if results == {"HIT"}:
+            return "HIT"
+        return "PENDING"
+
+    async def _get_auto_slip_notification_combinations(self) -> list[dict]:
+        async with self.session() as s:
+            result = await s.execute(
+                select(AutoSlipNotification, AutoSlipNotificationLeg)
+                .join(
+                    AutoSlipNotificationLeg,
+                    AutoSlipNotificationLeg.notification_signature
+                    == AutoSlipNotification.signature,
+                )
+                .where(AutoSlipNotification.status == "SENT")
+                .order_by(
+                    desc(AutoSlipNotification.sent_at),
+                    AutoSlipNotificationLeg.leg_index,
+                )
+            )
+            rows = result.all()
+
+        grouped: dict[str, dict] = {}
+        result_priority = {"PENDING": 0, "VOID": 1, "HIT": 2, "MISS": 2, "PUSH": 2}
+        for notification, leg in rows:
+            combination = str(leg.combination_signature or "")
+            if not combination:
+                continue
+            group = grouped.setdefault(
+                combination,
+                {
+                    "combination_signature": combination,
+                    "slip_size": notification.slip_size,
+                    "created_at": notification.created_at,
+                    "sent_at": notification.sent_at,
+                    "_legs": {},
+                },
+            )
+            if notification.sent_at and (
+                group["sent_at"] is None or notification.sent_at < group["sent_at"]
+            ):
+                group["sent_at"] = notification.sent_at
+            existing_leg = group["_legs"].get(leg.leg_index)
+            leg_record = {
+                "leg_index": leg.leg_index,
+                "provider": leg.provider,
+                "external_id": leg.external_id,
+                "game_id": leg.game_id,
+                "player_name": leg.player_name,
+                "sport": leg.sport,
+                "stat_type": leg.stat_type,
+                "line_value": leg.line_value,
+                "direction": leg.direction,
+                "game_time": leg.game_time,
+                "result": leg.result,
+                "actual_value": leg.actual_value,
+                "grade_result_source": leg.grade_result_source,
+            }
+            if existing_leg is None or result_priority.get(
+                str(leg.result or "PENDING").upper(), 0
+            ) > result_priority.get(str(existing_leg["result"] or "PENDING").upper(), 0):
+                group["_legs"][leg.leg_index] = leg_record
+
+        records = []
+        for group in grouped.values():
+            legs = [
+                group["_legs"][index]
+                for index in sorted(group["_legs"])
+            ]
+            records.append(
+                {
+                    "combination_signature": group["combination_signature"],
+                    "slip_size": group["slip_size"],
+                    "created_at": group["created_at"],
+                    "sent_at": group["sent_at"],
+                    "result": self._auto_slip_combination_result(legs),
+                    "legs": legs,
+                }
+            )
+        records.sort(
+            key=lambda record: record.get("sent_at") or datetime.min,
+            reverse=True,
+        )
+        return records
+
+    async def get_auto_slip_notification_history(self, limit: int = 10) -> list[dict]:
+        """Return recent distinct auto-sent combinations with their leg grades."""
+        records = await self._get_auto_slip_notification_combinations()
+        return records[: max(1, int(limit))]
+
+    async def get_auto_slip_notification_stats(self) -> dict:
+        """Aggregate distinct automatic slips by size and HIT/MISS/PUSH outcome."""
+        records = await self._get_auto_slip_notification_combinations()
+        by_size: dict[int, dict[str, int]] = {}
+        for record in records:
+            size = int(record["slip_size"])
+            stats = by_size.setdefault(
+                size,
+                {
+                    "hit": 0,
+                    "miss": 0,
+                    "push": 0,
+                    "pending": 0,
+                    "void": 0,
+                    "total": 0,
+                },
+            )
+            outcome = str(record["result"]).lower()
+            if outcome not in stats:
+                outcome = "pending"
+            stats[outcome] += 1
+            stats["total"] += 1
+
+        async with self.session() as s:
+            sent_result = await s.execute(
+                select(AutoSlipNotification.signature).where(
+                    AutoSlipNotification.status == "SENT"
+                )
+            )
+            sent_signatures = set(sent_result.scalars().all())
+            tracked_result = await s.execute(
+                select(AutoSlipNotificationLeg.notification_signature).distinct()
+            )
+            tracked_signatures = set(tracked_result.scalars().all())
+
+        return {
+            "by_size": by_size,
+            "total_slips": len(records),
+            "untracked_deliveries": len(sent_signatures - tracked_signatures),
+        }
 
     async def create_slip_journal(
         self,

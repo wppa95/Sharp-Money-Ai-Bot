@@ -54,6 +54,216 @@ async def test_auto_slip_notification_claim_is_durable_and_idempotent():
 
 
 @pytest.mark.asyncio
+async def test_auto_slip_results_use_official_event_rows_and_deduplicate_recipients():
+    from database import Database, PlayerGameResult
+
+    db = Database("sqlite+aiosqlite:///:memory:")
+    await db.init()
+    legs = [
+        {
+            "provider": "Underdog",
+            "external_id": "prop-over",
+            "game_id": "event-over",
+            "player_name": "Over Player",
+            "sport": "NBA",
+            "stat_type": "points",
+            "line_value": 18.5,
+            "direction": "OVER",
+            "game_time": datetime(2026, 9, 28, 19, 0),
+        },
+        {
+            "provider": "Underdog",
+            "external_id": "prop-under",
+            "game_id": "event-under",
+            "player_name": "Under Player",
+            "sport": "NBA",
+            "stat_type": "rebounds",
+            "line_value": 8.5,
+            "direction": "UNDER",
+            "game_time": datetime(2026, 9, 28, 19, 0),
+        },
+    ]
+    try:
+        for signature in ("a" * 64, "b" * 64):
+            assert await db.claim_auto_slip_notification(
+                signature,
+                2,
+                combination_signature="c" * 64,
+                legs=legs,
+            )
+            assert await db.mark_auto_slip_notification_sent(signature)
+
+        async with db.session() as session:
+            session.add_all(
+                [
+                    PlayerGameResult(
+                        player_name="Over Player",
+                        sport="NBA",
+                        stat_type="points",
+                        game_date="2026-09-28",
+                        actual_value=22.0,
+                        source="propline_event_results",
+                        game_id="event-over",
+                    ),
+                    PlayerGameResult(
+                        player_name="Under Player",
+                        sport="NBA",
+                        stat_type="rebounds",
+                        game_date="2026-09-28",
+                        actual_value=8.5,
+                        source="propline_history",
+                        game_id="event-under",
+                    ),
+                ]
+            )
+            await session.commit()
+
+        assert await db.grade_auto_slip_notification_legs() == 4
+        history = await db.get_auto_slip_notification_history(limit=8)
+        assert len(history) == 1
+        assert history[0]["result"] == "PUSH"
+        assert [leg["result"] for leg in history[0]["legs"]] == ["HIT", "PUSH"]
+
+        stats = await db.get_auto_slip_notification_stats()
+        assert stats["total_slips"] == 1
+        assert stats["by_size"][2]["push"] == 1
+        assert stats["untracked_deliveries"] == 0
+    finally:
+        await db.close()
+
+
+@pytest.mark.asyncio
+async def test_auto_slip_result_reports_miss_with_directional_under_hit():
+    from database import Database, PlayerGameResult
+
+    db = Database("sqlite+aiosqlite:///:memory:")
+    await db.init()
+    legs = [
+        {
+            "provider": "Underdog",
+            "external_id": "prop-under-win",
+            "game_id": "event-under-win",
+            "player_name": "Under Winner",
+            "sport": "NBA",
+            "stat_type": "rebounds",
+            "line_value": 8.5,
+            "direction": "UNDER",
+            "game_time": datetime(2026, 9, 28, 19, 0),
+        },
+        {
+            "provider": "Underdog",
+            "external_id": "prop-over-loss",
+            "game_id": "event-over-loss",
+            "player_name": "Over Loser",
+            "sport": "NBA",
+            "stat_type": "points",
+            "line_value": 20.5,
+            "direction": "OVER",
+            "game_time": datetime(2026, 9, 28, 19, 0),
+        },
+    ]
+    try:
+        assert await db.claim_auto_slip_notification(
+            "f" * 64,
+            2,
+            combination_signature="1" * 64,
+            legs=legs,
+        )
+        assert await db.mark_auto_slip_notification_sent("f" * 64)
+        async with db.session() as session:
+            session.add_all(
+                [
+                    PlayerGameResult(
+                        player_name="Under Winner",
+                        sport="NBA",
+                        stat_type="rebounds",
+                        game_date="2026-09-28",
+                        actual_value=7.0,
+                        source="propline_event_results",
+                        game_id="event-under-win",
+                    ),
+                    PlayerGameResult(
+                        player_name="Over Loser",
+                        sport="NBA",
+                        stat_type="points",
+                        game_date="2026-09-28",
+                        actual_value=19.0,
+                        source="propline_history",
+                        game_id="event-over-loss",
+                    ),
+                ]
+            )
+            await session.commit()
+
+        assert await db.grade_auto_slip_notification_legs() == 2
+        history = await db.get_auto_slip_notification_history(limit=8)
+        assert history[0]["result"] == "MISS"
+        assert [leg["result"] for leg in history[0]["legs"]] == ["HIT", "MISS"]
+    finally:
+        await db.close()
+
+
+@pytest.mark.asyncio
+async def test_auto_slip_does_not_grade_untrusted_or_wrong_event_rows():
+    from database import Database, PlayerGameResult
+
+    db = Database("sqlite+aiosqlite:///:memory:")
+    await db.init()
+    legs = [
+        {
+            "provider": "Underdog",
+            "external_id": "prop-a",
+            "game_id": "expected-event",
+            "player_name": "Player A",
+            "sport": "NBA",
+            "stat_type": "points",
+            "line_value": 10.5,
+            "direction": "OVER",
+            "game_time": datetime(2026, 9, 28, 19, 0),
+        }
+    ]
+    try:
+        assert await db.claim_auto_slip_notification(
+            "d" * 64,
+            2,
+            combination_signature="e" * 64,
+            legs=legs,
+        )
+        assert await db.mark_auto_slip_notification_sent("d" * 64)
+        async with db.session() as session:
+            session.add_all(
+                [
+                    PlayerGameResult(
+                        player_name="Player A",
+                        sport="NBA",
+                        stat_type="points",
+                        game_date="2026-09-28",
+                        actual_value=20.0,
+                        source="propline_event_results",
+                        game_id="different-event",
+                    ),
+                    PlayerGameResult(
+                        player_name="Player A",
+                        sport="NBA",
+                        stat_type="points",
+                        game_date="2026-09-28",
+                        actual_value=20.0,
+                        source="api",
+                        game_id="expected-event",
+                    ),
+                ]
+            )
+            await session.commit()
+
+        assert await db.grade_auto_slip_notification_legs() == 0
+        history = await db.get_auto_slip_notification_history(limit=8)
+        assert history[0]["result"] == "PENDING"
+        assert history[0]["legs"][0]["result"] == "PENDING"
+    finally:
+        await db.close()
+
+
+@pytest.mark.asyncio
 async def test_auto_slips_send_once_and_reoffer_changed_combinations(monkeypatch):
     from database import Database
     import commands
@@ -151,3 +361,87 @@ def test_auto_slip_signature_ignores_leg_order_but_tracks_line_changes():
 
     changed = _slip(2, line=19.5)
     assert _auto_slip_signature(2, slip) != _auto_slip_signature(2, changed)
+
+
+@pytest.mark.asyncio
+async def test_slip_journal_and_slipstats_show_auto_slip_outcomes(monkeypatch):
+    import commands
+
+    db = SimpleNamespace(
+        get_slip_journal_history=AsyncMock(return_value=[]),
+        grade_auto_slip_notification_legs=AsyncMock(return_value=2),
+        get_auto_slip_notification_history=AsyncMock(
+            return_value=[
+                {
+                    "slip_size": 2,
+                    "sent_at": datetime(2026, 9, 28, 20, 0),
+                    "result": "PUSH",
+                    "legs": [
+                        {
+                            "player_name": "Player A",
+                            "direction": "OVER",
+                            "line_value": 10.5,
+                            "stat_type": "Points",
+                            "result": "HIT",
+                            "actual_value": 12.0,
+                        },
+                        {
+                            "player_name": "Player B",
+                            "direction": "UNDER",
+                            "line_value": 8.5,
+                            "stat_type": "Rebounds",
+                            "result": "PUSH",
+                            "actual_value": 8.5,
+                        },
+                    ],
+                }
+            ]
+        ),
+        get_auto_slip_notification_stats=AsyncMock(
+            return_value={
+                "by_size": {
+                    2: {
+                        "hit": 0,
+                        "miss": 0,
+                        "push": 1,
+                        "pending": 0,
+                        "void": 0,
+                        "total": 1,
+                    }
+                },
+                "total_slips": 1,
+                "untracked_deliveries": 0,
+            }
+        ),
+        get_slip_journal_stats=AsyncMock(
+            return_value={
+                "total_slips": 0,
+                "by_size": {},
+                "total_staked": 0.0,
+                "total_payout": 0.0,
+                "overall_roi": None,
+            }
+        ),
+        get_pick_accuracy_by_sport=AsyncMock(return_value=[]),
+    )
+    monkeypatch.setattr(commands, "_db", db)
+    monkeypatch.setattr(commands, "_check_allowed", lambda _update: True)
+
+    update = SimpleNamespace(
+        message=SimpleNamespace(reply_text=AsyncMock())
+    )
+    context = SimpleNamespace(args=[])
+
+    await commands._cmd_slip_journal(update, context, ["journal"])
+    journal_text = update.message.reply_text.await_args.args[0]
+    assert "Auto-sent combinations" in journal_text
+    assert "PUSH" in journal_text
+    assert "Player A" in journal_text
+    assert "actual 8.5" in journal_text
+
+    update.message.reply_text.reset_mock()
+    await commands.cmd_slipstats(update, context)
+    stats_text = update.message.reply_text.await_args.args[0]
+    assert "AUTO-SENT SLIPS" in stats_text
+    assert "1P" in stats_text
+    assert "HIT = every leg hit" in stats_text

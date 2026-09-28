@@ -3078,19 +3078,57 @@ async def _cmd_slip_journal(
 
     # ── /slip journal | /slip j | /slip history ──────────────────────────────
     history = await _db.get_slip_journal_history(limit=8)
-    if not history:
-        await update.message.reply_text(
-            "📓 <b>Slip Journal</b>\n\n"
-            "No slips recorded yet.\n\n"
-            "Create one: <code>/slip create [stake]</code>\n"
-            "Add picks:  <code>/slip add &lt;player&gt;</code>\n"
+    try:
+        _grade_auto_slips = getattr(
+            _db, "grade_auto_slip_notification_legs", None
+        )
+        if callable(_grade_auto_slips):
+            await _grade_auto_slips()
+    except Exception as exc:
+        logger.warning("slip journal: auto-slip settlement refresh failed: %s", exc)
+    auto_history = []
+    auto_stats = {}
+    _auto_history_reader = getattr(
+        _db, "get_auto_slip_notification_history", None
+    )
+    if callable(_auto_history_reader):
+        try:
+            auto_history = await _auto_history_reader(limit=8) or []
+        except Exception as exc:
+            logger.warning("slip journal: auto-slip history unavailable: %s", exc)
+    _auto_stats_reader = getattr(_db, "get_auto_slip_notification_stats", None)
+    if callable(_auto_stats_reader):
+        try:
+            auto_stats = await _auto_stats_reader() or {}
+        except Exception as exc:
+            logger.warning("slip journal: auto-slip totals unavailable: %s", exc)
+
+    if not history and not auto_history:
+        lines = [
+            "📓 <b>Slip Journal</b>",
+            "",
+            "No manual slips or gradeable auto-sent slips are available.",
+            "",
+            "Create one: <code>/slip create [stake]</code>",
+            "Add picks:  <code>/slip add &lt;player&gt;</code>",
             "Grade:      <code>/slip grade [payout]</code>",
+        ]
+        if auto_stats.get("untracked_deliveries"):
+            lines += [
+                "",
+                f"<i>{auto_stats['untracked_deliveries']} earlier auto-slip "
+                "delivery record(s) have no saved legs and cannot be graded.</i>",
+            ]
+        await update.message.reply_text(
+            "\n".join(lines),
             parse_mode=ParseMode.HTML,
         )
         return
 
     status_sym = {"OPEN": "🟡", "GRADED": "✅", "VOID": "❌"}
-    lines = [f"📓 <b>Slip Journal</b>  ({len(history)} recent)", ""]
+    lines = ["📓 <b>Slip Journal</b>"]
+    if history:
+        lines += ["", f"<b>Manual slips</b>  ({len(history)} recent)", ""]
     for slip in history:
         sym   = status_sym.get(slip.status, "❓")
         st    = f"${slip.stake:.2f}" if slip.stake else "—"
@@ -3111,6 +3149,55 @@ async def _cmd_slip_journal(
                 f"  {sym} 🎯 PLAYER PROP · {leg.player_name} · "
                 f"{leg.direction or ''} {leg.line_value:g} · {leg.stat_type}"
             )
+
+    lines += ["", "<b>Auto-sent combinations</b>"]
+    auto_result_sym = {
+        "HIT": "✅",
+        "MISS": "❌",
+        "PUSH": "🔁",
+        "PENDING": "⏳",
+        "VOID": "⚪",
+    }
+    if auto_history:
+        lines.append("")
+        for auto_slip in auto_history:
+            outcome = str(auto_slip.get("result") or "PENDING").upper()
+            sym = auto_result_sym.get(outcome, "⏳")
+            sent_at = auto_slip.get("sent_at")
+            date = sent_at.strftime("%b %d") if sent_at else "?"
+            size = int(auto_slip.get("slip_size") or 0)
+            lines.append(
+                f"{sym} <b>{size}-leg</b> · {date} · "
+                f"<b>{_html.escape(outcome)}</b>"
+            )
+            for leg in auto_slip.get("legs", []):
+                leg_result = str(leg.get("result") or "PENDING").upper()
+                leg_sym = auto_result_sym.get(leg_result, "⏳")
+                actual = leg.get("actual_value")
+                actual_text = (
+                    f" · actual {float(actual):g}" if actual is not None else ""
+                )
+                player = _html.escape(str(leg.get("player_name") or "Unknown"))
+                direction = _html.escape(str(leg.get("direction") or ""))
+                stat = _html.escape(str(leg.get("stat_type") or ""))
+                line = leg.get("line_value")
+                line_text = f"{float(line):g}" if line is not None else "?"
+                lines.append(
+                    f"  {leg_sym} {player} · {direction} {line_text} "
+                    f"{stat}{actual_text}"
+                )
+        lines += [
+            "",
+            "<i>HIT = all legs hit · MISS = any leg missed · "
+            "PUSH = no misses and at least one push. This is not a payout record.</i>",
+        ]
+    else:
+        lines.append("  <i>No tracked auto-sent combinations yet.</i>")
+    if auto_stats.get("untracked_deliveries"):
+        lines.append(
+            f"<i>{auto_stats['untracked_deliveries']} earlier auto-slip "
+            "delivery record(s) have no saved legs and cannot be graded.</i>"
+        )
 
     await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML)
 
@@ -3520,14 +3607,49 @@ async def auto_slip_notifications_job(context: ContextTypes.DEFAULT_TYPE) -> Non
                 if slip is None:
                     continue
                 combination_signature = _auto_slip_signature(size, slip)
+                leg_payload = [
+                    {
+                        "provider": getattr(leg, "sportsbook", "Underdog")
+                        or "Underdog",
+                        "external_id": getattr(leg, "external_id", "") or "",
+                        "game_id": getattr(leg, "game_id", "") or "",
+                        "player_name": getattr(leg, "player_name", "") or "",
+                        "sport": getattr(leg, "sport", "") or "",
+                        "stat_type": getattr(leg, "stat_type", "") or "",
+                        "line_value": getattr(leg, "pp_line_value", None),
+                        "direction": getattr(leg, "best_side", "") or "",
+                        "game_time": getattr(leg, "game_time", None),
+                    }
+                    for leg in getattr(slip, "legs", [])
+                ]
                 claim_signature = hashlib.sha256(
                     f"{chat_id}:{combination_signature}".encode("utf-8")
                 ).hexdigest()
-                if await _db.claim_auto_slip_notification(
+                claimed_now = await _db.claim_auto_slip_notification(
                     claim_signature,
                     size,
-                ):
+                    combination_signature=combination_signature,
+                    legs=leg_payload,
+                )
+                if claimed_now:
                     claimed.append((claim_signature, size, slip))
+                else:
+                    backfill = getattr(
+                        _db, "backfill_auto_slip_notification_legs", None
+                    )
+                    if callable(backfill):
+                        try:
+                            await backfill(
+                                claim_signature,
+                                combination_signature,
+                                leg_payload,
+                            )
+                        except Exception as exc:
+                            logger.warning(
+                                "auto_slip_notifications: legacy leg backfill "
+                                "failed: %s",
+                                exc,
+                            )
         except Exception:
             for signature, _, _ in claimed:
                 try:
@@ -5998,6 +6120,26 @@ async def cmd_slipstats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         return
 
     try:
+        _grade_auto_slips = getattr(
+            _db, "grade_auto_slip_notification_legs", None
+        )
+        if callable(_grade_auto_slips):
+            await _grade_auto_slips()
+    except Exception as exc:
+        logger.warning("cmd_slipstats: auto-slip settlement refresh failed: %s", exc)
+
+    auto_slip_stats = None
+    _auto_stats_reader = getattr(_db, "get_auto_slip_notification_stats", None)
+    if callable(_auto_stats_reader):
+        try:
+            auto_slip_stats = await _auto_stats_reader()
+            auto_slip_stats = (
+                auto_slip_stats if isinstance(auto_slip_stats, dict) else None
+            )
+        except Exception as exc:
+            logger.warning("cmd_slipstats: auto-slip stats unavailable: %s", exc)
+
+    try:
         slip_stats, sport_rows = await _independent_report_reads([
             _db.get_slip_journal_stats(),
             _db.get_pick_accuracy_by_sport(
@@ -6046,38 +6188,79 @@ async def cmd_slipstats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             _thick,
             "  <i>Slip journal database error; metrics are temporarily unavailable.</i>",
         ]
-        lines.append(f"\n{_thick}")
-        await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML)
-        return
-
-    lines += [
-        "",
-        f"<b>SLIP JOURNAL</b>  ({slip_stats['total_slips']} graded slips)",
-        _thick,
-    ]
-    by_size = slip_stats.get("by_size", {})
-    if by_size:
-        for size in sorted(by_size):
-            d   = by_size[size]
-            w   = d["win"]
-            l   = d["loss"]
-            tot = w + l
-            win_pct = f"{w / tot * 100:.0f}%" if tot > 0 else "—"
-            stk = f"${d['staked']:.2f}" if d["staked"] else "—"
-            pay = f"${d['payout']:.2f}" if d["payout"] else "—"
-            lines.append(f"  {size:<8}  {w}W / {l}L  ({win_pct})  ·  {stk} → {pay}")
     else:
-        lines.append("  <i>No graded slips yet. Create one: /slip create</i>")
-
-    # Overall
-    if slip_stats["total_staked"] > 0:
-        roi_str = f"{slip_stats['overall_roi']:+.1f}%" if slip_stats["overall_roi"] is not None else "—"
         lines += [
             "",
-            f"Total staked:  ${slip_stats['total_staked']:.2f}",
-            f"Total payout:  ${slip_stats['total_payout']:.2f}",
-            f"Overall ROI:   <b>{roi_str}</b>",
+            f"<b>SLIP JOURNAL</b>  ({slip_stats['total_slips']} graded slips)",
+            _thick,
         ]
+        by_size = slip_stats.get("by_size", {})
+        if by_size:
+            for size in sorted(by_size):
+                d   = by_size[size]
+                w   = d["win"]
+                l   = d["loss"]
+                tot = w + l
+                win_pct = f"{w / tot * 100:.0f}%" if tot > 0 else "—"
+                stk = f"${d['staked']:.2f}" if d["staked"] else "—"
+                pay = f"${d['payout']:.2f}" if d["payout"] else "—"
+                lines.append(
+                    f"  {size:<8}  {w}W / {l}L  ({win_pct})  ·  {stk} → {pay}"
+                )
+        else:
+            lines.append("  <i>No graded slips yet. Create one: /slip create</i>")
+
+        # Overall
+        if slip_stats["total_staked"] > 0:
+            roi_str = (
+                f"{slip_stats['overall_roi']:+.1f}%"
+                if slip_stats["overall_roi"] is not None
+                else "—"
+            )
+            lines += [
+                "",
+                f"Total staked:  ${slip_stats['total_staked']:.2f}",
+                f"Total payout:  ${slip_stats['total_payout']:.2f}",
+                f"Overall ROI:   <b>{roi_str}</b>",
+            ]
+
+    lines += ["", "<b>AUTO-SENT SLIPS</b>  (official result evidence)", _thick]
+    if auto_slip_stats is None:
+        lines.append("  <i>Auto-sent slip results are temporarily unavailable.</i>")
+    else:
+        auto_by_size = auto_slip_stats.get("by_size", {})
+        if auto_by_size:
+            for size in sorted(auto_by_size):
+                counts = auto_by_size[size]
+                hits = int(counts.get("hit", 0))
+                misses = int(counts.get("miss", 0))
+                pushes = int(counts.get("push", 0))
+                pending = int(counts.get("pending", 0))
+                voids = int(counts.get("void", 0))
+                settled = hits + misses + pushes
+                hit_rate = (
+                    f"{hits / settled * 100:.0f}% settled hit rate"
+                    if settled
+                    else "not settled"
+                )
+                detail = f"{hits}H / {misses}M / {pushes}P"
+                if pending:
+                    detail += f" · {pending} pending"
+                if voids:
+                    detail += f" · {voids} void"
+                lines.append(f"  {size}-leg: {detail} · {hit_rate}")
+        else:
+            lines.append("  <i>No auto-sent combinations with saved legs yet.</i>")
+        untracked = int(auto_slip_stats.get("untracked_deliveries", 0) or 0)
+        if untracked:
+            lines.append(
+                f"  <i>{untracked} earlier delivery record(s) lack saved legs "
+                "and cannot be graded.</i>"
+            )
+        lines.append(
+            "  <i>HIT = every leg hit · MISS = any leg missed · "
+            "PUSH = no misses and at least one push. No payout is implied.</i>"
+        )
 
     lines.append(f"\n{_thick}")
     await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML)
