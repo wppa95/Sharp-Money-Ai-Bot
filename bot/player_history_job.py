@@ -53,10 +53,9 @@ _PLAYER_HISTORY_OPERATION_TIMEOUT_SECONDS = 5.0
 # provider calls retain the shorter timeout above.
 _PLAYER_HISTORY_TARGET_DISCOVERY_TIMEOUT_SECONDS = 30.0
 
-# Retained as a compatibility/configuration value for callers that import it.
-# It is deliberately not used as a selection limit: every active supported
-# target is fetched on every cadence. The default is sized above the current
-# approximately 5,200-target Underdog book.
+# Retained for the legacy rotating-target helper and callers that import it.
+# The active collector below does not use this value to limit targets or rows:
+# it fetches every active supported target and persists every row returned.
 try:
     from config import config as _config
 
@@ -424,7 +423,7 @@ async def player_history_collector_job(context) -> None:
         return
     logger.info(
         "player_history_collector_job: independent full-book collection starting "
-        "target_floor=%d cadence_budget=%.1fs",
+        "result_row_cap=none legacy_target_slice_limit=%d cadence_budget=%.1fs",
         _API_CALL_TARGET,
         _player_history_cadence_budget(),
     )
@@ -639,7 +638,7 @@ async def player_history_collector_job(context) -> None:
         logger.info(
             "player_history_collector_job: provider_targets=%d "
             "round_robin_sports=%s mode=independent_full_collection "
-            "target_floor=%d",
+            "result_row_cap=none legacy_target_slice_limit=%d",
             len(targets),
             sorted({sport for _, sport, _ in targets}),
             _API_CALL_TARGET,
@@ -1022,7 +1021,7 @@ async def player_history_collector_job(context) -> None:
             "persisted_rows=%d targets_processed=%d rows_processed=%d "
             "remaining_targets=%d processed=%d remaining=%d errors=%d "
             "deadline_targets=%d empty_results=%d budget_exhausted=%s "
-            "targets_total=%d elapsed=%.1fs "
+            "result_row_cap=none targets_total=%d elapsed=%.1fs "
             "targets_by_sport=%s "
             "players_ok_by_sport=%s rows_by_sport=%s "
             "no_result_by_sport=%s "

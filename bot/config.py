@@ -230,9 +230,8 @@ class Config:
     PLAYER_HISTORY_POLL_INTERVAL: int = int(
         os.environ.get("PLAYER_HISTORY_POLL_INTERVAL", "180")
     )
-    # Full active-book player-history collection runs on every cadence. Keep
-    # this compatibility setting above the current approximately 5,200-target
-    # book; the collector never uses it to truncate the active target list.
+    # Legacy rotation-helper limit retained for compatibility. The active
+    # multi-sport collector does not use this as a target, result, or row cap.
     PLAYER_HISTORY_BATCH_SIZE: int = int(
         os.environ.get("PLAYER_HISTORY_BATCH_SIZE", "20000")
     )
