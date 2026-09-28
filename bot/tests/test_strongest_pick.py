@@ -398,7 +398,7 @@ def test_strong_mode_uses_computed_hit_rates_when_decision_omits_windows():
     ) == [candidate]
 
 
-@pytest.mark.parametrize("sport", ["MLB", "TENNIS"])
+@pytest.mark.parametrize("sport", ["MLB", "NBA", "NFL", "WNBA", "NHL"])
 @pytest.mark.parametrize(
     "direction,rates,expected",
     [
@@ -408,7 +408,7 @@ def test_strong_mode_uses_computed_hit_rates_when_decision_omits_windows():
         ("UNDER", [0.25, 0.25, 0.25, 0.25, 0.26, 0.25], False),
     ],
 )
-def test_strong_pick_applies_same_cutoffs_across_sports(
+def test_strong_pick_applies_history_cutoffs_across_main_leagues(
     sport,
     direction,
     rates,
@@ -426,6 +426,38 @@ def test_strong_pick_applies_same_cutoffs_across_sports(
         rates,
         games=100,
     )
+
+    selected = select_strongest_actionable_picks(
+        [candidate],
+        require_strong=True,
+    )
+
+    assert (candidate in selected) is expected
+
+
+@pytest.mark.parametrize(
+    "sport,confidence,expected",
+    [
+        ("TENNIS", 70, True),
+        ("SOCCER", 80, True),
+        ("FIFA", 69, False),
+        ("CS", None, False),
+    ],
+)
+def test_direction_only_sports_use_confidence_without_game_history(
+    sport,
+    confidence,
+    expected,
+):
+    candidate = _candidate(
+        "Underdog",
+        "No History Player",
+        "Points",
+        confidence=confidence or 0,
+    )
+    candidate["sport"] = sport
+    candidate["confidence"] = confidence
+    candidate["decision"] = SimpleNamespace(recommendation="OVER")
 
     selected = select_strongest_actionable_picks(
         [candidate],

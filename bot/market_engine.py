@@ -61,6 +61,7 @@ from engine.strongest_pick import (
     select_strongest_actionable_picks,
 )
 from engine.delivery_evidence import (
+    has_qualifying_directional_pick,
     has_qualifying_pick_history,
     history_supports_delivery,
     history_is_available,
@@ -3232,7 +3233,7 @@ async def _run_prizepicks_independent_cycle(
                 line_value=line,
                 recommendation=decision.recommendation,
                 decision_tier=None,
-                confidence=None,
+                confidence=getattr(decision, "confidence", None),
                 game_time=getattr(prop, "game_time", None),
                 game_id=str(
                     getattr(prop, "game_id", "")
@@ -3853,6 +3854,7 @@ async def consensus_check_job(context) -> None:
 
 def _has_strong_delivery_evidence(
     *,
+    sport: str = "",
     score: object = None,
     validation: object = None,
     decision: object = None,
@@ -3860,10 +3862,13 @@ def _has_strong_delivery_evidence(
 ) -> bool:
     """Return whether existing scoring/validation data supports strong delivery.
 
-    A directional result must have strong completed-result evidence in every
-    required window. The active alert gate below applies the same threshold
-    alongside its source-provenance checks.
+    History-required sports need strong completed-result evidence in every
+    required window. Other sports use the direction-confidence threshold;
+    the active alert gate also applies source-provenance checks where required.
     """
+    if is_history_optional_sport(sport):
+        return has_qualifying_directional_pick(decision, sport=sport)
+
     def _strong_directional_history(obj: object) -> bool:
         recommendation = str(
             getattr(obj, "recommendation", "")
@@ -4008,12 +4013,11 @@ def _has_delivery_evidence(
 ) -> bool:
     """Return whether a directional candidate may enter Telegram delivery.
 
-    A valid OVER/UNDER recommendation is necessary but not sufficient: every
-    candidate must pass the directional hit-rate threshold in each required
-    history window and have completed primary-player results or explicitly
-    settled PropLine history. Disallowed football-family sports are suppressed
-    here and again by ``AlertDelivery``. Other safety checks (freshness, timing,
-    tracking, deduplication, and transport) remain downstream.
+    Main league sports must pass the directional hit-rate threshold in each
+    required history window and have completed primary-player results or
+    explicitly settled PropLine history. Other sports require direction
+    confidence of at least 70. Disallowed football-family sports are
+    suppressed here and again by ``AlertDelivery``.
     """
     if is_disallowed_football_sport(sport):
         return False
@@ -4029,6 +4033,12 @@ def _has_delivery_evidence(
     ).upper()
     if direction not in {"OVER", "UNDER"}:
         return False
+    if is_history_optional_sport(sport):
+        return has_qualifying_directional_pick(
+            decision,
+            direction,
+            sport=sport,
+        )
     if not history_is_available(validation, decision, intelligence_trace):
         return False
 
@@ -4039,10 +4049,12 @@ def _has_delivery_evidence(
     )
     if not history_supports_delivery(*history_values):
         return False
-    if not has_qualifying_pick_history(decision, direction):
+    if not has_qualifying_directional_pick(
+        decision,
+        direction,
+        sport=sport,
+    ):
         return False
-    if is_history_optional_sport(sport):
-        return True
 
     if bool(getattr(validation, "has_supporting_data", False)):
         source = str(getattr(validation, "data_source", "") or "").lower().strip()
@@ -5705,7 +5717,7 @@ async def underdog_job(context) -> None:
                                 line_value        = line_val,
                                 recommendation    = decision.recommendation,
                                 decision_tier     = None,
-                                confidence        = None,
+                                confidence        = getattr(decision, "confidence", None),
                                 game_time         = snap.game_time,
                                 game_id           = _snapshot_event_id(snap),
                                 provider          = "Underdog",
@@ -6055,7 +6067,7 @@ async def underdog_job(context) -> None:
                                     line_value        = snap.line or 0.0,
                                     recommendation    = decision.recommendation,
                                      decision_tier     = None,
-                                     confidence        = None,
+                                     confidence        = getattr(decision, "confidence", None),
                                     game_time         = snap.game_time,
                                     game_id           = _snapshot_event_id(snap),
                                     provider          = "Underdog",
@@ -6709,7 +6721,7 @@ async def underdog_job(context) -> None:
                         line_value        = _line_val,
                         recommendation    = _sdec.recommendation,
                          decision_tier     = None,
-                         confidence        = None,
+                         confidence        = getattr(_sdec, "confidence", None),
                         game_time         = _ssnap.game_time,
                         game_id           = _snapshot_event_id(_ssnap),
                         provider          = "Underdog",
@@ -8143,7 +8155,7 @@ async def _stable_refresh_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                         line_value        = _sr_line,
                         recommendation    = _sr_dec.recommendation,
                          decision_tier     = None,
-                         confidence        = None,
+                         confidence        = getattr(_sr_dec, "confidence", None),
                         game_time         = _sr_snap.game_time,
                         game_id           = getattr(_sr_snap, "game_id", "") or "",
                         provider          = "Underdog",
@@ -9022,7 +9034,7 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                         "line_value": _fpr_line,
                         "recommendation": getattr(_fpr_dec, "recommendation", None),
                         "decision_tier": None,
-                        "confidence": None,
+                        "confidence": getattr(_fpr_dec, "confidence", None),
                         "game_time": getattr(_fpr_snap, "game_time", None),
                         "game_id": _snapshot_event_id(_fpr_snap),
                         "provider": _fpr_provider,

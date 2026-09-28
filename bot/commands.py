@@ -1820,7 +1820,7 @@ def _display_prop_from_opportunity(opportunity: Any) -> Any:
         removed=False,
         score_tier=None,
         bet_recommendation=getattr(opportunity, "recommendation", None),
-        bet_confidence=None,
+        bet_confidence=getattr(opportunity, "confidence", None),
         score_total=None,
         market_quality_score=None,
         alert_sent=True,
@@ -3259,9 +3259,9 @@ async def cmd_slip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         )
         return
 
-    # Use the same complete-history quality gate as automatic delivery and
-    # /picks. All reported hit rates are OVER rates.
-    from engine.delivery_evidence import has_qualifying_pick_history
+    # Main league sports use complete history; other sports use the same
+    # 70-confidence direction rule as automatic delivery and /picks.
+    from engine.delivery_evidence import has_qualifying_directional_pick
     from engine.player_results import compute_hit_rates as _compute_slip_hit_rates
 
     _slip_result_keys = [
@@ -3308,7 +3308,12 @@ async def cmd_slip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             _history = None
         if (
             _direction not in ("OVER", "UNDER")
-            or not has_qualifying_pick_history(_history, _direction)
+            or not has_qualifying_directional_pick(
+                _history,
+                _direction,
+                sport=_plh.sport,
+                confidence=getattr(_plh, "bet_confidence", None),
+            )
         ):
             _slip_ineligible += 1
             logger.debug(

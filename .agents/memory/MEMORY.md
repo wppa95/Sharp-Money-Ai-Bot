@@ -122,7 +122,7 @@
 - [CLV bulk writes](clv-bulk-writes.md) — bounded CLV batches and no full-history sort before LIMIT keep scheduled CLV work from appearing stuck.
 - [Funnel timing](funnel-timing.md) — report scan age/cadence from observed timestamps, never from the requested report window.
 - [Monitoring cycle budget](cycle-budget-funnel-resilience.md) — optional enrichment must have a hard shared budget so stalled history calls cannot block cycle completion or /funnel.
-- [Direction-only prop delivery](direction-only-delivery.md) — require completed evidence, direction, and the stricter hit-rate bar; watchlist/tiers stay non-blocking and sports remain uncapped.
+- [Direction-only prop delivery](direction-only-delivery.md) — apply sport-specific quality rules while keeping independent safety gates; watchlists/tiers remain non-blocking and uncapped.
 - [Independent sport delivery](independent-sport-delivery-quotas.md) — attempt every pick passing existing gates; order within sports and never impose global or per-sport caps.
 - [PropLine complete-feed ledger](propline-complete-feed-ledger.md) — fetch all active non-football sports, retain immutable normalized observations, and withhold evaluation on partial feeds.
 - [PropLine catalog audit boundary](propline-catalog-audit.md) — catalog drift is separate operational evidence; retain unknown identities and resolve them only when a later complete audit maps them.
@@ -143,7 +143,7 @@
 - [Underdog event timing](underdog-event-timing.md) — join event metadata only through explicit provider IDs; unknown timing must remain delivery-blocked.
 - [Telegram funnel boundary](telegram-funnel-boundary.md) — Telegram delivery requires tracked + directional durable rows; keep `/picks` and monitoring populations independent.
 - [Sleeper test fixtures](sleeper-test-fixtures.md) — cache non-fixture current seasons as empty so date-dependent NFL lookups stay deterministic.
-- [Strong pick quality gate](strong-pick-quality-gate.md) — alerts, `/picks`, and `/slip` share 75% OVER / 25% UNDER-rate thresholds in every history window.
+- [Strong pick quality gate](strong-pick-quality-gate.md) — MLB/NBA/NFL/WNBA/NHL require 75%/25% across six windows; other sports need direction confidence ≥70, without completed-game history.
 - [Telegram transport error handling](telegram-transport-errors.md) — python-telegram-bot wraps httpx read failures in NetworkError; classify the cause as transient polling noise.
 - [Grader backlog fairness](grader-backlog-fairness.md) — id-only settlement rotation can starve evidence-backed sports behind unresolved football rows; prefer cheap sport-priority ordering over correlated evidence scans.
 - [PropLine handoff pacing](propline-handoff-pacing.md) — a quota-paced PropLine fetch must not block the live monitor; preserve completed handoffs for the next cycle.

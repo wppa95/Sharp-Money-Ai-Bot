@@ -8,6 +8,7 @@ they can support a user-facing directional alert.
 from __future__ import annotations
 
 import json
+import math
 from typing import Any
 
 
@@ -23,22 +24,20 @@ _NESTED_KEYS = (
     "bet_evidence_json",
 )
 
-_STRICT_HISTORY_SPORTS = frozenset({"MLB", "NFL", "NBA", "WNBA"})
+_STRICT_HISTORY_SPORTS = frozenset({"MLB", "NFL", "NBA", "WNBA", "NHL"})
+_DIRECTION_ONLY_MIN_CONFIDENCE = 70
 
 
 def is_history_optional_sport(sport: Any) -> bool:
-    """Return whether *sport* skips the stricter history-quality checks.
+    """Return whether *sport* uses the direction-confidence rule.
 
-    NFL, NBA, MLB, and WNBA are strict-history sports. Other sports may be
-    delivered after common completed-history qualification without the
-    additional strict-sport checks. This never makes missing history optional:
-    every user-facing alert still needs five usable completed or settled
-    results and an OVER/UNDER direction.
+    MLB, NBA, NFL, WNBA, and NHL require complete completed-result history.
+    Other named sports need an OVER/UNDER recommendation with confidence of at
+    least 70; they do not require completed player-game results.
 
-    This is deliberately based on the strict set rather than a hand-maintained
-    list of aliases. The feed contains additional active sports (for example
-    CFB, NHL, and FIFA), and omitting one from an optional-sport allowlist
-    silently changes its additional quality checks.
+    This is deliberately based on the history-required set rather than a
+    hand-maintained optional-sport allowlist, so new sport codes inherit the
+    direction-confidence rule.
     """
     normalized = " ".join(
         str(sport or "").strip().upper().replace("_", " ").replace("-", " ").split()
@@ -407,17 +406,82 @@ def has_qualifying_pick_history(
     value: Any,
     direction: Any = None,
 ) -> bool:
-    """Require qualifying directional history in every required window.
+    """Apply the completed-history threshold for history-required sports.
 
-    Shared by automatic delivery and the /picks and /slip commands: OVER must
-    be at least 75%, while UNDER must be at most 25% OVER-rate, in every
-    required window.
+    Callers making an eligibility decision should use
+    ``has_qualifying_directional_pick`` so sports that do not require completed
+    results use their confidence threshold instead.
     """
     return has_strong_directional_history(
         value,
         direction,
         over_min_rate=0.75,
         under_max_over_rate=0.25,
+    )
+
+
+def has_qualifying_directional_pick(
+    value: Any,
+    direction: Any = None,
+    *,
+    sport: Any = None,
+    confidence: Any = None,
+) -> bool:
+    """Apply the sport-specific history or direction-confidence requirement."""
+    recommendation = str(
+        direction
+        or (
+            value.get("recommendation") or value.get("rec")
+            if isinstance(value, dict)
+            else getattr(value, "recommendation", "")
+        )
+        or ""
+    ).strip().upper()
+    if recommendation not in {"OVER", "UNDER"}:
+        return False
+
+    if not is_history_optional_sport(sport):
+        return has_qualifying_pick_history(value, recommendation)
+
+    if confidence is None:
+        if isinstance(value, dict):
+            confidence = next(
+                (
+                    value[key]
+                    for key in (
+                        "confidence",
+                        "bet_confidence",
+                        "decision_confidence",
+                    )
+                    if value.get(key) is not None
+                ),
+                None,
+            )
+        else:
+            confidence = next(
+                (
+                    candidate
+                    for candidate in (
+                        getattr(value, "confidence", None),
+                        getattr(value, "bet_confidence", None),
+                        getattr(value, "decision_confidence", None),
+                    )
+                    if candidate is not None
+                ),
+                None,
+            )
+    if (
+        not isinstance(confidence, (int, float))
+        or isinstance(confidence, bool)
+    ):
+        return False
+    try:
+        numeric_confidence = float(confidence)
+    except (OverflowError, TypeError, ValueError):
+        return False
+    return (
+        math.isfinite(numeric_confidence)
+        and numeric_confidence >= _DIRECTION_ONLY_MIN_CONFIDENCE
     )
 
 

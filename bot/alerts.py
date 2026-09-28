@@ -38,6 +38,7 @@ from engine.delivery_gates import (
 _directional_evidence_gate = _canonical_tier_delivery_gate
 from engine.score_validation import clamp_score
 from engine.delivery_evidence import (
+    has_qualifying_directional_pick,
     history_supports_delivery,
     history_is_available,
     is_history_optional_sport,
@@ -663,9 +664,9 @@ def _has_strong_underdog_evidence(
 ) -> bool:
     """Apply the terminal direction/sport rule without importing market_engine.
 
-    A direction alone is not delivery evidence. Every sport needs completed
-    primary-player history or explicitly settled PropLine results, plus
-    history meeting the directional hit-rate thresholds.
+    Main league sports need completed-player history meeting the thresholds in
+    every required window. Other sports need direction confidence of at least
+    70 and do not require completed-result history.
     """
     decision_direction = str(
         (
@@ -676,6 +677,12 @@ def _has_strong_underdog_evidence(
     ).upper()
     if decision_direction not in {"OVER", "UNDER"}:
         return False
+    if is_history_optional_sport(sport):
+        return has_qualifying_directional_pick(
+            decision,
+            decision_direction,
+            sport=sport,
+        )
     if not history_is_available(validation, decision, intelligence_trace):
         return False
 
@@ -686,12 +693,12 @@ def _has_strong_underdog_evidence(
     )
     if not history_supports_delivery(*history_values):
         return False
-    from engine.delivery_evidence import has_qualifying_pick_history
-
-    if not has_qualifying_pick_history(decision, decision_direction):
+    if not has_qualifying_directional_pick(
+        decision,
+        decision_direction,
+        sport=sport,
+    ):
         return False
-    if is_history_optional_sport(sport):
-        return True
 
     if bool(getattr(validation, "has_supporting_data", False)):
         source = getattr(validation, "data_source", None)
@@ -1651,7 +1658,7 @@ class AlertDelivery:
                 filtered=True,
                 filtered_reason="Canonical direction/evidence gate",
             )
-        from engine.delivery_evidence import has_qualifying_pick_history
+        from engine.delivery_evidence import has_qualifying_directional_pick
 
         _pp_history = (
             getattr(opp, "hit_rates", None)
@@ -1659,11 +1666,19 @@ class AlertDelivery:
             or getattr(score, "hit_rates", None)
             or getattr(score, "decision", None)
         )
-        if not has_qualifying_pick_history(_pp_history, _pp_direction):
+        _pp_confidence = getattr(score, "total", None)
+        if _pp_confidence is None:
+            _pp_confidence = getattr(opp, "confidence", None)
+        if not has_qualifying_directional_pick(
+            _pp_history,
+            _pp_direction,
+            sport=_pp_sport,
+            confidence=_pp_confidence,
+        ):
             return DeliveryResult(
                 sent=False,
                 filtered=True,
-                filtered_reason="Directional history threshold",
+                filtered_reason="Directional confidence/history threshold",
             )
 
         _pp_line_value = float(getattr(opp.pp_line, "line_value", 0) or 0)

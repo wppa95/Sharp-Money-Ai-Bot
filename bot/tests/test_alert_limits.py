@@ -45,6 +45,7 @@ def _directional_history(direction: str = "OVER") -> SimpleNamespace:
     windows = ("l5", "l10", "l15", "l20", "l30", "season")
     return SimpleNamespace(
         recommendation=direction,
+        confidence=75,
         **{f"{window}_games": 100 for window in windows},
         **{f"{window}_over": over for window in windows},
         **{f"{window}_under": 100 - over for window in windows},
@@ -280,8 +281,7 @@ async def test_underdog_cap_disabled_when_limit_is_zero():
                         n_supplemental_games=10,
                 ),
                  decision=SimpleNamespace(
-                     **vars(_directional_history("OVER")),
-                     confidence=80,
+                     **{**vars(_directional_history("OVER")), "confidence": 80},
                  ),
             )
 
@@ -316,8 +316,7 @@ async def test_underdog_allowed_when_under_cap():
                     n_supplemental_games=10,
             ),
              decision=SimpleNamespace(
-                 **vars(_directional_history("OVER")),
-                 confidence=80,
+                 **{**vars(_directional_history("OVER")), "confidence": 80},
              ),
         )
 

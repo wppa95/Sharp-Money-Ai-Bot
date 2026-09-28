@@ -50,6 +50,7 @@ def _directional_history(
     over = round(over_rate * 100)
     return {
         "recommendation": direction,
+        "confidence": 75,
         **{
             f"{window}_games": 100
             for window in windows

@@ -31,7 +31,7 @@ def _directional_decision(
     l30_over_rate: float | None = None,
 ) -> SimpleNamespace:
     windows = ("l5", "l10", "l15", "l20", "l30", "season")
-    values = {"recommendation": direction}
+    values = {"recommendation": direction, "confidence": 75}
     for window in windows:
         rate = l30_over_rate if window == "l30" and l30_over_rate is not None else over_rate
         over_count = round(rate * 100)

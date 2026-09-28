@@ -3,8 +3,8 @@ name: Direction-only prop delivery
 description: Delivery requires qualifying directional evidence; tiers, labels, and per-sport caps are not filters.
 ---
 
-Automatic delivery requires a usable completed-history sample, an OVER/UNDER direction, and the shared 75% OVER / 25% UNDER-rate cutoff in every required history window. Watchlist/near-miss states, tiers, and quality labels are not blockers. Apply the quality gate consistently across sports without a global or per-sport cap.
+Automatic delivery requires an explicit OVER/UNDER direction and the sport-specific quality rule in [strong-pick-quality-gate.md](strong-pick-quality-gate.md). Watchlist/near-miss states, tiers, and quality labels are not blockers. Keep the independent scope, freshness, event-timing, tracking, deduplication, and transport protections; do not add global or per-sport caps.
 
-**Why:** On 2026-09-27, the user changed the prior volume policy after reporting too many picks and chose stricter directional-history thresholds rather than sport-specific or global caps.
+**Why:** Completed-result thresholds apply only to MLB, NBA, NFL, WNBA, and NHL; other named sports can qualify by direction confidence without game-result history. Confidence does not override unrelated delivery-safety gates.
 
-**How to apply:** Keep observations and tracked props available for every sport. Require at least five usable completed primary-provider or explicitly settled PropLine results, direction, and the shared 75%/25% history gate; watchlist/near-miss text and state remain non-blocking.
+**How to apply:** Keep observations and tracked props available for every sport. Apply the shared sport-specific gate before delivery, but keep watchlist/near-miss text and state non-blocking and preserve the independent delivery-safety checks.

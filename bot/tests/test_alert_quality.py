@@ -628,6 +628,71 @@ def test_qualifying_pick_history_uses_75_and_25_percent_cutoffs():
     ) is False
 
 
+def test_non_major_sports_use_70_confidence_without_game_history():
+    from engine.delivery_evidence import (
+        has_qualifying_directional_pick,
+        is_history_optional_sport,
+    )
+    import types
+
+    for sport in ("MLB", "NBA", "NFL", "WNBA", "NHL"):
+        assert is_history_optional_sport(sport) is False
+    for sport in ("TENNIS", "SOCCER", "FIFA", "CS", "DOTA"):
+        assert is_history_optional_sport(sport) is True
+
+    direction_only = types.SimpleNamespace(
+        recommendation="OVER",
+        confidence=70,
+    )
+    assert has_qualifying_directional_pick(
+        direction_only, sport="TENNIS"
+    ) is True
+    assert has_qualifying_directional_pick(
+        types.SimpleNamespace(recommendation="UNDER", confidence=69),
+        sport="FIFA",
+    ) is False
+    assert has_qualifying_directional_pick(
+        types.SimpleNamespace(recommendation="OVER"),
+        sport="CS",
+    ) is False
+    assert has_qualifying_directional_pick(
+        direction_only,
+        sport="MLB",
+    ) is False
+
+    complete_history = {
+        "recommendation": "OVER",
+        "confidence": 95,
+        **{
+            window: {"games": 20, "over": 15, "under": 5}
+            for window in ("l5", "l10", "l15", "l20", "l30", "season")
+        },
+    }
+    assert has_qualifying_directional_pick(
+        complete_history, sport="NHL"
+    ) is True
+
+
+def test_delivery_gates_allow_strong_direction_without_game_history_only_outside_main_leagues():
+    from alerts import _has_strong_underdog_evidence
+    from market_engine import _has_delivery_evidence
+    import types
+
+    decision = types.SimpleNamespace(recommendation="OVER", confidence=70)
+    assert _has_delivery_evidence(sport="TENNIS", decision=decision) is True
+    assert _has_strong_underdog_evidence(
+        decision=decision, sport="TENNIS"
+    ) is True
+    assert _has_delivery_evidence(
+        sport="TENNIS",
+        decision=types.SimpleNamespace(recommendation="OVER", confidence=69),
+    ) is False
+    assert _has_delivery_evidence(sport="MLB", decision=decision) is False
+    assert _has_strong_underdog_evidence(
+        decision=decision, sport="NHL"
+    ) is False
+
+
 def test_strong_history_rejects_57_percent_l30_for_over_and_under():
     from alerts_multiplatform import _has_strong_directional_history
     import types

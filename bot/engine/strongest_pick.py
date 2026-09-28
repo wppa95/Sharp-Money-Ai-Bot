@@ -11,6 +11,7 @@ from typing import Iterable
 
 from engine.delivery_evidence import (
     has_strong_directional_history,
+    has_qualifying_directional_pick,
     has_qualifying_pick_history,
     history_supports_delivery,
     is_history_optional_sport,
@@ -308,14 +309,24 @@ def is_strong_actionable_pick(
 ) -> bool:
     """Return whether a candidate meets the shared strongest-pick contract.
 
-    Every sport needs complete directional history meeting the shared
-    75% OVER / 25% UNDER thresholds.
+    Main league sports need complete directional history meeting the shared
+    75% OVER / 25% UNDER thresholds. Other sports need direction confidence
+    of at least 70.
     """
     direction = _direction(candidate)
     if direction not in {"OVER", "UNDER"}:
         return False
     if not require_strong:
         return True
+
+    sport = _sport(candidate)
+    if is_history_optional_sport(sport):
+        return has_qualifying_directional_pick(
+            candidate,
+            direction,
+            sport=sport,
+            confidence=candidate.get("confidence"),
+        )
 
     history = candidate.get("hit_rates") or candidate.get("decision")
     validation = candidate.get("validation")

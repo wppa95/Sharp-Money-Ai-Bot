@@ -456,6 +456,65 @@ class TestSlipSubcommandRouting:
 
         assert identities == [("Source A", "NBA", "Points", "projection-123")]
         assert len(build_all_slips.call_args.args[0]) == 1
+
+    @pytest.mark.asyncio
+    async def test_canonical_direction_only_slip_uses_saved_confidence_without_results(self):
+        from commands import _display_prop_from_opportunity, cmd_slip
+
+        now = datetime.utcnow()
+        opportunity = SimpleNamespace(
+            player_name="Canonical A",
+            team="TEAM",
+            sport="TENNIS",
+            stat_type="Points",
+            line_value=20.5,
+            recommendation="OVER",
+            confidence=70,
+            external_id="canonical-123",
+            game_id="canonical-game",
+            game_time=now + timedelta(hours=2),
+            detected_at=now,
+            alert_sent_at=now,
+            result="PENDING",
+        )
+        assert _display_prop_from_opportunity(opportunity).bet_confidence == 70
+
+        class SlipDB:
+            async def get_top_ud_props_for_picks(self, **kwargs):
+                return []
+
+            async def get_latest_props_for_provider(self, provider, **kwargs):
+                return []
+
+            async def get_current_actionable_opportunities(self, **kwargs):
+                return [opportunity]
+
+            async def get_ud_recommendations_bulk(self, requested, **kwargs):
+                return {}
+
+            async def get_player_results_bulk(self, requested, **kwargs):
+                return {}
+
+        update, _ = self._make_update([])
+        ctx = MagicMock()
+        ctx.args = []
+        with (
+            patch("commands._db", SlipDB()),
+            patch(
+                "engine.slip_builder.build_all_slips",
+                return_value={},
+            ) as build_all_slips,
+            patch(
+                "engine.player_prop_market.build_player_prop_market_comparison",
+                return_value=None,
+            ),
+            patch("commands._is_active_display_sport", return_value=True),
+            patch("commands._is_upcoming_game", return_value=True),
+        ):
+            await cmd_slip(update, ctx)
+
+        candidates = build_all_slips.call_args.args[0]
+        assert len(candidates) == 1
         msg = update.message.reply_text.call_args[0][0]
         assert "not enough" in msg.lower()
 

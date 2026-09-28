@@ -23,6 +23,7 @@ def _directional_history(direction: str = "OVER") -> dict:
     windows = ("l5", "l10", "l15", "l20", "l30", "season")
     return {
         "recommendation": direction,
+        "confidence": 75,
         **{f"{window}_games": 100 for window in windows},
         **{f"{window}_over": over for window in windows},
         **{f"{window}_under": 100 - over for window in windows},
