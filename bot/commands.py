@@ -813,6 +813,83 @@ async def cmd_health(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         await update.message.reply_text("⚠️ /health failed. Check bot logs.")
 
 
+def _tracked_prop_grade_lines(summary: object) -> list[str]:
+    """Format universal tracked-line counts without presenting them as picks."""
+    heading = "🧾 <b>ALL TRACKED PROP LINES</b>"
+    if not isinstance(summary, dict):
+        return [
+            heading,
+            "  <i>Tracked-line grades are UNAVAILABLE; this is not zero.</i>",
+        ]
+
+    total = int(summary.get("total", summary.get("tracked", 0)) or 0)
+    pending = int(summary.get("pending", 0) or 0)
+    resolved = int(summary.get("resolved", 0) or 0)
+    verified = int(summary.get("verified", 0) or 0)
+    unverified = int(summary.get("unverified", 0) or 0)
+    hit = int(summary.get("hit", 0) or 0)
+    miss = int(summary.get("miss", 0) or 0)
+    push = int(summary.get("push", 0) or 0)
+    void = int(summary.get("void", 0) or 0)
+    denominator = int(summary.get("denominator", hit + miss + push) or 0)
+    above_line_rate = summary.get("above_line_rate")
+    rate_text = (
+        f"{float(above_line_rate):.1f}%"
+        if denominator and above_line_rate is not None
+        else "—"
+    )
+    lines = [
+        heading,
+        f"  Distinct tracked lines: <b>{total:,}</b>",
+        f"  Pending: <b>{pending:,}</b> · Resolved: <b>{resolved:,}</b> · "
+        f"Source-verified: <b>{verified:,}</b> · Unverified: <b>{unverified:,}</b>",
+        f"  Above line: {hit:,} · Below line: {miss:,} · Push: {push:,} · "
+        f"Void/other: {void:,}",
+        f"  Above-line rate: <b>{rate_text}</b> "
+        f"(HIT / (HIT + MISS + PUSH), n={denominator:,})",
+        "  <i>For neutral rows, HIT/MISS means above/below the line, not a recommended pick.</i>",
+    ]
+
+    by_provider = summary.get("by_provider", {})
+    if isinstance(by_provider, dict) and by_provider:
+        lines.append("  <b>By provider</b>")
+        for provider, row in sorted(
+            by_provider.items(),
+            key=lambda item: -int(item[1].get("total", 0) or 0),
+        ):
+            lines.append(
+                f"    {_html.escape(str(provider))}: "
+                f"{int(row.get('total', 0) or 0):,} lines · "
+                f"{int(row.get('hit', 0) or 0):,} above / "
+                f"{int(row.get('miss', 0) or 0):,} below / "
+                f"{int(row.get('push', 0) or 0):,} push · "
+                f"{int(row.get('pending', 0) or 0):,} pending"
+            )
+
+    by_sport = summary.get("by_sport", {})
+    if isinstance(by_sport, dict) and by_sport:
+        lines.append("  <b>By sport</b>")
+        sorted_sports = sorted(
+            by_sport.items(),
+            key=lambda item: -int(item[1].get("total", 0) or 0),
+        )
+        for sport, row in sorted_sports[:8]:
+            lines.append(
+                f"    {_html.escape(str(sport))}: "
+                f"{int(row.get('total', 0) or 0):,} lines · "
+                f"{int(row.get('pending', 0) or 0):,} pending · "
+                f"{int(row.get('verified', 0) or 0):,} verified · "
+                f"{int(row.get('unverified', 0) or 0):,} unverified"
+            )
+        if len(sorted_sports) > 8:
+            other_rows = [row for _sport, row in sorted_sports[8:]]
+            other_total = sum(int(row.get("total", 0) or 0) for row in other_rows)
+            lines.append(
+                f"    Other {len(other_rows)} sports: {other_total:,} lines"
+            )
+    return lines
+
+
 async def cmd_rollups(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """/rollups — show learning performance rollups by sport and stat type."""
     if not _check_allowed(update):
@@ -824,9 +901,10 @@ async def cmd_rollups(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             await update.message.reply_text("⚠️ Database not available.")
             return
 
-        rollups_raw, tg_perf_raw = await _independent_report_reads([
+        rollups_raw, tg_perf_raw, tracked_grades_raw = await _independent_report_reads([
             db.get_learning_rollups(enabled_sports=config.active_sports),
             db.get_telegram_pick_performance(),
+            db.get_tracked_prop_grade_summary(),
         ])
         rollups_available = isinstance(rollups_raw, dict)
         tg_perf_available = isinstance(tg_perf_raw, dict)
@@ -835,6 +913,8 @@ async def cmd_rollups(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         if not rollups_available:
             await update.message.reply_text(
                 "📊 <b>Learning Rollups</b>\n\n"
+                + "\n".join(_tracked_prop_grade_lines(tracked_grades_raw))
+                + "\n\n"
                 "<i>Historical learning data is UNAVAILABLE; the database "
                 "query failed or timed out. This is not zero.</i>",
                 parse_mode=ParseMode.HTML,
@@ -885,6 +965,8 @@ async def cmd_rollups(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
                     f"{source_perf.get('unverified', 0)} unverified"
                 )
         tg_lines.append("")
+        tg_lines.extend(_tracked_prop_grade_lines(tracked_grades_raw))
+        tg_lines.append("")
         if not rollups_available:
             tg_lines += [
                 "📚 <b>All Directional Grading</b>",
@@ -925,7 +1007,10 @@ async def cmd_rollups(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             ])
 
         if total == 0 and int(rollups.get("unverified_graded", 0) or 0) == 0:
-            tg_lines.append("<i>No overall graded plays yet — results are graded after game_time passes.</i>")
+            tg_lines.append(
+                "<i>No source-verified directional plays yet — results are "
+                "graded after game_time passes.</i>"
+            )
             await update.message.reply_text("\n".join(tg_lines), parse_mode=ParseMode.HTML)
             return
 
@@ -4080,21 +4165,26 @@ async def _cmd_grade_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     PropOpportunityLog result values: HIT | MISS | PUSH | PENDING
     Mapped to display:  HIT→W  MISS→L  PUSH/REFUND→P
     """
-    summary = await _report_read(
-        _db.get_directional_performance_summary(
-            enabled_sports=config.active_sports
-        ),
-        fallback=None,
+    summary, tracked_grades = await _independent_report_reads(
+        [
+            _db.get_directional_performance_summary(
+                enabled_sports=config.active_sports
+            ),
+            _db.get_tracked_prop_grade_summary(),
+        ],
         timeout=_COMMAND_TIMEOUT_SECONDS * _AGGREGATE_REPORT_TIMEOUT_MULTIPLIER,
     )
-    if not isinstance(summary, dict):
+    directional_available = isinstance(summary, dict)
+    tracked_available = isinstance(tracked_grades, dict)
+    if not directional_available and not tracked_available:
         await update.message.reply_text(
             "⚠️ <b>Sharp Money Pick Grades</b>\n\n"
-            "<i>Grade data is UNAVAILABLE; the database query failed or "
+            "<i>Grade data is UNAVAILABLE; the database queries failed or "
             "timed out. This is not zero.</i>",
             parse_mode=ParseMode.HTML,
         )
         return
+    summary = summary if directional_available else {}
     by_sport = summary.get("by_sport", {}) or {}
     by_provider = summary.get("by_provider", {}) or {}
     total_all = sum(int(row.get("directional", 0) or 0) for row in by_sport.values())
@@ -4109,10 +4199,23 @@ async def _cmd_grade_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     denominator = overall_w + overall_l + overall_p
     overall_rate = f"{overall_w / denominator * 100:.0f}%" if denominator else "—"
 
-    lines: list[str] = ["📊 <b>Sharp Money Pick Grades</b>", ""]
+    lines: list[str] = [
+        "📊 <b>Player Prop Grades</b>",
+        "",
+        *_tracked_prop_grade_lines(tracked_grades),
+        "",
+    ]
+
+    if not directional_available:
+        lines.extend([
+            "─ <b>Directional Picks</b> " + "─" * 15,
+            "  <i>Directional grade data is UNAVAILABLE; this is not zero.</i>",
+        ])
+        await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML)
+        return
 
     lines += [
-        "─ <b>Overall</b> " + "─" * 21,
+        "─ <b>Directional Picks (OVER/UNDER)</b> " + "─" * 3,
         f"  Stored directional picks: <b>{total_all}</b>",
         f"  <b>{resolved_count}</b> verified outcomes  "
         f"W:{overall_w}  L:{overall_l}  P:{overall_p}  "

@@ -896,6 +896,78 @@ async def test_grade_waits_through_extended_history_read_window():
 
 
 @pytest.mark.asyncio
+async def test_grade_shows_all_tracked_lines_separately_from_directional_picks():
+    update, context = _update_and_context()
+    db = MagicMock()
+    db.get_directional_performance_summary = AsyncMock(return_value={
+        "by_sport": {"NBA": {"directional": 2, "pending": 2}},
+        "by_provider": {},
+    })
+    db.get_tracked_prop_grade_summary = AsyncMock(return_value={
+        "total": 1234,
+        "pending": 1200,
+        "verified": 34,
+        "unverified": 0,
+        "hit": 20,
+        "miss": 12,
+        "push": 2,
+        "void": 0,
+        "denominator": 34,
+        "above_line_rate": 58.8,
+        "by_provider": {},
+        "by_sport": {},
+    })
+
+    with (
+        patch("commands._check_allowed", return_value=True),
+        patch("commands._db", db),
+    ):
+        await commands.cmd_grade(update, context)
+
+    message = update.message.reply_text.await_args.args[0]
+    assert "ALL TRACKED PROP LINES" in message
+    assert "Distinct tracked lines: <b>1,234</b>" in message
+    assert "Stored directional picks: <b>2</b>" in message
+    assert "not a recommended pick" in message
+
+
+@pytest.mark.asyncio
+async def test_rollups_shows_tracked_population_when_directional_learning_is_empty():
+    update, context = _update_and_context()
+    db = MagicMock()
+    db.get_learning_rollups = AsyncMock(return_value={
+        "total_graded": 0,
+        "unverified_graded": 0,
+        "intelligence": {},
+        "adaptive_learning": {},
+    })
+    db.get_telegram_pick_performance = AsyncMock(return_value={"total": 0})
+    db.get_tracked_prop_grade_summary = AsyncMock(return_value={
+        "total": 1234,
+        "pending": 1200,
+        "verified": 34,
+        "unverified": 0,
+        "hit": 20,
+        "miss": 12,
+        "push": 2,
+        "void": 0,
+        "denominator": 34,
+        "above_line_rate": 58.8,
+        "by_provider": {},
+        "by_sport": {},
+    })
+    context.bot_data = {"db": db}
+
+    with patch("commands._check_allowed", return_value=True):
+        await commands.cmd_rollups(update, context)
+
+    message = update.message.reply_text.await_args.args[0]
+    assert "ALL TRACKED PROP LINES" in message
+    assert "Distinct tracked lines: <b>1,234</b>" in message
+    assert "No source-verified directional plays yet" in message
+
+
+@pytest.mark.asyncio
 async def test_slip_section_has_confidence_helper_in_its_own_scope():
     """The live /slip path must not depend on /picks' local imports."""
     from commands import _render_slip_section

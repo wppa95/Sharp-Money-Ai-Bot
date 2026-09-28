@@ -297,6 +297,91 @@ async def test_tracking_summary_includes_football_and_soccer(db):
 
 
 @pytest.mark.asyncio
+async def test_universal_tracking_grade_summary_keeps_neutral_results_separate(db):
+    async with db.session() as session:
+        session.add_all([
+            PropTrackingLog(
+                external_id="tracked-hit",
+                provider="Underdog",
+                player_name="Tracked Player",
+                sport="NBA",
+                stat_type="Points",
+                line_value=20.5,
+                result="HIT",
+                settlement_source="auto_grade",
+            ),
+            PropTrackingLog(
+                external_id="tracked-miss",
+                provider="Underdog",
+                player_name="Tracked Player",
+                sport="NBA",
+                stat_type="Rebounds",
+                line_value=8.5,
+                result="MISS",
+                settlement_source="auto_grade",
+            ),
+            PropTrackingLog(
+                external_id="tracked-push",
+                provider="PrizePicks",
+                player_name="Tracked Player",
+                sport="NFL",
+                stat_type="Passing Yards",
+                line_value=250.5,
+                result="PUSH",
+                settlement_source="auto_grade",
+            ),
+            PropTrackingLog(
+                external_id="tracked-pending",
+                provider="PrizePicks",
+                player_name="Tracked Player",
+                sport="NFL",
+                stat_type="Rushing Yards",
+                line_value=50.5,
+                result="PENDING",
+            ),
+            PropTrackingLog(
+                external_id="tracked-unverified",
+                provider="FanDuel",
+                player_name="Tracked Player",
+                sport="WNBA",
+                stat_type="Points",
+                line_value=15.5,
+                result="HIT",
+                settlement_source="manual",
+            ),
+            PropTrackingLog(
+                external_id="tracked-void",
+                provider="DraftKings",
+                player_name="Tracked Player",
+                sport="SOCCER",
+                stat_type="Goals",
+                line_value=0.5,
+                result="VOID",
+                settlement_source="auto_grade",
+            ),
+        ])
+        await session.commit()
+
+    summary = await db.get_tracked_prop_grade_summary()
+
+    assert summary["total"] == 6
+    assert summary["tracked"] == 6
+    assert summary["pending"] == 1
+    assert summary["resolved"] == 5
+    assert summary["verified"] == 4
+    assert summary["unverified"] == 1
+    assert summary["hit"] == 1
+    assert summary["miss"] == 1
+    assert summary["push"] == 1
+    assert summary["void"] == 1
+    assert summary["denominator"] == 3
+    assert summary["above_line_rate"] == 33.3
+    assert summary["by_provider"]["Underdog"]["total"] == 2
+    assert summary["by_provider"]["FanDuel"]["unverified"] == 1
+    assert summary["by_sport"]["SOCCER"]["void"] == 1
+
+
+@pytest.mark.asyncio
 async def test_funnel_includes_sportsbook_provider_observations(db):
     now = datetime.utcnow()
     async with db.session() as session:

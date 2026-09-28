@@ -10904,6 +10904,119 @@ class Database:
                 ),
             )
 
+    async def get_tracked_prop_grade_summary(self) -> dict:
+        """Summarize the universal tracked-line ledger independently of picks.
+
+        PropTrackingLog rows do not carry a recommendation. For these rows,
+        HIT/MISS describe whether the actual result was above/below the line,
+        not whether a model pick won. Only grades written by the verified
+        automatic grader count as source-verified outcomes.
+        """
+        async with self.session() as s:
+            result = await s.execute(
+                select(
+                    PropTrackingLog.provider,
+                    PropTrackingLog.sport,
+                    PropTrackingLog.result,
+                    PropTrackingLog.settlement_source,
+                    func.count(PropTrackingLog.id),
+                ).group_by(
+                    PropTrackingLog.provider,
+                    PropTrackingLog.sport,
+                    PropTrackingLog.result,
+                    PropTrackingLog.settlement_source,
+                )
+            )
+            grouped_rows = result.all()
+
+        def _empty_counts() -> dict:
+            return {
+                "total": 0,
+                "pending": 0,
+                "resolved": 0,
+                "verified": 0,
+                "unverified": 0,
+                "hit": 0,
+                "miss": 0,
+                "push": 0,
+                "void": 0,
+            }
+
+        overall = _empty_counts()
+        by_provider: dict[str, dict] = {}
+        by_sport: dict[str, dict] = {}
+
+        def _add_counts(target: dict, result_key: str, source_key: str, count: int) -> None:
+            target["total"] += count
+            if result_key == "PENDING":
+                target["pending"] += count
+                return
+
+            target["resolved"] += count
+            verified_outcomes = _DIRECTIONAL_GRADE_RESULTS | _VOID_GRADE_RESULTS
+            if (
+                result_key not in verified_outcomes
+                or source_key != "auto_grade"
+            ):
+                target["unverified"] += count
+                return
+
+            target["verified"] += count
+            if result_key == "HIT":
+                target["hit"] += count
+            elif result_key == "MISS":
+                target["miss"] += count
+            elif result_key == "PUSH":
+                target["push"] += count
+            else:
+                target["void"] += count
+
+        for provider, sport, result, settlement_source, row_count in grouped_rows:
+            if not _is_supported_tracking_sport(sport):
+                continue
+            provider_key = str(provider or "Unknown").strip() or "Unknown"
+            sport_key = str(sport or "UNKNOWN").strip().upper() or "UNKNOWN"
+            result_key = str(result or "PENDING").strip().upper() or "PENDING"
+            source_key = str(settlement_source or "").strip().casefold()
+            count = int(row_count or 0)
+
+            _add_counts(overall, result_key, source_key, count)
+            _add_counts(
+                by_provider.setdefault(provider_key, _empty_counts()),
+                result_key,
+                source_key,
+                count,
+            )
+            _add_counts(
+                by_sport.setdefault(sport_key, _empty_counts()),
+                result_key,
+                source_key,
+                count,
+            )
+
+        def _finish_counts(counts: dict) -> dict:
+            finished = dict(counts)
+            finished["denominator"] = (
+                finished["hit"] + finished["miss"] + finished["push"]
+            )
+            finished["above_line_rate"] = (
+                round(finished["hit"] / finished["denominator"] * 100, 1)
+                if finished["denominator"]
+                else None
+            )
+            return finished
+
+        return {
+            **_finish_counts(overall),
+            "tracked": overall["total"],
+            "by_provider": {
+                key: _finish_counts(value) for key, value in by_provider.items()
+            },
+            "by_sport": {
+                key: _finish_counts(value) for key, value in by_sport.items()
+            },
+        }
+
     async def get_tracking_summary(self) -> "dict":
         """
         Return monitoring and directional performance statistics.
