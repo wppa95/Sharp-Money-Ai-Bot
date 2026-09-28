@@ -406,11 +406,30 @@ class TestSlipSubcommandRouting:
             score_total=88,
             market_quality_score=75,
         )
+        tomorrow_prop = SimpleNamespace(
+            player_name="Tomorrow A",
+            sport="NBA",
+            stat_type="Points",
+            provider="Underdog",
+            external_id="projection-tomorrow",
+            game_id="game-tomorrow",
+            team="TEAM2",
+            game_time=now + timedelta(hours=26),
+            provider_status="scheduled",
+            fetched_at=now,
+            line_value=20.5,
+            prev_line=None,
+            bet_recommendation=None,
+            bet_confidence=88,
+            score_tier="A",
+            score_total=88,
+            market_quality_score=75,
+        )
         identities = []
 
         class SlipDB:
             async def get_top_ud_props_for_picks(self, **kwargs):
-                return [prop]
+                return [prop, tomorrow_prop]
 
             async def get_latest_props_for_provider(self, provider, **kwargs):
                 return []
@@ -451,6 +470,10 @@ class TestSlipSubcommandRouting:
             ),
             patch("commands._is_active_display_sport", return_value=True),
             patch("commands._is_upcoming_game", return_value=True),
+            patch(
+                "reporting.is_current_reporting_day",
+                side_effect=lambda game_time: game_time == prop.game_time,
+            ),
         ):
             await cmd_slip(update, ctx)
 
@@ -510,6 +533,7 @@ class TestSlipSubcommandRouting:
             ),
             patch("commands._is_active_display_sport", return_value=True),
             patch("commands._is_upcoming_game", return_value=True),
+            patch("reporting.is_current_reporting_day", return_value=True),
         ):
             await cmd_slip(update, ctx)
 

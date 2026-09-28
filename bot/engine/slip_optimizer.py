@@ -6,7 +6,7 @@ total confidence while minimising intra-slip correlation.
 
 Correlation heuristics (rule-based, no ML required):
   1. Same player                        → 1.00  (hard block)
-  2. Same team, same sport              → 0.65  (soft block / warn)
+  2. Same team, same sport              → 0.65  (hard block for slips)
   3. Same game, opposing teams          → 0.40  (warn)
   4. Known complementary stat pairs     → ±0.05–0.10 additive adjustment
   5. Different sport / truly independent→ 0.00
@@ -16,7 +16,8 @@ Greedy selection algorithm:
   • Seed with the top candidate.
   • For each remaining slot, pick the candidate with the lowest
     max-correlation against the already-selected set.
-  • Hard-block any candidate with max correlation ≥ 0.90.
+  • Hard-block same-team candidates and any candidate with max
+    correlation ≥ 0.90.
   • Record all exclusions and soft-block warnings for display.
 
 Public API
@@ -170,8 +171,8 @@ def optimize_slip(
     2. Seed the slip with the top candidate.
     3. For each open slot, score remaining candidates:
            pick_score = conf_norm  -  max_corr_with_selected * 2.0
-       Select the highest-scoring candidate; hard-block any candidate
-       whose max correlation with the selected set is ≥ _HARD_BLOCK.
+       Select the highest-scoring candidate; hard-block same-team candidates
+       and any candidate whose max correlation is ≥ _HARD_BLOCK.
     4. Soft-block candidates (add a warning but still include them) when
        max correlation is ≥ _SOFT_BLOCK.
 
@@ -211,8 +212,20 @@ def optimize_slip(
             corr_results = [check_correlation(candidate, s) for s in selected]
             max_corr_score = max(c.score for c in corr_results)
             worst = max(corr_results, key=lambda c: c.score)
-            if max_corr_score >= _HARD_BLOCK:
-                hard_blocked.append((candidate, corr_results, worst))
+            same_team_conflict = next(
+                (
+                    result
+                    for result in corr_results
+                    if result.reason.startswith("Same team (")
+                ),
+                None,
+            )
+            if max_corr_score >= _HARD_BLOCK or same_team_conflict is not None:
+                hard_blocked.append((
+                    candidate,
+                    corr_results,
+                    same_team_conflict or worst,
+                ))
                 continue
             conf_norm = (candidate.confidence or 0) / max_conf
             pick_score = conf_norm - (max_corr_score * 2.0)

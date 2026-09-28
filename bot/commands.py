@@ -1732,6 +1732,15 @@ def _is_upcoming_game(
     return game_time > now
 
 
+def _is_today_reporting_game(game_time: Any) -> bool:
+    """Fail closed unless the event is dated for today in the reporting zone."""
+    if not isinstance(game_time, datetime):
+        return False
+    from reporting import is_current_reporting_day
+
+    return is_current_reporting_day(game_time)
+
+
 def _is_active_display_sport(sport: Optional[str]) -> bool:
     """Keep current pick/slip views aligned with the configured live slate."""
     sport_key = str(sport or "").strip().upper()
@@ -3202,6 +3211,73 @@ async def _cmd_slip_journal(
     await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML)
 
 
+def _order_slip_candidates_by_sport(
+    entries: list[tuple[PropPickAdapter, Any, Any]],
+) -> list[PropPickAdapter]:
+    """Rank qualified legs by evidence within each sport, then interleave.
+
+    Hit-rate strength is never compared across sports. Each sport gets its
+    own evidence ordering; ties use sample size, game time, and stable identity
+    fields so the pair selection is reproducible rather than input-order noise.
+    """
+    from engine.strongest_pick import (
+        directional_hit_rate_strength,
+        season_directional_hit_rate_strength,
+    )
+    from reporting import to_reporting_timezone
+
+    grouped: dict[str, list[tuple[tuple, PropPickAdapter]]] = {}
+    for candidate, prop, history in entries:
+        sport = str(getattr(prop, "sport", "") or "").strip().upper()
+        direction = str(getattr(candidate, "best_side", "") or "").upper()
+        ranking_input = {
+            "sport": sport,
+            "direction": direction,
+            "hit_rates": history,
+        }
+        strength = season_directional_hit_rate_strength(ranking_input)
+        if strength is None:
+            strength = directional_hit_rate_strength(ranking_input)
+        try:
+            sample_count = max(0, int(getattr(history, "total_games", 0) or 0))
+        except (TypeError, ValueError):
+            sample_count = 0
+        local_game_time = to_reporting_timezone(
+            getattr(candidate, "game_time", None)
+        )
+        game_order = (
+            local_game_time.timestamp()
+            if local_game_time is not None
+            else float("inf")
+        )
+        rank_key = (
+            0 if strength is not None else 1,
+            -(strength if strength is not None else 0.0),
+            -sample_count,
+            game_order,
+            str(getattr(candidate, "player_name", "") or "").casefold(),
+            str(getattr(candidate, "stat_type", "") or "").casefold(),
+            str(getattr(candidate, "external_id", "") or "").casefold(),
+        )
+        grouped.setdefault(sport, []).append((rank_key, candidate))
+
+    for sport_entries in grouped.values():
+        sport_entries.sort(key=lambda item: item[0])
+
+    # Round-robin preserves sport-level quality ordering without comparing
+    # the hit-rate values of different sports.
+    ordered: list[PropPickAdapter] = []
+    sports = sorted(grouped)
+    while True:
+        added = False
+        for sport in sports:
+            if grouped[sport]:
+                ordered.append(grouped[sport].pop(0)[1])
+                added = True
+        if not added:
+            return ordered
+
+
 async def cmd_slip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """/slip — Build correlation-aware prop slips (2–6 legs) from live market props.
 
@@ -3248,8 +3324,10 @@ async def cmd_slip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     from engine.slip_builder import build_all_slips
     from engine.player_prop_market import build_player_prop_market_comparison
 
+    from reporting import reporting_now
+
     now   = datetime.utcnow()
-    today = now.strftime("%b %d, %Y")
+    today = reporting_now().strftime("%b %d, %Y")
 
     # ── 1. Fetch provider-owned props (same pool as /picks) ──────────────────
     ud_props = await _report_read(
@@ -3273,6 +3351,7 @@ async def cmd_slip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not _is_season_future(getattr(row, "stat_type", ""))
         and _is_active_display_sport(getattr(row, "sport", None))
         and not is_telegram_suppressed_sport(getattr(row, "sport", None))
+        and _is_today_reporting_game(getattr(row, "game_time", None))
         and _is_upcoming_game(
             getattr(row, "game_time", None),
             getattr(row, "provider_status", None),
@@ -3289,6 +3368,7 @@ async def cmd_slip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         )
         and _is_active_display_sport(p.sport)
         and not is_telegram_suppressed_sport(p.sport)
+        and _is_today_reporting_game(getattr(p, "game_time", None))
         and _is_upcoming_game(
             getattr(p, "game_time", None),
             getattr(p, "provider_status", None),
@@ -3308,7 +3388,7 @@ async def cmd_slip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not provider_props:
         await update.message.reply_text(
             "🎯 <b>Sharp Money Prop Slip</b>\n\n"
-            "No current directional player props available right now.\n\n"
+            "No eligible player props for today's games right now.\n\n"
             "<i>Season-long futures are excluded from this view.\n"
         "Run /picks to check current opportunities.</i>",
             parse_mode=ParseMode.HTML,
@@ -3384,7 +3464,7 @@ async def cmd_slip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not provider_props:
         await update.message.reply_text(
             "🎯 <b>Sharp Money Prop Slip</b>\n\n"
-            "No current player props available right now.\n\n"
+            "No eligible player props for today's games right now.\n\n"
             "<i>Season-long futures are excluded from this view.\n"
             "Run /picks to check current opportunities.</i>",
             parse_mode=ParseMode.HTML,
@@ -3413,7 +3493,9 @@ async def cmd_slip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         _slip_results_by_key = {}
 
     _slip_ineligible = 0
-    _candidates_eligible: list[PropPickAdapter] = []
+    _eligible_slip_entries: list[
+        tuple[PropPickAdapter, Any, Any]
+    ] = []
     for _cand, (_, _plh), _key in zip(
         _candidates, provider_props, _slip_result_keys
     ):
@@ -3453,18 +3535,21 @@ async def cmd_slip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             )
             continue
         _cand.best_side = _direction
-        _candidates_eligible.append(_cand)
+        _eligible_slip_entries.append((_cand, _plh, _history))
     if _slip_ineligible:
         logger.info(
             "cmd_slip: filtered %d ineligible candidates (direction/history threshold); "
             "%d eligible remain",
-            _slip_ineligible, len(_candidates_eligible),
+            _slip_ineligible, len(_eligible_slip_entries),
         )
-    _candidates = _candidates_eligible
-
-    slips = build_all_slips(_candidates, max_size=6)
+    _candidates = _order_slip_candidates_by_sport(_eligible_slip_entries)
 
     _slip_build_capture = getattr(context, "_slip_build_capture", None)
+    slips = build_all_slips(
+        _candidates,
+        max_size=2 if isinstance(_slip_build_capture, dict) else 6,
+    )
+
     if isinstance(_slip_build_capture, dict):
         _slip_build_capture["slips"] = slips
         _slip_build_capture["candidate_count"] = len(_candidates)
@@ -3563,7 +3648,7 @@ def _auto_slip_signature(size: int, slip: object) -> str:
 
 
 async def auto_slip_notifications_job(context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Send newly qualifying 2- and 3-leg slips after an Underdog scan."""
+    """Send a newly qualifying two-leg slip after an Underdog scan."""
     if _db is None:
         return
     recipients = sorted(config.allowed_user_ids)
@@ -3602,7 +3687,7 @@ async def auto_slip_notifications_job(context: ContextTypes.DEFAULT_TYPE) -> Non
     for chat_id in recipients:
         claimed: list[tuple[str, int, object]] = []
         try:
-            for size in (2, 3):
+            for size in (2,):
                 slip = slips.get(size)
                 if slip is None:
                     continue
@@ -3665,17 +3750,14 @@ async def auto_slip_notifications_job(context: ContextTypes.DEFAULT_TYPE) -> Non
             continue
 
         lines = [
-            "🔔 <b>New qualifying player-prop slip</b>",
+            "🔔 <b>Today's qualifying two-pick player-prop slip</b>",
             "",
-            "<i>Built from the current eligible Underdog picks.</i>",
+            "<i>Each leg passed the current direction/history checks.</i>",
             "",
         ]
         for _, size, slip in claimed:
             lines.extend(_render_slip_section(size, slip))
             lines.append("")
-        lines.append(
-            "<i>Research only — outcomes are uncertain; this does not place a bet.</i>"
-        )
         try:
             await bot.send_message(
                 chat_id=chat_id,

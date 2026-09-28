@@ -5,7 +5,7 @@ Covers:
   - check_correlation: same player, same team, same game, independent
   - Stat pair delta adjustments
   - _extract_opponent helper
-  - optimize_slip: empty, too few, normal, hard block, soft block, n_legs clamp
+  - optimize_slip: empty, too few, normal, hard block, same-team block, n_legs clamp
   - OptimizedSlip properties: avg_edge, avg_confidence
   - Greedy ordering (best tier/confidence selected first)
 """
@@ -220,8 +220,7 @@ class TestOptimizeSlip:
         result = optimize_slip([s_pick, a_pick, b_pick], n_legs=3)
         assert result.legs[0] is b_pick
 
-    def test_soft_blocked_adds_warning(self):
-        # Two players from same team → soft block (corr ~0.65)
+    def test_same_team_is_hard_blocked_from_a_slip(self):
         a = _make_rec(player_name="Player A", team="LAL", sport="NBA",
                       tier="S", confidence=88.0, game_description="vs BOS")
         b = _make_rec(player_name="Player B", team="LAL", sport="NBA",
@@ -229,11 +228,13 @@ class TestOptimizeSlip:
         c = _make_rec(player_name="Player C", team="MIA", sport="NBA",
                       tier="A", confidence=68.0, game_description="vs CHI")
         result = optimize_slip([a, b, c], n_legs=3)
-        # b should generate a warning or be blocked, not silently included
-        # (same team corr ~0.65 ≥ _SOFT_BLOCK)
-        has_warning = len(result.correlation_warnings) > 0
-        is_excluded = b in [r for r, _ in result.excluded]
-        assert has_warning or is_excluded
+        assert a in result.legs
+        assert c in result.legs
+        assert b not in result.legs
+        assert any(
+            record is b and "Same team" in reason
+            for record, reason in result.excluded
+        )
 
     def test_returns_optimized_slip(self):
         candidates = [_make_rec(player_name=f"P{i}", team=f"T{i}") for i in range(4)]

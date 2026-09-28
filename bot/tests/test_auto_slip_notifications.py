@@ -37,6 +37,46 @@ def _slip(size: int, line: float = 18.5):
     )
 
 
+def test_slip_candidate_order_uses_directional_evidence_per_sport():
+    from commands import _order_slip_candidates_by_sport
+
+    def entry(name, sport, direction, over_rate, samples):
+        candidate = SimpleNamespace(
+            player_name=name,
+            sport=sport,
+            stat_type="Points",
+            external_id=name,
+            game_time=datetime(2026, 9, 28, 19, 0),
+            best_side=direction,
+        )
+        prop = SimpleNamespace(sport=sport)
+        history = (
+            SimpleNamespace(
+                season=SimpleNamespace(games=samples, hit_rate=over_rate),
+                total_games=samples,
+            )
+            if samples
+            else None
+        )
+        return candidate, prop, history
+
+    entries = [
+        entry("NBA weaker", "NBA", "OVER", 0.75, 20),
+        entry("Tennis direction-only", "TENNIS", "UNDER", None, 0),
+        entry("WNBA strong under", "WNBA", "UNDER", 0.20, 20),
+        entry("NBA stronger", "NBA", "OVER", 0.90, 20),
+    ]
+
+    ordered = _order_slip_candidates_by_sport(entries)
+
+    assert [candidate.player_name for candidate in ordered] == [
+        "NBA stronger",
+        "Tennis direction-only",
+        "WNBA strong under",
+        "NBA weaker",
+    ]
+
+
 @pytest.mark.asyncio
 async def test_auto_slip_notification_claim_is_durable_and_idempotent():
     from database import Database
@@ -293,7 +333,9 @@ async def test_auto_slips_send_once_and_reoffer_changed_combinations(monkeypatch
         assert bot.send_message.await_count == 1
         first_message = bot.send_message.await_args.kwargs["text"]
         assert "2-leg section" in first_message
-        assert "3-leg section" in first_message
+        assert "3-leg section" not in first_message
+        assert "Today's qualifying two-pick" in first_message
+        assert "Research only" not in first_message
 
         slips[2] = _slip(2, line=19.5)
         await commands.auto_slip_notifications_job(context)
@@ -301,6 +343,7 @@ async def test_auto_slips_send_once_and_reoffer_changed_combinations(monkeypatch
         changed_message = bot.send_message.await_args.kwargs["text"]
         assert "2-leg section" in changed_message
         assert "3-leg section" not in changed_message
+        assert "Research only" not in changed_message
     finally:
         await db.close()
 
