@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Literal, Optional
 
 import aiohttp
@@ -361,7 +361,10 @@ class PrizePicksClient:
             if raw_t:
                 try:
                     from dateutil.parser import parse as _dp
-                    start_time = _dp(raw_t).replace(tzinfo=None)
+                    parsed_time = _dp(raw_t)
+                    if parsed_time.tzinfo is not None:
+                        parsed_time = parsed_time.astimezone(timezone.utc)
+                    start_time = parsed_time.replace(tzinfo=None)
                 except Exception:
                     pass
 

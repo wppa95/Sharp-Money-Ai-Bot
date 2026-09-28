@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 from commands import (
@@ -64,6 +64,26 @@ def test_zero_market_quality_still_blocks_current_row():
     )
 
     assert not _has_current_prop_data(prop, require_scoring=True)
+
+
+def test_current_prop_aware_times_compare_by_actual_instant():
+    now = datetime(2026, 8, 7, 20, 0)
+    prop = _current_prop(
+        fetched_at=datetime(2026, 8, 7, 15, 0, tzinfo=timezone(timedelta(hours=-4))),
+        game_time=datetime(2026, 8, 7, 19, 0, tzinfo=timezone(timedelta(hours=-4))),
+    )
+    # fetched=19:00 UTC and game=23:00 UTC: both are valid relative to now.
+    assert _has_current_prop_data(prop, now=now, require_direction=False)
+
+
+def test_current_prop_aware_past_game_is_rejected_by_instant():
+    now = datetime(2026, 8, 7, 20, 0)
+    prop = _current_prop(
+        fetched_at=datetime(2026, 8, 7, 14, 0, tzinfo=timezone(timedelta(hours=-4))),
+        game_time=datetime(2026, 8, 7, 15, 0, tzinfo=timezone(timedelta(hours=-4))),
+    )
+    # game=19:00 UTC, already past.
+    assert not _has_current_prop_data(prop, now=now, require_direction=False)
 
 
 def test_directional_selection_uses_fresh_snapshot_map_for_cross_sport_row():

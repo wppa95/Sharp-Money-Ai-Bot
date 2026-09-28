@@ -18,7 +18,7 @@ Data flow:
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Optional
 
 from providers.prop_provider import PlayerProp, PropProviderBase
@@ -90,10 +90,17 @@ def _parse_dt(value: Any) -> Optional[datetime]:
     if value is None:
         return None
     if isinstance(value, datetime):
-        return value
+        parsed = value
+    else:
+        try:
+            parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        except (ValueError, TypeError):
+            return None
     try:
-        return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
-    except (ValueError, TypeError):
+        if parsed.tzinfo is not None:
+            parsed = parsed.astimezone(timezone.utc)
+        return parsed.replace(tzinfo=None) if parsed.tzinfo is not None else parsed
+    except (OverflowError, TypeError, ValueError):
         return None
 
 

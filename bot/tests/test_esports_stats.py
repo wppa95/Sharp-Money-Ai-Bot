@@ -127,6 +127,30 @@ class TestOpendotaGameDate:
         assert _opendota_game_date({"start_time": "bad"}) is None
 
 
+class TestPandaScoreGameDate:
+    def test_begin_at_offset_uses_utc_calendar_date(self):
+        assert EsportsStatsProvider._pandascore_game_date(
+            {"begin_at": "2026-08-02T00:30:00+02:00"}
+        ) == "2026-08-01"
+
+    def test_utc_and_date_only_values(self):
+        assert EsportsStatsProvider._pandascore_game_date(
+            {"begin_at": "2026-08-01T23:00:00Z"}
+        ) == "2026-08-01"
+        assert EsportsStatsProvider._pandascore_game_date(
+            {"begin_at": "2026-08-01"}
+        ) == "2026-08-01"
+
+    def test_end_at_fallback_and_invalid_contract(self):
+        assert EsportsStatsProvider._pandascore_game_date(
+            {"end_at": "2026-08-01T23:30:00-04:00"}
+        ) == "2026-08-02"
+        assert EsportsStatsProvider._pandascore_game_date({}) is None
+        assert EsportsStatsProvider._pandascore_game_date(
+            {"begin_at": "not-a-date", "end_at": None}
+        ) is None
+
+
 # ── Stat map completeness ─────────────────────────────────────────────────────
 
 class TestDotaStatMap:

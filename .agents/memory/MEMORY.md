@@ -76,6 +76,7 @@
  - [Odds API settlement-only scope](odds-api-settlement-only.md) — retain Odds API for explicitly paced settlement/evidence requests; PropLine/Underdog own live markets and player-prop ingestion.
 - [PropLine endpoint safety](propline-endpoint.md) — require an explicit authorized API URL; never send the credential to a guessed host.
 - [Provider history adapter contract](provider-history-adapter.md) — provider-specific history adapters must preserve scorer-required lifecycle fields such as removed.
+- [Provider timestamp normalization](sports-time-normalization.md) — normalize aware instants to UTC before dropping offsets; preserve naive UTC and date-only values.
 - [PropLine cycle pacing](propline-cycle-pacing.md) — primary PrizePicks monitoring fetches one configured sport per shared cycle; do not use the all-sports fetch in production.
 - [FIFA history alias](fifa-history-alias.md) — FIFA may reuse the soccer provider only when result labels remain FIFA; empty provider results stay N/A.
 - [Command report resilience](command-report-resilience.md) — one locked SQLite counter must not make a Telegram health/report command fail wholesale.

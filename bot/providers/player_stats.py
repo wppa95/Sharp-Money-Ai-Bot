@@ -35,7 +35,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import NamedTuple, Optional
 from urllib.parse import quote_plus
 
@@ -1131,6 +1131,8 @@ def _parse_date(raw: Optional[str]) -> Optional[str]:
     try:
         # Accept "2026-07-28T18:10:00Z" or "2026-07-28" etc.
         dt = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        if dt.tzinfo is not None:
+            dt = dt.astimezone(timezone.utc)
         return dt.date().isoformat()
     except (ValueError, AttributeError):
         return None

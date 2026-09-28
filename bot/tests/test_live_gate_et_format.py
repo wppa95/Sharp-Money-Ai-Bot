@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import os
 import sys
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 import pytest
@@ -61,6 +61,24 @@ class TestIsGameLiveOrPast:
         fn = self._fn()
         snap = _make_snap(game_time=datetime.utcnow() - timedelta(minutes=30))
         assert fn(snap, self._now()) is True
+
+    def test_aware_game_time_uses_actual_future_instant(self):
+        fn = self._fn()
+        now = datetime(2026, 8, 7, 20, 0)
+        # 19:00 -04:00 is 23:00 UTC, so this is future, not live.
+        snap = _make_snap(
+            game_time=datetime(2026, 8, 7, 19, 0, tzinfo=timezone(timedelta(hours=-4)))
+        )
+        assert fn(snap, now) is False
+
+    def test_aware_game_time_uses_actual_past_instant(self):
+        fn = self._fn()
+        now = datetime(2026, 8, 7, 20, 0)
+        # 15:00 -04:00 is 19:00 UTC, so this is past.
+        snap = _make_snap(
+            game_time=datetime(2026, 8, 7, 15, 0, tzinfo=timezone(timedelta(hours=-4)))
+        )
+        assert fn(snap, now) is True
 
     def test_game_time_none_allows_through(self):
         """Many valid props lack a scheduled time — must not be blocked."""
@@ -174,6 +192,49 @@ class TestFormatGameTimeEt:
         dt = datetime(2026, 8, 7, 0, 0, 0)  # midnight UTC = 8 PM ET previous day
         result = fn(dt)
         assert "ET" in result
+
+    def test_aware_offset_is_converted_before_et_display(self):
+        fn = self._fn()
+        dt = datetime(2026, 8, 7, 19, 0, tzinfo=timezone(timedelta(hours=-4)))
+        assert fn(dt) == "Aug 7, 7:00 PM ET"
+
+    def test_utc_date_boundary_uses_prior_et_date(self):
+        fn = self._fn()
+        dt = datetime(2026, 8, 7, 1, 0, tzinfo=timezone.utc)
+        assert fn(dt) == "Aug 6, 9:00 PM ET"
+
+    def test_fallback_displays_aware_timestamp_as_utc(self, monkeypatch):
+        import zoneinfo
+
+        real_zone_info = zoneinfo.ZoneInfo
+
+        def fail_et_zone(name):
+            if name == "America/New_York":
+                raise zoneinfo.ZoneInfoNotFoundError(name)
+            return real_zone_info(name)
+
+        monkeypatch.setattr(zoneinfo, "ZoneInfo", fail_et_zone)
+        fn = self._fn()
+        dt = datetime(2026, 8, 7, 1, 0, tzinfo=timezone.utc)
+        assert fn(dt) == "Aug 7, 1:00 AM UTC"
+
+
+class TestMarketAvailabilityStatus:
+    def test_aware_game_time_uses_utc_instant(self, monkeypatch):
+        import alerts_multiplatform
+
+        class FrozenDateTime(datetime):
+            @classmethod
+            def utcnow(cls):
+                return cls(2026, 8, 7, 20, 0)
+
+        monkeypatch.setattr(alerts_multiplatform, "datetime", FrozenDateTime)
+        game_time = datetime(
+            2026, 8, 7, 16, 10, tzinfo=timezone(timedelta(hours=-4))
+        )
+        assert alerts_multiplatform._market_availability_status(game_time) == (
+            "🟡 CLOSING SOON"
+        )
 
 
 # ─────────────────────────────────────────────────────────────────────────────

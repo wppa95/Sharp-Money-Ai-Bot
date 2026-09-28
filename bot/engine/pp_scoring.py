@@ -37,7 +37,7 @@ from __future__ import annotations
 
 import enum
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Optional
 
 if TYPE_CHECKING:
@@ -146,6 +146,13 @@ def _market_balance(over_odds: int, under_odds: int) -> float:
         return 25.0
     fair_over = _implied(over_odds) / total
     return abs(fair_over - 0.50) * 100.0
+
+
+def _utc_naive(value: datetime) -> datetime:
+    """Normalize an aware instant to naive UTC; naive values are already UTC."""
+    if value.tzinfo is not None and value.utcoffset() is not None:
+        return value.astimezone(timezone.utc).replace(tzinfo=None)
+    return value.replace(tzinfo=None)
 
 
 # ── Dimension 1: Market Edge (0–25) ──────────────────────────────────────────
@@ -284,9 +291,9 @@ def _score_matchup(
     # Game-time proximity
     start_time = opp.pp_line.start_time
     if start_time is not None:
-        _now = now or datetime.utcnow()
-        # Ensure both are naive UTC for comparison
-        _start = start_time.replace(tzinfo=None) if start_time.tzinfo else start_time
+        _now = _utc_naive(now or datetime.utcnow())
+        # Provider timestamps may be aware; compare instants in UTC.
+        _start = _utc_naive(start_time)
         hours_to_game = (_start - _now).total_seconds() / 3600.0
         if   hours_to_game <= 4:  pts += 8
         elif hours_to_game <= 12: pts += 6

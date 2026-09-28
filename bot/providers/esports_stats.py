@@ -552,6 +552,8 @@ class EsportsStatsProvider:
             return None
         try:
             dt = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+            if dt.tzinfo is not None:
+                dt = dt.astimezone(timezone.utc)
             return dt.date().isoformat()
         except (ValueError, AttributeError):
             return None

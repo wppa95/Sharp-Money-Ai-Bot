@@ -82,6 +82,7 @@ from engine.evidence_memory import (
 )
 from providers import FailureType, get_health_monitor
 from engine.delivery_gates import directional_evidence_gate as _directional_evidence_gate
+from engine.timing import _naive_utc
 from engine.player_props_pipeline import (
     canonicalize_player_props,
     persist_canonical_player_props,
@@ -1793,7 +1794,7 @@ def _is_game_live_or_past(snap: object, now: datetime) -> bool:
     _gt = getattr(snap, "game_time", None)
     if _gt is not None:
         try:
-            if _gt.replace(tzinfo=None) < now:
+            if _naive_utc(_gt) < _naive_utc(now):
                 return True
         except Exception:
             pass

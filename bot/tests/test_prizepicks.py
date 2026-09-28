@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import pytest
 from datetime import datetime, timedelta
+from copy import deepcopy
 from unittest.mock import AsyncMock, MagicMock
 
 import sys
@@ -315,6 +316,29 @@ class TestPrizePicksClientParsing:
         assert line.stat_type    == "Points"
         assert line.line_value   == 25.5
         assert line.game_description == "vs LAC"
+        assert line.start_time == datetime(2025, 1, 15, 20, 0)
+
+    @pytest.mark.parametrize(
+        ("raw_time", "expected"),
+        [
+            ("2025-01-15T20:00:00Z", datetime(2025, 1, 15, 20, 0)),
+            ("2025-01-15T20:00:00-05:00", datetime(2025, 1, 16, 1, 0)),
+            ("2025-01-15", datetime(2025, 1, 15, 0, 0)),
+        ],
+    )
+    def test_parse_normalizes_aware_times_but_preserves_date_only(
+        self, raw_time, expected
+    ):
+        c = self._client()
+        data = deepcopy(SAMPLE_API_RESPONSE)
+        data["data"][0]["attributes"]["start_time"] = raw_time
+        assert c._parse(data, league_id=2)[0].start_time == expected
+
+    def test_parse_invalid_start_time_remains_none(self):
+        c = self._client()
+        data = deepcopy(SAMPLE_API_RESPONSE)
+        data["data"][0]["attributes"]["start_time"] = "not-a-date"
+        assert c._parse(data, league_id=2)[0].start_time is None
 
     def test_parse_skips_final_status(self):
         c = self._client()

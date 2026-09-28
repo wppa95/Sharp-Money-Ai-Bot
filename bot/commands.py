@@ -1764,7 +1764,11 @@ def _has_current_prop_data(
     Direction is checked separately by default. Scoring checks are opt-in and
     must not become a delivery or pick-eligibility blocker.
     """
+    # Stored provider times are UTC-naive, but adapters may supply aware
+    # offsets. Normalize both sides by instant before applying this display gate.
     now = now or datetime.utcnow()
+    if now.tzinfo is not None and now.utcoffset() is not None:
+        now = now.astimezone(timezone.utc).replace(tzinfo=None)
     provider = str(getattr(prop, "provider", "") or "").strip().lower()
     if provider != "underdog":
         return False
@@ -1788,8 +1792,16 @@ def _has_current_prop_data(
     game_time = getattr(prop, "game_time", None)
     if not isinstance(fetched_at, datetime) or not isinstance(game_time, datetime):
         return False
-    fetched = fetched_at.replace(tzinfo=None) if fetched_at.tzinfo else fetched_at
-    game = game_time.replace(tzinfo=None) if game_time.tzinfo else game_time
+    fetched = (
+        fetched_at.astimezone(timezone.utc).replace(tzinfo=None)
+        if fetched_at.tzinfo is not None and fetched_at.utcoffset() is not None
+        else fetched_at.replace(tzinfo=None)
+    )
+    game = (
+        game_time.astimezone(timezone.utc).replace(tzinfo=None)
+        if game_time.tzinfo is not None and game_time.utcoffset() is not None
+        else game_time.replace(tzinfo=None)
+    )
     from datetime import timedelta
     if fetched > now + timedelta(minutes=5):
         return False

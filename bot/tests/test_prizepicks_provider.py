@@ -153,7 +153,19 @@ class TestParseDt:
 
     def test_iso_string_with_z(self):
         result = _parse_dt("2026-08-01T19:00:00Z")
-        assert isinstance(result, datetime)
+        assert result == datetime(2026, 8, 1, 19, 0)
+
+    def test_iso_string_with_offset_normalizes_to_utc_naive(self):
+        assert _parse_dt("2026-08-01T19:00:00-04:00") == datetime(
+            2026, 8, 1, 23, 0
+        )
+
+    def test_date_only_string_stays_on_same_calendar_date(self):
+        assert _parse_dt("2026-08-01") == datetime(2026, 8, 1)
+
+    def test_aware_datetime_normalizes_to_utc_naive(self):
+        value = datetime(2026, 8, 1, 19, 0, tzinfo=timezone.utc)
+        assert _parse_dt(value) == datetime(2026, 8, 1, 19, 0)
 
     def test_invalid_string_returns_none(self):
         assert _parse_dt("not-a-date") is None

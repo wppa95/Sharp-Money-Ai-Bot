@@ -14,7 +14,7 @@ Covers:
 from __future__ import annotations
 
 import pytest
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock
 
 import sys, os
@@ -290,6 +290,19 @@ class TestMatchup:
         opp = make_opp(pp_line=25.5, sb_line=25.5, start_time=start)
         score = _score_matchup(opp, now=now)
         assert score >= 8 + 2   # agreement + 2 for 48h band
+
+    def test_aware_start_time_matches_equivalent_utc_naive(self):
+        now = datetime(2025, 1, 15, 20, 0)
+        aware = datetime(2025, 1, 15, 19, 0, tzinfo=timezone(timedelta(hours=-4)))
+        # 19:00 -04:00 is 23:00 UTC, three hours after now.
+        aware_score = _score_matchup(
+            make_opp(pp_line=25.5, sb_line=25.5, start_time=aware), now=now
+        )
+        utc_score = _score_matchup(
+            make_opp(pp_line=25.5, sb_line=25.5,
+                     start_time=datetime(2025, 1, 15, 23, 0)), now=now
+        )
+        assert aware_score == utc_score
 
     def test_no_start_time_gives_zero_proximity(self):
         opp_no_time  = make_opp(pp_line=25.5, sb_line=25.5, start_time=None)

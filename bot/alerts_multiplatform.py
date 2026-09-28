@@ -12,7 +12,7 @@ New alert types:
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from html import escape
 import re
 from typing import Optional
@@ -22,16 +22,29 @@ def _format_game_time_et(dt: datetime) -> str:
     """Convert a naive-UTC datetime to a readable date/time in ET.
 
     Returns e.g. ``"Sep 22, 8:40 PM ET"`` for Telegram display.
-    Falls back to ``"HH:MM UTC"`` if the zoneinfo conversion fails.
+    Falls back to a UTC date/time if the display-zone conversion fails.
     UTC is kept internally everywhere; this is display-only.
     """
     try:
         from zoneinfo import ZoneInfo
-        dt_et = dt.replace(tzinfo=ZoneInfo("UTC")).astimezone(ZoneInfo("America/New_York"))
+        if dt.tzinfo is not None and dt.utcoffset() is not None:
+            dt_et = dt.astimezone(ZoneInfo("America/New_York"))
+        else:
+            dt_et = dt.replace(tzinfo=ZoneInfo("UTC")).astimezone(
+                ZoneInfo("America/New_York")
+            )
         # %-I strips the leading zero on Linux ("8:40 PM ET" not "08:40 PM ET")
         return dt_et.strftime("%b %-d, %-I:%M %p ET")
     except Exception:
-        return dt.strftime("%H:%M UTC")
+        try:
+            dt_utc = (
+                dt.astimezone(timezone.utc)
+                if dt.tzinfo is not None and dt.utcoffset() is not None
+                else dt
+            )
+            return dt_utc.strftime("%b %-d, %-I:%M %p UTC")
+        except Exception:
+            return "Time unavailable"
 
 
 def _line_label(line: float) -> str:
@@ -966,7 +979,11 @@ def _market_availability_status(game_time: Optional[datetime]) -> str:
     """Return availability label based on time until game start."""
     if game_time is None:
         return "🟢 AVAILABLE NOW"
-    gt = game_time.replace(tzinfo=None)
+    gt = (
+        game_time.astimezone(timezone.utc).replace(tzinfo=None)
+        if game_time.tzinfo is not None and game_time.utcoffset() is not None
+        else game_time.replace(tzinfo=None)
+    )
     mins_until = (gt - datetime.utcnow()).total_seconds() / 60
     if mins_until <= 0:
         return "🔴 GAME LIVE / CLOSING"
