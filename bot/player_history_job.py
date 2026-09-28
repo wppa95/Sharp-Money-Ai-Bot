@@ -48,6 +48,10 @@ _PLAYER_HISTORY_FETCH_CONCURRENCY = 256
 # use the providers' own request timeouts and all selected targets are awaited;
 # target data is never intentionally dropped by this collector.
 _PLAYER_HISTORY_OPERATION_TIMEOUT_SECONDS = 5.0
+# Sport providers have request timeouts between 6 and 12 seconds. Give one
+# player/stat target enough time to complete its provider route, while the
+# collector's absolute cadence deadline remains the hard upper bound.
+_PLAYER_HISTORY_PROVIDER_TIMEOUT_SECONDS = 12.0
 # Active-target discovery reads the shared SQLite database while full-feed
 # persistence may be draining. Give that read a bounded but realistic window;
 # provider calls retain the shorter timeout above.
@@ -732,10 +736,10 @@ async def player_history_collector_job(context) -> None:
                         min_samples=5,
                         source_provider=source_provider or "Underdog",
                     ),
-                    timeout=min(_PLAYER_HISTORY_OPERATION_TIMEOUT_SECONDS, remaining),
+                    timeout=min(_PLAYER_HISTORY_PROVIDER_TIMEOUT_SECONDS, remaining),
                 )
             except asyncio.TimeoutError:
-                return "deadline", None
+                return "supplement_timeout", None
             except Exception as exc:
                 logger.debug(
                     "player_history_collector_job: PropLine DOTA history "
@@ -764,12 +768,23 @@ async def player_history_collector_job(context) -> None:
 
         async def fetch_target(player: str, sport: str, stat: str):
             async with fetch_semaphore:
+                target_started = time.monotonic()
+                operation_deadline = (
+                    target_started + _PLAYER_HISTORY_PROVIDER_TIMEOUT_SECONDS
+                )
+                target_deadline = min(cycle_deadline, operation_deadline)
+                timeout_status = (
+                    "cycle_deadline"
+                    if cycle_deadline <= operation_deadline
+                    else "provider_timeout"
+                )
                 try:
-                    # All provider work belongs to this invocation. PropLine
-                    # resolved-history lookups remain on their own cadence.
-                    remaining = cycle_deadline - time.monotonic()
+                    # Bound the complete target route, including optional
+                    # supplements, rather than granting each provider a fresh
+                    # timeout. The cycle deadline always takes precedence.
+                    remaining = target_deadline - time.monotonic()
                     if remaining <= 0:
-                        return "deadline", None
+                        return timeout_status, None
                     from providers.player_stats import validate_player_result_rows
 
                     if sport == "DOTA":
@@ -793,16 +808,19 @@ async def player_history_collector_job(context) -> None:
                                     status="usable",
                                     provider="PropLine",
                                 )
-                            # Missing history, an unsupported PropLine market,
-                            # or a provider error must not suppress the public
-                            # DOTA stats request. The cycle deadline is checked
-                            # again immediately before that request.
+                            # A failed or empty supplement must not suppress
+                            # the public DOTA route. A supplement timeout is
+                            # terminal only if it consumed this target's budget.
+                            if propline_status == "supplement_timeout":
+                                remaining = target_deadline - time.monotonic()
+                                if remaining <= 0:
+                                    return timeout_status, None
+                    remaining = target_deadline - time.monotonic()
+                    if remaining <= 0:
+                        return timeout_status, None
                     raw = await asyncio.wait_for(
                         provider.fetch_results(player, sport, stat),
-                        timeout=min(
-                            _PLAYER_HISTORY_OPERATION_TIMEOUT_SECONDS,
-                            remaining,
-                        ),
+                        timeout=remaining,
                     )
                     usable_rows = validate_player_result_rows(
                         raw,
@@ -825,7 +843,7 @@ async def player_history_collector_job(context) -> None:
                     )
                     return "ok", coverage
                 except asyncio.TimeoutError:
-                    return "deadline", None
+                    return timeout_status, None
                 except Exception as exc:
                     return "error", exc
 
@@ -860,10 +878,19 @@ async def player_history_collector_job(context) -> None:
                 for task in tasks:
                     if not task.done():
                         task.cancel()
-                await asyncio.gather(*tasks, return_exceptions=True)
-                fetch_results.extend(
-                    [("deadline", None)] * len(batch)
+                batch_outcomes = await asyncio.gather(
+                    *tasks,
+                    return_exceptions=True,
                 )
+                for outcome in batch_outcomes:
+                    if (
+                        isinstance(outcome, tuple)
+                        and len(outcome) == 2
+                        and isinstance(outcome[0], str)
+                    ):
+                        fetch_results.append(outcome)
+                    else:
+                        fetch_results.append(("cycle_deadline", None))
                 break
             fetch_results.extend(batch_results)
 
