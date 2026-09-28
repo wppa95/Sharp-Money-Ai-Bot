@@ -22,8 +22,8 @@ description: How /picks and /slip work after the PPEdgeRecord migration — data
 **How to apply:** Any new command that needs ranked props should call `get_top_ud_props_for_picks` + `build_player_prop_market_comparison(min_confidence=0)`. The PPEdgeRecord pipeline (get_top_pp_edges) is retained for backward compat with CLV/performance commands but should not be the primary data source for user-facing picks.
 
 ## Current-row metadata handoff
-The shared `PropLineHistory` row can lag the provider-owned Underdog snapshot for direction and confidence, and some current rows have no dedicated market-quality value. `/picks` and `/slip` must refresh recommendation/confidence from the snapshot map before applying presentation scoring gates; a positive composite score plus confidence is sufficient when market quality is absent.
+The shared `PropLineHistory` row can lag the provider-owned Underdog snapshot for direction and confidence, and some current rows have no dedicated market-quality value. `/picks` and `/slip` must refresh provider-owned direction before applying sport-aware eligibility. Confidence and market-quality values may be displayed but must not block an OVER/UNDER pick.
 
-**Why:** Current CS and other non-MLB rows were being discarded before their fresh snapshot direction was applied, making both commands report no picks even though the feed had scored directional rows.
+**Why:** Current CS and other non-MLB rows were being discarded before their fresh snapshot direction was applied. The user clarified that confidence is not a delivery blocker; direction alone qualifies optional-history sports.
 
-**How to apply:** Keep the initial current-row filter shape-only, refresh provider-owned metadata, then require a valid S/A/B tier, positive composite score, and positive confidence. Never use this presentation fallback to bypass delivery evidence or football suppression.
+**How to apply:** Keep current-row identity, freshness, event timing, provider scope, and removal checks. Apply the strict six-window result rule only to MLB/NBA/NFL/WNBA/NHL; for other named sports, require OVER/UNDER direction only. Preserve confidence as optional reporting data, not an eligibility gate.

@@ -66,6 +66,7 @@ from engine.delivery_evidence import (
     history_supports_delivery,
     history_is_available,
     is_history_optional_sport,
+    optional_sport_evidence_is_usable,
     is_historical_average_source,
     serialized_evidence_supports_delivery,
 )
@@ -3863,11 +3864,19 @@ def _has_strong_delivery_evidence(
     """Return whether existing scoring/validation data supports strong delivery.
 
     History-required sports need strong completed-result evidence in every
-    required window. Other sports use the direction-confidence threshold;
+    required window. Other sports use the direction-only rule;
     the active alert gate also applies source-provenance checks where required.
     """
     if is_history_optional_sport(sport):
-        return has_qualifying_directional_pick(decision, sport=sport)
+        return (
+            has_qualifying_directional_pick(decision, sport=sport)
+            and optional_sport_evidence_is_usable(
+                sport,
+                validation,
+                decision,
+                intelligence_trace,
+            )
+        )
 
     def _strong_directional_history(obj: object) -> bool:
         recommendation = str(
@@ -4015,9 +4024,9 @@ def _has_delivery_evidence(
 
     Main league sports must pass the directional hit-rate threshold in each
     required history window and have completed primary-player results or
-    explicitly settled PropLine history. Other sports require direction
-    confidence of at least 70. Disallowed football-family sports are
-    suppressed here and again by ``AlertDelivery``.
+    explicitly settled PropLine history. Other sports require an OVER/UNDER
+    direction but no completed-result history. Disallowed football-family
+    sports are suppressed here and again by ``AlertDelivery``.
     """
     if is_disallowed_football_sport(sport):
         return False
@@ -4034,10 +4043,18 @@ def _has_delivery_evidence(
     if direction not in {"OVER", "UNDER"}:
         return False
     if is_history_optional_sport(sport):
-        return has_qualifying_directional_pick(
-            decision,
-            direction,
-            sport=sport,
+        return (
+            has_qualifying_directional_pick(
+                decision,
+                direction,
+                sport=sport,
+            )
+            and optional_sport_evidence_is_usable(
+                sport,
+                validation,
+                decision,
+                intelligence_trace,
+            )
         )
     if not history_is_available(validation, decision, intelligence_trace):
         return False
@@ -4432,7 +4449,7 @@ def _select_strong_directional_picks(candidates: list[dict]) -> list[dict]:
     """Keep every candidate that already passed direction/evidence gates.
 
     This compatibility helper used to apply a second, stricter six-window
-    history and confidence filter after the canonical delivery gate. That
+    history filter after the canonical delivery gate. That
     silently made lower-volume sports tracking-only even when they had valid
     provider evidence. Qualification belongs at the collection point; this
     stage only preserves directional candidates for ranking/rate limiting.

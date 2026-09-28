@@ -628,7 +628,7 @@ def test_qualifying_pick_history_uses_75_and_25_percent_cutoffs():
     ) is False
 
 
-def test_non_major_sports_use_70_confidence_without_game_history():
+def test_non_major_sports_use_direction_without_game_history():
     from engine.delivery_evidence import (
         has_qualifying_directional_pick,
         is_history_optional_sport,
@@ -640,19 +640,20 @@ def test_non_major_sports_use_70_confidence_without_game_history():
     for sport in ("TENNIS", "SOCCER", "FIFA", "CS", "DOTA"):
         assert is_history_optional_sport(sport) is True
 
-    direction_only = types.SimpleNamespace(
-        recommendation="OVER",
-        confidence=70,
-    )
+    direction_only = types.SimpleNamespace(recommendation="OVER")
     assert has_qualifying_directional_pick(
         direction_only, sport="TENNIS"
     ) is True
     assert has_qualifying_directional_pick(
-        types.SimpleNamespace(recommendation="UNDER", confidence=69),
+        types.SimpleNamespace(recommendation="UNDER", confidence=0),
         sport="FIFA",
-    ) is False
+    ) is True
     assert has_qualifying_directional_pick(
         types.SimpleNamespace(recommendation="OVER"),
+        sport="CS",
+    ) is True
+    assert has_qualifying_directional_pick(
+        types.SimpleNamespace(recommendation="PASS", confidence=100),
         sport="CS",
     ) is False
     assert has_qualifying_directional_pick(
@@ -678,15 +679,15 @@ def test_delivery_gates_allow_strong_direction_without_game_history_only_outside
     from market_engine import _has_delivery_evidence
     import types
 
-    decision = types.SimpleNamespace(recommendation="OVER", confidence=70)
+    decision = types.SimpleNamespace(recommendation="OVER", confidence=0)
     assert _has_delivery_evidence(sport="TENNIS", decision=decision) is True
     assert _has_strong_underdog_evidence(
         decision=decision, sport="TENNIS"
     ) is True
     assert _has_delivery_evidence(
         sport="TENNIS",
-        decision=types.SimpleNamespace(recommendation="OVER", confidence=69),
-    ) is False
+        decision=types.SimpleNamespace(recommendation="OVER", confidence=None),
+    ) is True
     assert _has_delivery_evidence(sport="MLB", decision=decision) is False
     assert _has_strong_underdog_evidence(
         decision=decision, sport="NHL"

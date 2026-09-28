@@ -145,7 +145,7 @@ def test_serialized_propline_evidence_requires_sample_count():
     assert _has_strong_underdog_evidence(
         sport="CS",
         decision=sufficient_directional,
-    ) is False
+    ) is True
     assert market_engine._has_strong_delivery_evidence(decision=sufficient) is True
 
 
@@ -160,7 +160,7 @@ def test_serialized_validation_json_keeps_propline_provenance_and_count():
     assert _has_strong_underdog_evidence(
         sport="CS",
         decision={**decision, "recommendation": "OVER"},
-    ) is False
+    ) is True
     assert market_engine._has_strong_delivery_evidence(
         decision={"validation_json": decision["validation_json"]},
     ) is True
@@ -400,7 +400,7 @@ def test_historical_average_evidence_source_without_windows_is_not_deliverable()
     "sport",
     ["CS", "LOL", "DOTA", "VALORANT", "TENNIS", "SOCCER", "FIFA"],
 )
-def test_nonfootball_sports_require_direction_and_completed_history(sport):
+def test_nonfootball_sports_require_direction_but_not_completed_history(sport):
     no_history = SimpleNamespace(
         recommendation="OVER",
         evidence_source=None,
@@ -409,11 +409,11 @@ def test_nonfootball_sports_require_direction_and_completed_history(sport):
     assert market_engine._has_delivery_evidence(
         sport=sport,
         decision=no_history,
-    ) is False
+    ) is True
     assert _has_strong_underdog_evidence(
         sport=sport,
         decision=no_history,
-    ) is False
+    ) is True
 
     completed_history = SimpleNamespace(
         evidence_source="primary",

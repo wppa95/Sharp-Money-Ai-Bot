@@ -33,7 +33,7 @@ def _current_prop(**overrides):
     return SimpleNamespace(**values)
 
 
-def test_shape_only_mode_allows_snapshot_recommendation_refresh():
+def test_directional_row_does_not_require_confidence_for_refresh():
     prop = _current_prop()
 
     assert _has_current_prop_data(
@@ -41,7 +41,7 @@ def test_shape_only_mode_allows_snapshot_recommendation_refresh():
         require_direction=False,
         require_scoring=False,
     )
-    assert not _has_current_prop_data(
+    assert _has_current_prop_data(
         prop,
         require_direction=False,
     )
@@ -63,7 +63,7 @@ def test_zero_market_quality_still_blocks_current_row():
         market_quality_score=0,
     )
 
-    assert not _has_current_prop_data(prop)
+    assert not _has_current_prop_data(prop, require_scoring=True)
 
 
 def test_directional_selection_uses_fresh_snapshot_map_for_cross_sport_row():

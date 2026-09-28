@@ -458,7 +458,7 @@ class TestSlipSubcommandRouting:
         assert len(build_all_slips.call_args.args[0]) == 1
 
     @pytest.mark.asyncio
-    async def test_canonical_direction_only_slip_uses_saved_confidence_without_results(self):
+    async def test_canonical_direction_only_slip_needs_no_confidence_or_results(self):
         from commands import _display_prop_from_opportunity, cmd_slip
 
         now = datetime.utcnow()
@@ -469,7 +469,7 @@ class TestSlipSubcommandRouting:
             stat_type="Points",
             line_value=20.5,
             recommendation="OVER",
-            confidence=70,
+            confidence=None,
             external_id="canonical-123",
             game_id="canonical-game",
             game_time=now + timedelta(hours=2),
@@ -477,7 +477,7 @@ class TestSlipSubcommandRouting:
             alert_sent_at=now,
             result="PENDING",
         )
-        assert _display_prop_from_opportunity(opportunity).bet_confidence == 70
+        assert _display_prop_from_opportunity(opportunity).bet_confidence is None
 
         class SlipDB:
             async def get_top_ud_props_for_picks(self, **kwargs):

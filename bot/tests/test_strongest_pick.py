@@ -436,18 +436,17 @@ def test_strong_pick_applies_history_cutoffs_across_main_leagues(
 
 
 @pytest.mark.parametrize(
-    "sport,confidence,expected",
+    "sport,confidence",
     [
-        ("TENNIS", 70, True),
-        ("SOCCER", 80, True),
-        ("FIFA", 69, False),
-        ("CS", None, False),
+        ("TENNIS", None),
+        ("SOCCER", 0),
+        ("FIFA", 69),
+        ("CS", None),
     ],
 )
-def test_direction_only_sports_use_confidence_without_game_history(
+def test_direction_only_sports_ignore_confidence_without_game_history(
     sport,
     confidence,
-    expected,
 ):
     candidate = _candidate(
         "Underdog",
@@ -464,11 +463,11 @@ def test_direction_only_sports_use_confidence_without_game_history(
         require_strong=True,
     )
 
-    assert (candidate in selected) is expected
+    assert candidate in selected
 
 
-@pytest.mark.parametrize("sport", ["CFB", "WNBA", "NHL", "FIFA", "KBO"])
-def test_non_football_sports_still_need_propline_history(sport):
+@pytest.mark.parametrize("sport", ["WNBA", "NHL"])
+def test_history_required_sports_still_need_propline_history(sport):
     candidate = _candidate(
         "Underdog",
         "Jordan Lee",
@@ -487,6 +486,28 @@ def test_non_football_sports_still_need_propline_history(sport):
         [candidate],
         require_strong=True,
     ) == []
+
+
+@pytest.mark.parametrize("sport", ["CFB", "FIFA", "KBO"])
+def test_other_sports_need_only_direction_not_propline_history(sport):
+    candidate = _candidate(
+        "Underdog",
+        "Jordan Lee",
+        "Points",
+        confidence=0,
+        evidence=False,
+        evidence_count=0,
+    )
+    candidate["sport"] = sport
+    candidate["decision"] = SimpleNamespace(
+        recommendation="OVER",
+        confidence=None,
+    )
+
+    assert select_strongest_actionable_picks(
+        [candidate],
+        require_strong=True,
+    ) == [candidate]
 
 
 @pytest.mark.parametrize("sport", ["MLB", "NFL", "NBA"])

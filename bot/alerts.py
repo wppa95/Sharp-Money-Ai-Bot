@@ -42,6 +42,7 @@ from engine.delivery_evidence import (
     history_supports_delivery,
     history_is_available,
     is_history_optional_sport,
+    optional_sport_evidence_is_usable,
     serialized_evidence_supports_delivery,
 )
 from engine.sport_policy import is_disallowed_football_sport
@@ -665,8 +666,8 @@ def _has_strong_underdog_evidence(
     """Apply the terminal direction/sport rule without importing market_engine.
 
     Main league sports need completed-player history meeting the thresholds in
-    every required window. Other sports need direction confidence of at least
-    70 and do not require completed-result history.
+    every required window. Other sports need an OVER/UNDER direction but do
+    not require completed-result history.
     """
     decision_direction = str(
         (
@@ -678,10 +679,18 @@ def _has_strong_underdog_evidence(
     if decision_direction not in {"OVER", "UNDER"}:
         return False
     if is_history_optional_sport(sport):
-        return has_qualifying_directional_pick(
-            decision,
-            decision_direction,
-            sport=sport,
+        return (
+            has_qualifying_directional_pick(
+                decision,
+                decision_direction,
+                sport=sport,
+            )
+            and optional_sport_evidence_is_usable(
+                sport,
+                validation,
+                decision,
+                intelligence_trace,
+            )
         )
     if not history_is_available(validation, decision, intelligence_trace):
         return False
@@ -1666,19 +1675,15 @@ class AlertDelivery:
             or getattr(score, "hit_rates", None)
             or getattr(score, "decision", None)
         )
-        _pp_confidence = getattr(score, "total", None)
-        if _pp_confidence is None:
-            _pp_confidence = getattr(opp, "confidence", None)
         if not has_qualifying_directional_pick(
             _pp_history,
             _pp_direction,
             sport=_pp_sport,
-            confidence=_pp_confidence,
         ):
             return DeliveryResult(
                 sent=False,
                 filtered=True,
-                filtered_reason="Directional confidence/history threshold",
+                filtered_reason="Directional qualification threshold",
             )
 
         _pp_line_value = float(getattr(opp.pp_line, "line_value", 0) or 0)

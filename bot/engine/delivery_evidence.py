@@ -8,7 +8,6 @@ they can support a user-facing directional alert.
 from __future__ import annotations
 
 import json
-import math
 from typing import Any
 
 
@@ -25,19 +24,19 @@ _NESTED_KEYS = (
 )
 
 _STRICT_HISTORY_SPORTS = frozenset({"MLB", "NFL", "NBA", "WNBA", "NHL"})
-_DIRECTION_ONLY_MIN_CONFIDENCE = 70
+_UNVERIFIED_MARKET_SPORTS = frozenset({"KBO", "NPB"})
 
 
 def is_history_optional_sport(sport: Any) -> bool:
-    """Return whether *sport* uses the direction-confidence rule.
+    """Return whether *sport* uses the direction-only rule.
 
     MLB, NBA, NFL, WNBA, and NHL require complete completed-result history.
-    Other named sports need an OVER/UNDER recommendation with confidence of at
-    least 70; they do not require completed player-game results.
+    Other named sports require only an OVER/UNDER direction and do not require
+    completed player-game results.
 
     This is deliberately based on the history-required set rather than a
     hand-maintained optional-sport allowlist, so new sport codes inherit the
-    direction-confidence rule.
+    direction-only rule.
     """
     normalized = " ".join(
         str(sport or "").strip().upper().replace("_", " ").replace("-", " ").split()
@@ -410,7 +409,7 @@ def has_qualifying_pick_history(
 
     Callers making an eligibility decision should use
     ``has_qualifying_directional_pick`` so sports that do not require completed
-    results use their confidence threshold instead.
+    results use direction-only qualification instead.
     """
     return has_strong_directional_history(
         value,
@@ -425,9 +424,8 @@ def has_qualifying_directional_pick(
     direction: Any = None,
     *,
     sport: Any = None,
-    confidence: Any = None,
 ) -> bool:
-    """Apply the sport-specific history or direction-confidence requirement."""
+    """Require direction for all sports and completed history for main leagues."""
     recommendation = str(
         direction
         or (
@@ -440,49 +438,9 @@ def has_qualifying_directional_pick(
     if recommendation not in {"OVER", "UNDER"}:
         return False
 
-    if not is_history_optional_sport(sport):
-        return has_qualifying_pick_history(value, recommendation)
-
-    if confidence is None:
-        if isinstance(value, dict):
-            confidence = next(
-                (
-                    value[key]
-                    for key in (
-                        "confidence",
-                        "bet_confidence",
-                        "decision_confidence",
-                    )
-                    if value.get(key) is not None
-                ),
-                None,
-            )
-        else:
-            confidence = next(
-                (
-                    candidate
-                    for candidate in (
-                        getattr(value, "confidence", None),
-                        getattr(value, "bet_confidence", None),
-                        getattr(value, "decision_confidence", None),
-                    )
-                    if candidate is not None
-                ),
-                None,
-            )
-    if (
-        not isinstance(confidence, (int, float))
-        or isinstance(confidence, bool)
-    ):
-        return False
-    try:
-        numeric_confidence = float(confidence)
-    except (OverflowError, TypeError, ValueError):
-        return False
-    return (
-        math.isfinite(numeric_confidence)
-        and numeric_confidence >= _DIRECTION_ONLY_MIN_CONFIDENCE
-    )
+    if is_history_optional_sport(sport):
+        return True
+    return has_qualifying_pick_history(value, recommendation)
 
 
 def has_directional_history_fields(value: Any) -> bool:
@@ -577,6 +535,27 @@ def history_is_available(*values: Any) -> bool:
         )
 
     return any(_has_marker(value) for value in values)
+
+
+def optional_sport_evidence_is_usable(
+    sport: Any,
+    *values: Any,
+    min_samples: int = 5,
+) -> bool:
+    """Keep source-integrity checks without requiring optional-sport history.
+
+    Direction-only eligibility permits a missing results payload. If a payload
+    explicitly claims evidence, however, it must be a supported completed
+    source with a sufficient sample. KBO/NPB remain blocked until such evidence
+    exists because their player-market mappings are not verified.
+    """
+    normalized = " ".join(
+        str(sport or "").strip().upper().replace("_", " ").replace("-", " ").split()
+    )
+    available = history_is_available(*values)
+    if not available:
+        return normalized not in _UNVERIFIED_MARKET_SPORTS
+    return history_supports_delivery(*values, min_samples=min_samples)
 
 
 def _nonnegative_int(value: Any) -> int | None:

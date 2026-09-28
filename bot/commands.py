@@ -1724,18 +1724,16 @@ def _has_current_prop_data(
     now: Optional[datetime] = None,
     *,
     require_direction: bool = True,
-    require_scoring: bool = True,
+    require_scoring: bool = False,
 ) -> bool:
     """Keep user-facing pick/slip views on current, actionable rows only.
 
     This is a presentation gate. It does not affect scanning, alert
     qualification, cadence, or persisted tracking.
 
-    A directional label by itself is not enough for a current pick. Reports
-    must have provider-owned identity and a fresh upcoming event. Shape-only
-    refreshes may explicitly set ``require_scoring=False``; the default
-    current-row view requires a directional recommendation and positive stored
-    confidence.
+    Reports must have provider-owned identity and a fresh upcoming event.
+    Direction is checked separately by default. Scoring checks are opt-in and
+    must not become a delivery or pick-eligibility blocker.
     """
     now = now or datetime.utcnow()
     provider = str(getattr(prop, "provider", "") or "").strip().lower()
@@ -2223,7 +2221,12 @@ async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     ud_props = [
         p for p in ud_props
         if _is_canonical_alert_prop(p)
-        or _has_current_prop_data(p, now, require_direction=False)
+        or _has_current_prop_data(
+            p,
+            now,
+            require_direction=False,
+            require_scoring=False,
+        )
     ]
 
     _provenance_map: dict = {}
@@ -3236,31 +3239,31 @@ async def cmd_slip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     except Exception as _slip_rec_exc:
         logger.debug("cmd_slip: rec_map lookup failed: %s", _slip_rec_exc)
 
-    # Apply the scoring gate after the provider-owned recommendation refresh.
-    # This keeps /slip aligned with /picks while still excluding unscored,
-    # stale, or zero-confidence rows.
-    _scored_provider_props = []
-    _scored_candidates = []
+    # Keep current-row validation separate from direction/history eligibility.
+    _current_provider_props = []
+    _current_candidates = []
     for _cand, (_provider, _plh) in zip(_candidates, provider_props):
         if _is_canonical_alert_prop(_plh) or _has_current_prop_data(
-            _plh, now, require_direction=False
+            _plh,
+            now,
+            require_direction=False,
+            require_scoring=False,
         ):
-            _scored_provider_props.append((_provider, _plh))
-            _scored_candidates.append(_cand)
-    provider_props = _scored_provider_props
-    _candidates = _scored_candidates
+            _current_provider_props.append((_provider, _plh))
+            _current_candidates.append(_cand)
+    provider_props = _current_provider_props
+    _candidates = _current_candidates
     if not provider_props:
         await update.message.reply_text(
             "🎯 <b>Sharp Money Prop Slip</b>\n\n"
-            "No current scored player props available right now.\n\n"
+            "No current player props available right now.\n\n"
             "<i>Season-long futures are excluded from this view.\n"
             "Run /picks to check current opportunities.</i>",
             parse_mode=ParseMode.HTML,
         )
         return
 
-    # Main league sports use complete history; other sports use the same
-    # 70-confidence direction rule as automatic delivery and /picks.
+    # Main league sports use complete history; other sports need direction only.
     from engine.delivery_evidence import has_qualifying_directional_pick
     from engine.player_results import compute_hit_rates as _compute_slip_hit_rates
 
@@ -3312,7 +3315,6 @@ async def cmd_slip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
                 _history,
                 _direction,
                 sport=_plh.sport,
-                confidence=getattr(_plh, "bet_confidence", None),
             )
         ):
             _slip_ineligible += 1
