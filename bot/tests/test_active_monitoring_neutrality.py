@@ -83,6 +83,7 @@ async def test_tracking_and_dashboard_ignore_legacy_non_directional_rows(db):
                 decision_tier="A",
                 confidence=75,
                 result="HIT",
+                    grade_result_source="propline_history",
             ),
             PropOpportunityLog(
                 external_id="legacy-pass",

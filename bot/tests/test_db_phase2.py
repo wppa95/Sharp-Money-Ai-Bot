@@ -311,7 +311,12 @@ async def test_get_learning_rollups_with_graded_plays(db):
                 .where(PropOpportunityLog.external_id.in_(
                     [f"rollup-seed-{i}" for i in range(5)]
                 ))
-                .values(result="HIT", actual_value=2.0, graded_at=datetime.utcnow())
+                    .values(
+                        result="HIT",
+                        actual_value=2.0,
+                        grade_result_source="propline_history",
+                        graded_at=datetime.utcnow(),
+                    )
             )
             await s.commit()
 

@@ -20,12 +20,18 @@ async def db():
     await database.close()
 
 
-async def _opportunity(db, external_id: str, recommendation: str = "OVER"):
+async def _opportunity(
+    db,
+    external_id: str,
+    recommendation: str = "OVER",
+    *,
+    sport: str = "MLB",
+):
     await db.log_prop_opportunity(
         external_id=external_id,
         player_name="CLV Player",
         team="TST",
-        sport="MLB",
+        sport=sport,
         stat_type="hits",
         line_value=0.5,
         recommendation=recommendation,
@@ -100,7 +106,12 @@ async def test_performance_summary_joins_clv_and_maps_under_direction(db):
         ("no-clv", "HIT"),
     ):
         row = await _fetch_opportunity(db, external_id)
-        await db.grade_opportunity(row.id, result=result, actual_value=1.0)
+        await db.grade_opportunity(
+            row.id,
+            result=result,
+            actual_value=1.0,
+            grade_result_source="propline_history",
+        )
 
     await _snapshot_and_seed(db, "over-hit", 4.0)
     await _snapshot_and_seed(db, "over-miss", -2.0)
@@ -124,7 +135,12 @@ async def test_performance_summary_joins_clv_and_maps_under_direction(db):
 async def test_performance_summary_deduplicates_moving_snapshots(db):
     await _opportunity(db, "moving")
     row = await _fetch_opportunity(db, "moving")
-    await db.grade_opportunity(row.id, result="HIT", actual_value=1.0)
+    await db.grade_opportunity(
+        row.id,
+        result="HIT",
+        actual_value=1.0,
+        grade_result_source="propline_history",
+    )
 
     await _snapshot_and_seed(db, "moving", 1.0, offset=0)
     await _snapshot_and_seed(db, "moving", 7.0, offset=1)
@@ -134,3 +150,55 @@ async def test_performance_summary_deduplicates_moving_snapshots(db):
 
     assert sport["clv_count"] == 1
     assert sport["clv_hit_avg"] == pytest.approx(7.0)
+
+
+@pytest.mark.asyncio
+async def test_reports_exclude_unverified_grades_and_filter_enabled_sports(db):
+    for external_id, sport in (
+        ("verified-mlb", "MLB"),
+        ("push-mlb", "MLB"),
+        ("void-mlb", "MLB"),
+        ("verified-nba", "NBA"),
+        ("legacy-nba", "NBA"),
+    ):
+        await _opportunity(db, external_id, sport=sport)
+
+    grade_rows = (
+        ("verified-mlb", "HIT", "propline_history"),
+        ("push-mlb", "PUSH", "propline_history"),
+        ("void-mlb", "VOID", "propline_event_results_void"),
+        ("verified-nba", "MISS", "propline_history"),
+        ("legacy-nba", "HIT", None),
+    )
+    for external_id, result, source in grade_rows:
+        row = await _fetch_opportunity(db, external_id)
+        await db.grade_opportunity(
+            row.id,
+            result=result,
+            actual_value=1.0,
+            grade_result_source=source,
+        )
+
+    enabled = await db.get_directional_performance_summary(
+        enabled_sports={"MLB"}
+    )
+    assert set(enabled["by_sport"]) == {"MLB"}
+    mlb = enabled["by_sport"]["MLB"]
+    assert mlb["hit"] == 1
+    assert mlb["push"] == 1
+    assert mlb["void"] == 1
+    assert mlb["unverified"] == 0
+    assert mlb["denominator"] == 1
+    assert mlb["hit_rate"] == 100.0
+
+    all_sports = await db.get_directional_performance_summary()
+    nba = all_sports["by_sport"]["NBA"]
+    assert nba["miss"] == 1
+    assert nba["unverified"] == 1
+    assert nba["denominator"] == 1
+
+    rollups = await db.get_learning_rollups(enabled_sports={"MLB"})
+    assert rollups["total_graded"] == 2
+    assert rollups["unverified_graded"] == 0
+    all_rollups = await db.get_learning_rollups()
+    assert all_rollups["unverified_graded"] == 1

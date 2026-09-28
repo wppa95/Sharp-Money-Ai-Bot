@@ -32,6 +32,7 @@ from database import (
     Database,
     OddsRecord,
     get_sqlite_backpressure_metrics,
+    is_gradeable_player_result_source,
     is_official_underdog_settlement_source,
 )
 from engine import AnalysisEngine
@@ -1431,13 +1432,18 @@ async def _grade_opportunities_job(context) -> None:
                     for row in _stored_grade_results.get(_key, [])
                 )
             return any(
-                (
-                    _event_date
-                    and str(getattr(row, "game_date", "") or "") == _event_date
+                is_gradeable_player_result_source(
+                    opp.provider, getattr(row, "source", "")
                 )
-                or (
-                    _game_id
-                    and str(getattr(row, "game_id", "") or "") == _game_id
+                and (
+                    (
+                        _event_date
+                        and str(getattr(row, "game_date", "") or "") == _event_date
+                    )
+                    or (
+                        _game_id
+                        and str(getattr(row, "game_id", "") or "") == _game_id
+                    )
                 )
                 for row in _stored_grade_results.get(_key, [])
             )
@@ -1850,8 +1856,16 @@ async def _grade_opportunities_job(context) -> None:
                         break
             if (
                 result_row is not None
-                and _is_underdog_opportunity(opp)
-                and not _is_official_underdog_result(opp, result_row)
+                and (
+                    not is_gradeable_player_result_source(
+                        getattr(opp, "provider", None) or "Underdog",
+                        getattr(result_row, "source", ""),
+                    )
+                    or (
+                        _is_underdog_opportunity(opp)
+                        and not _is_official_underdog_result(opp, result_row)
+                    )
+                )
             ):
                 # Defense in depth for compatibility resolvers or stale
                 # PlayerGameResult rows written by a generic stats provider.
@@ -1931,6 +1945,7 @@ async def _grade_opportunities_job(context) -> None:
                             "actual_value": actual,
                             "error_type": error_type,
                             "void_reason": f"PropLine {_void_code}",
+                            "grade_result_source": _void_source,
                         }
                     )
                 graded += 1
@@ -1986,6 +2001,7 @@ async def _grade_opportunities_job(context) -> None:
                     "id": opp.id, "result": outcome,
                     "actual_value": actual, "error_type": error_type,
                     "void_reason": settlement_reason,
+                    "grade_result_source": getattr(result_row, "source", None),
                 })
                 graded += 1
                 continue
@@ -2033,6 +2049,7 @@ async def _grade_opportunities_job(context) -> None:
                     "result": outcome,
                     "actual_value": actual,
                     "error_type": error_type,
+                    "grade_result_source": getattr(result_row, "source", None),
                 }
                 if settlement_reason:
                     _grade_row["void_reason"] = settlement_reason
@@ -2060,6 +2077,9 @@ async def _grade_opportunities_job(context) -> None:
                 _grade_kwargs = {"error_type": _grade.get("error_type")}
                 if _grade.get("void_reason") is not None:
                     _grade_kwargs["void_reason"] = _grade["void_reason"]
+                _grade_kwargs["grade_result_source"] = _grade.get(
+                    "grade_result_source"
+                )
                 await db.grade_opportunity(
                     _grade["id"],
                     _grade["result"],

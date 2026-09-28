@@ -47,6 +47,17 @@ _PLAYER_PROP_PROVIDERS = ("Underdog", "PrizePicks", "DraftKings", "FanDuel")
 _UNDERDOG_SETTLEMENT_RESULT_SOURCES = frozenset(
     {"propline_event_results", "propline_history"}
 )
+_UNDERDOG_VOID_RESULT_SOURCES = frozenset({"propline_event_results_void"})
+_DIRECTIONAL_GRADE_RESULTS = frozenset({"HIT", "MISS", "PUSH"})
+_VOID_GRADE_RESULTS = frozenset({
+    "VOID", "CANCELLED", "INJURY_VOID", "GAME_INTERRUPTED",
+})
+_TERMINAL_GRADE_RESULTS = frozenset({
+    "HIT", "MISS", "PUSH", "VOID", "CANCELLED",
+    "INJURY_VOID", "GAME_INTERRUPTED", "UNRESOLVED", "OUTLIER",
+    "PLATFORM_DIFF",
+})
+_UNTRUSTED_PLAYER_RESULT_SOURCES = frozenset({"", "graded_prop", "manual", "unknown"})
 _DB_WRITE_MAX_RETRIES = 4
 _DB_WRITE_RETRY_DELAYS = (1.0, 3.0, 7.0, 15.0)
 _PRIZEPICKS_EXTERNAL_PREFIX = "PrizePicks::"
@@ -56,6 +67,96 @@ _TELEGRAM_DELIVERY_KEY_VERSION = "v1"
 def is_official_underdog_settlement_source(source: object) -> bool:
     """Return whether a stored result came from an explicit PropLine settlement."""
     return str(source or "").strip().casefold() in _UNDERDOG_SETTLEMENT_RESULT_SOURCES
+
+
+def is_gradeable_player_result_source(provider: object, source: object) -> bool:
+    """Reject self-generated and unproven rows before they can grade a pick."""
+    source_key = str(source or "").strip().casefold()
+    provider_key = str(provider or "").strip().casefold()
+    if not provider_key or provider_key == "underdog":
+        return source_key in _UNDERDOG_SETTLEMENT_RESULT_SOURCES
+    return source_key not in _UNTRUSTED_PLAYER_RESULT_SOURCES
+
+
+def is_trusted_directional_grade_source(
+    provider: object,
+    result: object,
+    source: object,
+) -> bool:
+    """Return whether a terminal opportunity grade has reportable provenance.
+
+    Underdog-native (including legacy provider-less) rows require explicit
+    PropLine settlement evidence. Other provider rows require an external
+    result source; self-generated ``graded_prop`` rows and legacy/manual rows
+    are not independent evidence.
+    """
+    outcome = str(result or "").strip().upper()
+    if outcome not in _TERMINAL_GRADE_RESULTS:
+        return False
+    source_key = str(source or "").strip().casefold()
+    provider_key = str(provider or "").strip().casefold()
+    if not provider_key or provider_key == "underdog":
+        if outcome in _VOID_GRADE_RESULTS:
+            return (
+                source_key in _UNDERDOG_SETTLEMENT_RESULT_SOURCES
+                or source_key in _UNDERDOG_VOID_RESULT_SOURCES
+            )
+        return source_key in _UNDERDOG_SETTLEMENT_RESULT_SOURCES
+    return is_gradeable_player_result_source(provider, source)
+
+
+def _trusted_directional_grade_filter():
+    """SQL predicate for verified HIT/MISS/PUSH opportunity results."""
+    provider_key = func.lower(func.trim(func.coalesce(PropOpportunityLog.provider, "")))
+    source_key = func.lower(
+        func.trim(func.coalesce(PropOpportunityLog.grade_result_source, ""))
+    )
+    underdog_provider = or_(provider_key == "", provider_key == "underdog")
+    return and_(
+        PropOpportunityLog.result.in_(tuple(_DIRECTIONAL_GRADE_RESULTS)),
+        or_(
+            and_(
+                underdog_provider,
+                source_key.in_(tuple(_UNDERDOG_SETTLEMENT_RESULT_SOURCES)),
+            ),
+            and_(
+                ~underdog_provider,
+                source_key != "",
+                source_key.notin_(tuple(_UNTRUSTED_PLAYER_RESULT_SOURCES)),
+            ),
+        ),
+    )
+
+
+def _trusted_terminal_grade_filter():
+    """SQL predicate for terminal grades with provider-appropriate provenance."""
+    provider_key = func.lower(func.trim(func.coalesce(PropOpportunityLog.provider, "")))
+    source_key = func.lower(
+        func.trim(func.coalesce(PropOpportunityLog.grade_result_source, ""))
+    )
+    result_key = func.upper(func.trim(func.coalesce(PropOpportunityLog.result, "")))
+    underdog_provider = or_(provider_key == "", provider_key == "underdog")
+    underdog_settlement = and_(
+        result_key.in_(tuple(_TERMINAL_GRADE_RESULTS - _VOID_GRADE_RESULTS)),
+        source_key.in_(tuple(_UNDERDOG_SETTLEMENT_RESULT_SOURCES)),
+    )
+    underdog_void = and_(
+        result_key.in_(tuple(_VOID_GRADE_RESULTS)),
+        source_key.in_(
+            tuple(_UNDERDOG_SETTLEMENT_RESULT_SOURCES | _UNDERDOG_VOID_RESULT_SOURCES)
+        ),
+    )
+    return and_(
+        result_key.in_(tuple(_TERMINAL_GRADE_RESULTS)),
+        or_(
+            and_(underdog_provider, or_(underdog_settlement, underdog_void)),
+            and_(
+                ~underdog_provider,
+                source_key != "",
+                source_key.notin_(tuple(_UNTRUSTED_PLAYER_RESULT_SOURCES)),
+            ),
+        ),
+    )
 
 
 def _analyst_grade(
@@ -1082,6 +1183,7 @@ class PropOpportunityLog(Base):
     reason_codes       = Column(Text,        nullable=True)               # JSON: ["STRONG_L5", …]
     watchlist_state    = Column(String(16),  nullable=True)               # Legacy compatibility; current writes null
     settlement_source  = Column(String(64),  nullable=True)               # "auto_grade"|"manual"|None
+    grade_result_source = Column(String(64), nullable=True)               # Provider row used for this outcome
     manual_opinion     = Column(String(8),   nullable=True)               # Legacy compatibility
     # Downstream intelligence — additive and never used as a delivery gate.
     downstream_intelligence_json = Column(Text, nullable=True)
@@ -1436,6 +1538,7 @@ class Database:
         await self._migrate_player_game_results_v1()
         await self._migrate_prop_opportunity_log_v6()
         await self._migrate_prop_opportunity_log_v7()
+        await self._migrate_prop_opportunity_log_v8()
         await self._migrate_telegram_delivery_audit_v1()
         # v2 reads mapped audit rows, so ensure any newer mapped columns exist
         # before that ORM query runs against an older database file.
@@ -2729,7 +2832,10 @@ class Database:
             )
             return len(audits)
 
-    async def get_directional_performance_summary(self) -> dict:
+    async def get_directional_performance_summary(
+        self,
+        enabled_sports: Optional[Iterable[str]] = None,
+    ) -> dict:
         """Return compact provider/sport pick performance aggregates.
 
         This is deliberately a grouped SQL read rather than the broad
@@ -2741,6 +2847,20 @@ class Database:
         created a seed.  A CLVRecord has no opportunity/source identifier, so
         joining it directly to a graded opportunity would be ambiguous.
         """
+        enabled_sport_keys = (
+            {
+                str(sport).strip().upper()
+                for sport in enabled_sports
+                if str(sport).strip()
+            }
+            if enabled_sports is not None
+            else None
+        )
+        sport_filter = (
+            [func.upper(PropOpportunityLog.sport).in_(enabled_sport_keys)]
+            if enabled_sport_keys is not None
+            else []
+        )
         async with self.session() as s:
             result = await s.execute(
                 select(
@@ -2748,14 +2868,19 @@ class Database:
                     PropOpportunityLog.sport,
                     PropOpportunityLog.recommendation,
                     PropOpportunityLog.result,
+                    PropOpportunityLog.grade_result_source,
                     func.count(),
                 )
-                .where(PropOpportunityLog.recommendation.in_(("OVER", "UNDER")))
+                .where(
+                    PropOpportunityLog.recommendation.in_(("OVER", "UNDER")),
+                    *sport_filter,
+                )
                 .group_by(
                     PropOpportunityLog.provider,
                     PropOpportunityLog.sport,
                     PropOpportunityLog.recommendation,
                     PropOpportunityLog.result,
+                    PropOpportunityLog.grade_result_source,
                 )
             )
             clv_result = await s.execute(
@@ -2791,11 +2916,12 @@ class Database:
                     ),
                 )
                 .where(
-                    PropOpportunityLog.recommendation.in_(("OVER", "UNDER")),
+                    _trusted_directional_grade_filter(),
                     or_(
                         PropOpportunityLog.provider == "Underdog",
                         PropOpportunityLog.provider.is_(None),
                     ),
+                    *sport_filter,
                 )
             )
 
@@ -2809,6 +2935,7 @@ class Database:
                 "pending": 0,
                 "resolved": 0,
                 "graded": 0,
+                "unverified": 0,
                 "denominator": 0,
                 "hit_rate": 0.0,
                 "hit": 0,
@@ -2821,8 +2948,10 @@ class Database:
         def _add_outcome(
             target: dict,
             key: str,
+            provider: str,
             recommendation: str,
             outcome: str,
+            grade_result_source: str,
             count: int,
         ) -> None:
             row = target.setdefault(key, _new_performance_row())
@@ -2832,7 +2961,11 @@ class Database:
             )
             if outcome == "PENDING":
                 row["pending"] += count
-            elif outcome in {"HIT", "MISS", "PUSH"}:
+            elif not is_trusted_directional_grade_source(
+                provider, outcome, grade_result_source
+            ):
+                row["unverified"] += count
+            elif outcome in _DIRECTIONAL_GRADE_RESULTS:
                 row["resolved"] += count
                 row["graded"] += count
                 if outcome == "PUSH":
@@ -2846,7 +2979,14 @@ class Database:
             else:
                 row["void"] += count
 
-        for provider, sport, recommendation, outcome, count in result.all():
+        for (
+            provider,
+            sport,
+            recommendation,
+            outcome,
+            grade_result_source,
+            count,
+        ) in result.all():
             if not _is_supported_tracking_sport(sport):
                 continue
             provider_key = str(provider or "Underdog")
@@ -2854,13 +2994,31 @@ class Database:
             rec_key = str(recommendation or "").upper()
             outcome_key = str(outcome or "PENDING").upper()
             count = int(count or 0)
-            _add_outcome(by_sport, sport_key, rec_key, outcome_key, count)
-            _add_outcome(by_provider, provider_key, rec_key, outcome_key, count)
+            _add_outcome(
+                by_sport,
+                sport_key,
+                provider_key,
+                rec_key,
+                outcome_key,
+                str(grade_result_source or ""),
+                count,
+            )
+            _add_outcome(
+                by_provider,
+                provider_key,
+                provider_key,
+                rec_key,
+                outcome_key,
+                str(grade_result_source or ""),
+                count,
+            )
             _add_outcome(
                 by_sport_direction.setdefault(sport_key, {}),
                 rec_key,
+                provider_key,
                 rec_key,
                 outcome_key,
+                str(grade_result_source or ""),
                 count,
             )
 
@@ -2906,7 +3064,13 @@ class Database:
         ) in latest_clv.values():
             # CLV coverage is intentionally based on completed directional
             # results only; pending picks do not make the denominator larger.
-            if outcome not in {"HIT", "MISS", "PUSH"}:
+            if outcome not in _DIRECTIONAL_GRADE_RESULTS or not is_trusted_directional_grade_source(
+                provider,
+                outcome,
+                "propline_history"
+                if str(provider or "").casefold() in {"", "underdog"}
+                else "external",
+            ):
                 continue
             # PropOpportunityLog outcomes already reflect the recorded
             # recommendation; do not invert UNDER results a second time.
@@ -3828,9 +3992,8 @@ class Database:
             rows = await s.execute(
                 select(PropOpportunityLog)
                 .where(
+                    _trusted_directional_grade_filter(),
                     PropOpportunityLog.recommendation.in_(["OVER", "UNDER"]),
-                    PropOpportunityLog.result.notin_(["PENDING", ""]),
-                    PropOpportunityLog.result.isnot(None),
                 )
                 .order_by(PropOpportunityLog.detected_at.desc())
                 .limit(limit)
@@ -7225,6 +7388,17 @@ class Database:
                 except Exception:
                     pass
 
+    async def _migrate_prop_opportunity_log_v8(self) -> None:
+        """Persist the exact result-row source behind each terminal grade."""
+        async with self._engine.begin() as conn:
+            try:
+                await conn.execute(text(
+                    "ALTER TABLE prop_opportunity_log ADD COLUMN "
+                    "grade_result_source VARCHAR(64)"
+                ))
+            except Exception:
+                pass
+
     async def repair_underdog_opportunity_game_ids(self) -> int:
         """Repair blank opportunity event IDs from retained UD snapshots.
 
@@ -9069,6 +9243,7 @@ class Database:
         actual_value: float,
         error_type:   Optional[str] = None,
         void_reason:  Optional[str] = None,
+        grade_result_source: Optional[str] = None,
     ) -> None:
         """
         Set the outcome (and optional learning label) on a prop opportunity
@@ -9093,6 +9268,11 @@ class Database:
             "result":       result,
             "actual_value": actual_value,
             "graded_at":    datetime.utcnow(),
+            "grade_result_source": (
+                str(grade_result_source).strip()[:64]
+                if grade_result_source
+                else None
+            ),
         }
         if error_type is not None:
             values["error_type"] = error_type
@@ -9146,7 +9326,11 @@ class Database:
                         game_date=evidence_date,
                         opponent=opp_row.team or None,
                         actual_value=actual_value,
-                        source="graded_prop",
+                        source=(
+                            str(grade_result_source).strip()[:32]
+                            if grade_result_source
+                            else "graded_prop"
+                        ),
                         game_id=evidence_game_id,
                     ))
             await s.execute(
@@ -9216,7 +9400,10 @@ class Database:
                             "game_date": evidence_date,
                             "opponent": opp_row.team or None,
                             "actual_value": actual_value,
-                            "source": "graded_prop",
+                            "source": (
+                                str(item.get("grade_result_source") or "").strip()[:32]
+                                or "graded_prop"
+                            ),
                             "game_id": evidence_game_id,
                             "fetched_at": datetime.utcnow(),
                         }
@@ -9233,6 +9420,10 @@ class Database:
                         "_opportunity_id": int(opp_row.id),
                         "_result": outcome,
                         "_actual_value": actual_value,
+                        "_grade_result_source": (
+                            str(item.get("grade_result_source") or "").strip()[:64]
+                            or None
+                        ),
                         "_graded_at": _graded_at,
                         "_analyst_grade": _ai_grade,
                         "_analyst_graded_at": (
@@ -9276,6 +9467,7 @@ class Database:
                     .values(
                         result=_bindparam("_result"),
                         actual_value=_bindparam("_actual_value"),
+                        grade_result_source=_bindparam("_grade_result_source"),
                         graded_at=_bindparam("_graded_at"),
                         analyst_grade=_bindparam("_analyst_grade"),
                         analyst_graded_at=_bindparam("_analyst_graded_at"),
@@ -9368,23 +9560,39 @@ class Database:
 
             key = str(dimensions[group_by](row, payload))
             bucket = buckets.setdefault(
-                key, {"total": 0, "graded": 0, "hits": 0, "misses": 0, "pushes": 0}
+                key, {
+                    "total": 0,
+                    "graded": 0,
+                    "hits": 0,
+                    "misses": 0,
+                    "pushes": 0,
+                    "unverified": 0,
+                }
             )
             bucket["total"] = int(bucket["total"] or 0) + 1
             if row.analyst_grade in {"HIT", "MISS", "PUSH"}:
-                bucket["graded"] = int(bucket["graded"] or 0) + 1
-                name = {
-                    "HIT": "hits",
-                    "MISS": "misses",
-                    "PUSH": "pushes",
-                }[row.analyst_grade]
-                bucket[name] = int(bucket[name] or 0) + 1
+                if is_trusted_directional_grade_source(
+                    row.provider,
+                    row.result,
+                    row.grade_result_source,
+                ):
+                    bucket["graded"] = int(bucket["graded"] or 0) + 1
+                    name = {
+                        "HIT": "hits",
+                        "MISS": "misses",
+                        "PUSH": "pushes",
+                    }[row.analyst_grade]
+                    bucket[name] = int(bucket[name] or 0) + 1
+                else:
+                    bucket["unverified"] = int(bucket["unverified"] or 0) + 1
 
         for bucket in buckets.values():
             graded = int(bucket["graded"] or 0)
+            denominator = int(bucket["hits"] or 0) + int(bucket["misses"] or 0)
+            bucket["denominator"] = denominator
             bucket["hit_rate"] = (
-                round(int(bucket["hits"] or 0) / graded * 100, 2)
-                if graded else None
+                round(int(bucket["hits"] or 0) / denominator * 100, 2)
+                if denominator else None
             )
         return {"group_by": group_by, "buckets": buckets}
 
@@ -9630,6 +9838,7 @@ class Database:
                     PropOpportunityLog.external_id,
                     PropOpportunityLog.stat_type,
                     PropOpportunityLog.result,
+                    PropOpportunityLog.grade_result_source,
                 ).where(
                     PropOpportunityLog.recommendation.in_(("OVER", "UNDER")),
                 )
@@ -9641,15 +9850,19 @@ class Database:
                         str(external_id or ""), provider
                     ),
                     str(stat_type or "").strip(),
-                ): str(result or "PENDING").upper()
-                for provider, external_id, stat_type, result
+                ): (
+                    str(result or "PENDING").upper(),
+                    str(provider or "Underdog"),
+                    str(grade_result_source or ""),
+                )
+                for provider, external_id, stat_type, result, grade_result_source
                 in opportunity_rows.all()
             }
             buckets: dict = {}
             by_provider: dict = {}
             for audit in confirmed_audits:
                 source = str(audit.provider or "Underdog")
-                result_val = result_by_identity.get(
+                stored_result = result_by_identity.get(
                     (
                         source.strip().lower() or "underdog",
                         _stored_opportunity_external_id(
@@ -9657,8 +9870,19 @@ class Database:
                         ),
                         str(audit.stat_type or "").strip(),
                     ),
-                    "PENDING",
+                    None,
                 )
+                if stored_result is None:
+                    result_val = "PENDING"
+                else:
+                    result_val, grade_provider, grade_source = stored_result
+                    if (
+                        result_val in _TERMINAL_GRADE_RESULTS
+                        and not is_trusted_directional_grade_source(
+                            grade_provider, result_val, grade_source
+                        )
+                    ):
+                        result_val = "UNVERIFIED"
                 buckets[result_val] = buckets.get(result_val, 0) + 1
                 source_buckets = by_provider.setdefault(source, {})
                 source_buckets[result_val] = source_buckets.get(result_val, 0) + 1
@@ -9669,11 +9893,13 @@ class Database:
         _void_codes = {"VOID", "CANCELLED", "INJURY_VOID", "GAME_INTERRUPTED",
                        "UNRESOLVED", "OUTLIER", "PLATFORM_DIFF"}
         void = sum(n for k, n in buckets.items() if k in _void_codes)
+        unverified = buckets.get("UNVERIFIED", 0)
         pending = sum(n for k, n in buckets.items()
-                      if k not in ("HIT", "MISS", "PUSH") and k not in _void_codes)
+                      if k not in ("HIT", "MISS", "PUSH", "UNVERIFIED")
+                      and k not in _void_codes)
         graded  = hit + miss + push
         denominator = hit + miss
-        total   = graded + pending + void
+        total   = graded + pending + void + unverified
         hit_rate = round(hit / denominator * 100, 1) if denominator > 0 else 0.0
         def _provider_summary(source_buckets: dict) -> dict:
             source_hit = source_buckets.get("HIT", 0)
@@ -9681,18 +9907,23 @@ class Database:
             source_push = source_buckets.get("PUSH", 0)
             source_pending = sum(
                 n for k, n in source_buckets.items()
-                if k not in ("HIT", "MISS", "PUSH") and k not in _void_codes
+                if k not in ("HIT", "MISS", "PUSH", "UNVERIFIED")
+                and k not in _void_codes
             )
             source_void = sum(n for k, n in source_buckets.items() if k in _void_codes)
+            source_unverified = source_buckets.get("UNVERIFIED", 0)
             source_graded = source_hit + source_miss + source_push
             source_denominator = source_hit + source_miss
             return {
-                "total": source_graded + source_pending + source_void,
+                "total": (
+                    source_graded + source_pending + source_void + source_unverified
+                ),
                 "hit": source_hit,
                 "miss": source_miss,
                 "push": source_push,
                 "void": source_void,
                 "pending": source_pending,
+                "unverified": source_unverified,
                 "graded": source_graded,
                 "denominator": source_denominator,
                 "hit_rate": round(source_hit / source_denominator * 100, 1)
@@ -9706,6 +9937,7 @@ class Database:
             "push":     push,
             "void":     void,
             "pending":  pending,
+            "unverified": unverified,
             "graded":   graded,
             "denominator": denominator,
             "hit_rate": hit_rate,
@@ -9797,7 +10029,7 @@ class Database:
                     PropOpportunityLog.error_type,
                 ).where(
                     PropOpportunityLog.recommendation.in_(("OVER", "UNDER")),
-                    PropOpportunityLog.result.in_(("HIT", "MISS", "PUSH")),
+                    _trusted_directional_grade_filter(),
                 )
             )
             for provider, sport, market_type, result, error_type in rows.all():
@@ -9987,7 +10219,10 @@ class Database:
                 "hit_rate": row.hit_rate,
             }
 
-    async def get_learning_rollups(self) -> "dict":
+    async def get_learning_rollups(
+        self,
+        enabled_sports: Optional[Iterable[str]] = None,
+    ) -> "dict":
         """
         Return learning-focused performance rollups for the /rollups command.
 
@@ -10019,8 +10254,22 @@ class Database:
                 v["win_pct"] = round(v["W"] / t * 100, 1) if t else 0.0
             return acc
 
-        graded_filter = PropOpportunityLog.result.in_(["HIT", "MISS", "PUSH"])
+        graded_filter = _trusted_directional_grade_filter()
         play_filter   = PropOpportunityLog.recommendation.in_(["OVER", "UNDER"])
+        enabled_sport_keys = (
+            {
+                str(sport).strip().upper()
+                for sport in enabled_sports
+                if str(sport).strip()
+            }
+            if enabled_sports is not None
+            else None
+        )
+        sport_filter = (
+            [func.upper(PropOpportunityLog.sport).in_(enabled_sport_keys)]
+            if enabled_sport_keys is not None
+            else []
+        )
 
         async with self.session() as s:
             # ── by_tier ──────────────────────────────────────────────────────
@@ -10030,7 +10279,7 @@ class Database:
                     PropOpportunityLog.recommendation,
                     PropOpportunityLog.result,
                     func.count(PropOpportunityLog.id).label("n"),
-                ).where(graded_filter, play_filter).group_by(
+                ).where(graded_filter, play_filter, *sport_filter).group_by(
                     PropOpportunityLog.decision_tier,
                     PropOpportunityLog.recommendation,
                     PropOpportunityLog.result,
@@ -10045,7 +10294,7 @@ class Database:
                     PropOpportunityLog.recommendation,
                     PropOpportunityLog.result,
                     func.count(PropOpportunityLog.id).label("n"),
-                ).where(graded_filter, play_filter).group_by(
+                ).where(graded_filter, play_filter, *sport_filter).group_by(
                     PropOpportunityLog.sport,
                     PropOpportunityLog.recommendation,
                     PropOpportunityLog.result,
@@ -10060,7 +10309,7 @@ class Database:
                     PropOpportunityLog.recommendation,
                     PropOpportunityLog.result,
                     func.count(PropOpportunityLog.id).label("n"),
-                ).where(graded_filter, play_filter).group_by(
+                ).where(graded_filter, play_filter, *sport_filter).group_by(
                     PropOpportunityLog.stat_type,
                     PropOpportunityLog.recommendation,
                     PropOpportunityLog.result,
@@ -10078,9 +10327,11 @@ class Database:
                     PropOpportunityLog.error_type,
                     func.count(PropOpportunityLog.id).label("n"),
                 ).where(
+                    graded_filter,
                     PropOpportunityLog.result      == "MISS",
                     PropOpportunityLog.error_type.isnot(None),
                     play_filter,
+                    *sport_filter,
                 ).group_by(PropOpportunityLog.error_type)
             )
             by_error_type = {row.error_type: row.n for row in err_rows.all()}
@@ -10094,7 +10345,7 @@ class Database:
                     PropOpportunityLog.recommendation,
                     PropOpportunityLog.result,
                     func.count(PropOpportunityLog.id).label("n"),
-                ).where(graded_filter, play_filter).group_by(
+                ).where(graded_filter, play_filter, *sport_filter).group_by(
                     PropOpportunityLog.player_name,
                     PropOpportunityLog.sport,
                     PropOpportunityLog.stat_type,
@@ -10127,9 +10378,20 @@ class Database:
 
             # ── population counts ─────────────────────────────────────────────
             total_row = await s.execute(
-                select(func.count(PropOpportunityLog.id)).where(graded_filter, play_filter)
+                select(func.count(PropOpportunityLog.id)).where(
+                    graded_filter, play_filter, *sport_filter
+                )
             )
             total_graded = total_row.scalar() or 0
+            unverified_row = await s.execute(
+                select(func.count(PropOpportunityLog.id)).where(
+                    PropOpportunityLog.recommendation.in_(("OVER", "UNDER")),
+                    PropOpportunityLog.result.in_(tuple(_TERMINAL_GRADE_RESULTS)),
+                    ~_trusted_terminal_grade_filter(),
+                    *sport_filter,
+                )
+            )
+            unverified_graded = unverified_row.scalar() or 0
             confirmed_audits = await self._confirmed_telegram_play_audits(s)
             graded_identities = {
                 (
@@ -10145,7 +10407,7 @@ class Database:
                             PropOpportunityLog.external_id,
                             PropOpportunityLog.stat_type,
                             PropOpportunityLog.result,
-                        ).where(graded_filter, play_filter)
+                        ).where(graded_filter, play_filter, *sport_filter)
                     )
                 ).all()
             }
@@ -10167,7 +10429,7 @@ class Database:
                     func.avg(PropOpportunityLog.sharp_confidence),
                     func.avg(PropOpportunityLog.evidence_completeness),
                     func.count(PropOpportunityLog.sharp_confidence),
-                ).where(graded_filter, play_filter)
+                ).where(graded_filter, play_filter, *sport_filter)
             )
             _intel_n, _avg_sharp, _avg_evidence, _sharp_n = intel_row.one()
 
@@ -10179,6 +10441,7 @@ class Database:
             "by_error_type": by_error_type,
             "player_trend": player_trend,
             "total_graded": total_graded,
+            "unverified_graded": unverified_graded,
             # ``total_graded`` is intentionally delivery-independent so
             # historical evaluation data remains available.  These explicit
             # counters prevent it from being mistaken for Telegram PLAY data.
@@ -10352,9 +10615,7 @@ class Database:
             event_row = None
             if game_id:
                 for row in by_event.get((player_key, sport, stat, game_id), []):
-                    if is_underdog and not is_official_underdog_settlement_source(
-                        row.source
-                    ):
+                    if not is_gradeable_player_result_source(provider, row.source):
                         continue
                     event_row = row
                     break
@@ -10372,16 +10633,21 @@ class Database:
                     dated_rows = [
                         row
                         for row in dated_rows
-                        if is_official_underdog_settlement_source(row.source)
+                        if is_gradeable_player_result_source(provider, row.source)
                         and (
                             not game_id
                             or str(row.game_id or "") == game_id
                         )
                     ]
-                elif game_id and not provider:
+                else:
                     dated_rows = [
-                        row for row in dated_rows
-                        if str(row.game_id or "") == game_id
+                        row
+                        for row in dated_rows
+                        if is_gradeable_player_result_source(provider, row.source)
+                        and (
+                            not game_id
+                            or str(row.game_id or "") == game_id
+                        )
                     ]
                 if dated_rows:
                     resolved[opp_id] = (dated_rows[0], candidate_date)
@@ -10393,15 +10659,17 @@ class Database:
             if not components or not provider or is_underdog:
                 continue
             for candidate_date in candidate_dates:
-                component_rows = {
-                    component: by_date.get(
-                        (player_key, sport, component, candidate_date), []
-                    )[0]
-                    for component in components
-                    if by_date.get(
-                        (player_key, sport, component, candidate_date), []
-                    )
-                }
+                component_rows = {}
+                for component in components:
+                    eligible_components = [
+                        row
+                        for row in by_date.get(
+                            (player_key, sport, component, candidate_date), []
+                        )
+                        if is_gradeable_player_result_source(provider, row.source)
+                    ]
+                    if eligible_components:
+                        component_rows[component] = eligible_components[0]
                 if len(component_rows) != len(components):
                     continue
                 selected = [component_rows[component] for component in components]
@@ -10467,6 +10735,15 @@ class Database:
                     func.lower(PlayerGameResult.source).in_(
                         tuple(_UNDERDOG_SETTLEMENT_RESULT_SOURCES)
                     )
+                )
+            else:
+                filters.extend(
+                    [
+                        func.lower(PlayerGameResult.source) != "",
+                        func.lower(PlayerGameResult.source).notin_(
+                            tuple(_UNTRUSTED_PLAYER_RESULT_SOURCES)
+                        ),
+                    ]
                 )
             if game_date:
                 filters.append(PlayerGameResult.game_date == game_date)
@@ -10606,6 +10883,7 @@ class Database:
                     PropOpportunityLog.sport,
                     PropOpportunityLog.recommendation,
                     PropOpportunityLog.result,
+                    PropOpportunityLog.grade_result_source,
                     func.count(),
                 ).where(directional)
                 .group_by(
@@ -10613,17 +10891,20 @@ class Database:
                     PropOpportunityLog.sport,
                     PropOpportunityLog.recommendation,
                     PropOpportunityLog.result,
+                    PropOpportunityLog.grade_result_source,
                 )
             )
             total = 0
             pending = 0
             resolved = 0
+            unverified = 0
             delivered = 0
             provider_delivered: dict[str, int] = {}
             directional_by_provider: dict[str, int] = {}
             directional_by_sport: dict[str, int] = {}
             pending_by_provider: dict[str, int] = {}
             resolved_by_provider: dict[str, int] = {}
+            unverified_by_provider: dict[str, int] = {}
             result_counts: dict[str, int] = {}
             result_counts_by_provider: dict[str, dict[str, int]] = {}
             result_counts_by_sport: dict[str, dict[str, int]] = {}
@@ -10631,13 +10912,24 @@ class Database:
                 "HIT", "MISS", "PUSH", "VOID", "CANCELLED",
                 "INJURY_VOID", "GAME_INTERRUPTED",
             }
-            for provider, sport, rec, res, row_count in directional_rows.all():
+            for provider, sport, rec, res, grade_source, row_count in directional_rows.all():
                 if not _is_supported_tracking_sport(sport):
                     continue
                 row_count = int(row_count or 0)
                 provider_key = str(provider or "Underdog")
                 recommendation_key = str(rec or "").upper()
                 result_key = str(res or "PENDING").upper()
+                if (
+                    result_key in _TERMINAL_GRADE_RESULTS
+                    and not is_trusted_directional_grade_source(
+                        provider_key, result_key, grade_source
+                    )
+                ):
+                    result_key = "UNVERIFIED"
+                    unverified += row_count
+                    unverified_by_provider[provider_key] = (
+                        unverified_by_provider.get(provider_key, 0) + row_count
+                    )
                 counts.setdefault(recommendation_key, {})[result_key] = (
                     counts.setdefault(recommendation_key, {}).get(result_key, 0) + row_count
                 )
@@ -10816,6 +11108,8 @@ class Database:
             "historical_observations_by_provider": tracked_observations_by_provider,
             "observations_by_sport": observations_by_sport,
             "total":    total,
+            "unverified": unverified,
+            "unverified_by_provider": unverified_by_provider,
             "directional_total": total,
             "directional_by_provider": directional_by_provider,
             "directional_by_sport": directional_by_sport,
@@ -11237,7 +11531,11 @@ class Database:
         )
         return rows[:max(1, int(limit))]
 
-    async def get_pick_accuracy_by_sport(self, limit_sports: int = 10) -> list[dict]:
+    async def get_pick_accuracy_by_sport(
+        self,
+        limit_sports: int = 10,
+        enabled_sports: Optional[Iterable[str]] = None,
+    ) -> list[dict]:
         """
         Aggregate HIT/MISS counts per provider and sport from PropOpportunityLog.
 
@@ -11246,6 +11544,20 @@ class Database:
           [{"provider": str, "sport": str, "hits": int, "misses": int,
             "pushes": int, "total": int}]
         """
+        enabled_sport_keys = (
+            {
+                str(sport).strip().upper()
+                for sport in enabled_sports
+                if str(sport).strip()
+            }
+            if enabled_sports is not None
+            else None
+        )
+        sport_filter = (
+            [func.upper(PropOpportunityLog.sport).in_(enabled_sport_keys)]
+            if enabled_sport_keys is not None
+            else []
+        )
         async with self.session() as s:
             confirmed_audits = await self._confirmed_telegram_play_audits(s)
             opportunity_rows = await s.execute(
@@ -11256,9 +11568,10 @@ class Database:
                     PropOpportunityLog.stat_type,
                     PropOpportunityLog.result,
                 ).where(
-                    PropOpportunityLog.result.in_(("HIT", "MISS", "PUSH")),
+                    _trusted_directional_grade_filter(),
                     PropOpportunityLog.recommendation.in_(("OVER", "UNDER")),
                     PropOpportunityLog.alert_sent == True,  # noqa: E712
+                    *sport_filter,
                 )
             )
             result_by_identity = {

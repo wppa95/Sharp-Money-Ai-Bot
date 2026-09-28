@@ -34,7 +34,11 @@ from alerts import (
     is_telegram_suppressed_sport,
 )
 from config import config
-from database import Database, is_official_underdog_settlement_source
+from database import (
+    Database,
+    is_gradeable_player_result_source,
+    is_official_underdog_settlement_source,
+)
 from engine import AnalysisEngine
 from engine.strongest_pick import (
     is_strong_actionable_pick,
@@ -821,7 +825,7 @@ async def cmd_rollups(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             return
 
         rollups_raw, tg_perf_raw = await _independent_report_reads([
-            db.get_learning_rollups(),
+            db.get_learning_rollups(enabled_sports=config.active_sports),
             db.get_telegram_pick_performance(),
         ])
         rollups_available = isinstance(rollups_raw, dict)
@@ -856,11 +860,20 @@ async def cmd_rollups(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             tg_hr   = tg_perf["hit_rate"]
             tg_lines.append(f"  Total: <b>{tg_total}</b>")
             tg_lines.append(f"  ✅ Hits: {tg_h}   ❌ Misses: {tg_m}   🟡 Pushes: {tg_p}   🚫 Void/other: {tg_v}   ⏳ Pending: {tg_pend}")
-            if tg_perf["graded"] > 0:
+            tg_unverified = int(tg_perf.get("unverified", 0) or 0)
+            if tg_unverified:
+                tg_lines.append(
+                    f"  Unverified results: {tg_unverified} "
+                    "(excluded from hit rate)"
+                )
+            tg_denominator = int(tg_perf.get("denominator", 0) or 0)
+            if tg_denominator > 0:
                 tg_lines.append(
                     f"  Hit Rate: <b>{tg_hr}%</b> "
-                    f"(HIT / (HIT + MISS), n={tg_perf.get('denominator', tg_h + tg_m)})"
+                    f"(HIT / (HIT + MISS), n={tg_denominator})"
                 )
+            elif tg_perf["graded"] > 0:
+                tg_lines.append("  Hit Rate: — (no HIT/MISS; pushes are excluded)")
             for source, source_perf in sorted(tg_perf.get("by_provider", {}).items()):
                 if str(source).strip().lower() != "underdog":
                     continue
@@ -868,7 +881,8 @@ async def cmd_rollups(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
                     f"  <b>{_html.escape(source)}:</b> "
                     f"{source_perf['hit']}H-{source_perf['miss']}M-"
                     f"{source_perf['push']}P · {source_perf.get('void', 0)} void · "
-                    f"{source_perf['pending']} pending"
+                    f"{source_perf['pending']} pending · "
+                    f"{source_perf.get('unverified', 0)} unverified"
                 )
         tg_lines.append("")
         if not rollups_available:
@@ -910,17 +924,18 @@ async def cmd_rollups(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
                 "",
             ])
 
-        if total == 0:
+        if total == 0 and int(rollups.get("unverified_graded", 0) or 0) == 0:
             tg_lines.append("<i>No overall graded plays yet — results are graded after game_time passes.</i>")
             await update.message.reply_text("\n".join(tg_lines), parse_mode=ParseMode.HTML)
             return
 
         def _result_row(k: str, v: dict) -> str:
             w, l, p = v.get("W", 0), v.get("L", 0), v.get("P", 0)
-            pct = v.get("win_pct", 0.0)
+            denominator = int(v.get("denominator", w + l) or 0)
+            pct = f"{v.get('win_pct', 0.0):.1f}%" if denominator else "—"
             return (
                 f"  <b>{k}:</b>  {w}W-{l}L-{p}P  "
-                f"({pct:.1f}%, n={v.get('denominator', w + l)})"
+                f"({pct}, n={denominator})"
             )
 
         # Extend the Telegram-picks header block with the overall grading section.
@@ -928,7 +943,9 @@ async def cmd_rollups(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             "<b>All Directional Grading</b>",
             "",
             f"Total graded directional evaluations: <b>{total}</b>",
-            "<i>This includes historical/legacy evaluations, whether or not they were sent to Telegram.</i>",
+            f"Unverified terminal outcomes excluded: "
+            f"<b>{int(rollups.get('unverified_graded', 0) or 0)}</b>",
+            "<i>Hit rates and learning use only source-verified completed results.</i>",
             f"Current delivered PLAYs graded: <b>{rollups.get('telegram_graded', 0)}</b>",
             f"Historical/legacy graded evaluations: <b>{rollups.get('historical_legacy_graded', 0)}</b>",
             "",
@@ -1446,7 +1463,9 @@ async def _send_performance_by_sport(
     """Render delivery-independent directional performance by sport."""
     await update.message.reply_text("⏳ Loading performance…")
     summary = await _report_read(
-        db.get_directional_performance_summary(),
+        db.get_directional_performance_summary(
+            enabled_sports=config.active_sports
+        ),
         fallback=None,
         timeout=_COMMAND_TIMEOUT_SECONDS,
     )
@@ -1477,7 +1496,13 @@ async def _send_performance_by_sport(
             valid = hit + miss
             rate = f"{hit / valid * 100:.0f}%" if valid else "—"
             void = int(row.get("void", 0) or 0)
-            extra = f" · {void} void/other" if void else ""
+            unverified = int(row.get("unverified", 0) or 0)
+            extra_parts = []
+            if void:
+                extra_parts.append(f"{void} void/other")
+            if unverified:
+                extra_parts.append(f"{unverified} unverified")
+            extra = f" · {' · '.join(extra_parts)}" if extra_parts else ""
             clv_count = int(row.get("clv_count", 0) or 0)
             clv_coverage = row.get("clv_coverage_pct")
             clv_coverage_text = (
@@ -1510,6 +1535,9 @@ async def _send_performance_by_sport(
                 direction_miss = int(direction_row.get("miss", 0) or 0)
                 direction_push = int(direction_row.get("push", 0) or 0)
                 direction_pending = int(direction_row.get("pending", 0) or 0)
+                direction_unverified = int(
+                    direction_row.get("unverified", 0) or 0
+                )
                 direction_valid = direction_hit + direction_miss
                 direction_rate = (
                     f"{direction_hit / direction_valid * 100:.0f}%"
@@ -1518,12 +1546,13 @@ async def _send_performance_by_sport(
                 lines.append(
                     f"  {direction}: {direction_hit}W-{direction_miss}L-"
                     f"{direction_push}P · {direction_pending} pending · "
+                    f"{direction_unverified} unverified · "
                     f"{direction_rate}"
                 )
     lines += [
         "",
-        "<i>HIT/MISS/PUSH use valid completed-game results only. "
-        "Pending and unknown outcomes are excluded from the denominator.</i>",
+        "<i>Only source-verified outcomes count. Hit rate is HIT/(HIT+MISS); "
+        "pushes, pending, and unverified results are excluded.</i>",
     ]
     await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML)
 
@@ -3667,7 +3696,9 @@ async def _cmd_grade_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     Mapped to display:  HIT→W  MISS→L  PUSH/REFUND→P
     """
     summary = await _report_read(
-        _db.get_directional_performance_summary(),
+        _db.get_directional_performance_summary(
+            enabled_sports=config.active_sports
+        ),
         fallback=None,
         timeout=_COMMAND_TIMEOUT_SECONDS * _AGGREGATE_REPORT_TIMEOUT_MULTIPLIER,
     )
@@ -3687,48 +3718,44 @@ async def _cmd_grade_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     overall_w = sum(int(row.get("hit", 0) or 0) for row in by_sport.values())
     overall_l = sum(int(row.get("miss", 0) or 0) for row in by_sport.values())
     overall_p = sum(int(row.get("push", 0) or 0) for row in by_sport.values())
-    overall_res = overall_w + overall_l + overall_p
+    unverified_count = sum(
+        int(row.get("unverified", 0) or 0) for row in by_sport.values()
+    )
+    denominator = overall_w + overall_l
+    overall_rate = f"{overall_w / denominator * 100:.0f}%" if denominator else "—"
 
     lines: list[str] = ["📊 <b>Sharp Money Pick Grades</b>", ""]
 
-    if resolved_count == 0:
-        lines += [
-            "No resolved picks yet.",
-            "<i>Results update automatically when games finish.</i>",
-            "",
-            "─ <b>Current snapshot</b> ─",
-            f"  Stored picks:  <b>{total_all}</b>",
-            f"  Pending:       <b>{pending_count}</b>",
-            f"  Resolved:      <b>0</b>",
-            "",
-            "<i>Use /picks to see active picks.</i>",
-        ]
-        await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML)
-        return
-
-    overall_hit = overall_w / overall_res * 100 if overall_res > 0 else 0.0
-
     lines += [
         "─ <b>Overall</b> " + "─" * 21,
-        f"  <b>{overall_res}</b> resolved  "
+        f"  Stored directional picks: <b>{total_all}</b>",
+        f"  <b>{resolved_count}</b> verified outcomes  "
         f"W:{overall_w}  L:{overall_l}  P:{overall_p}  "
-        f"→ <code>{overall_hit:.0f}%</code> hit",
-        "",
-        f"<i>{pending_count} picks still PENDING · results set when games finish.</i>",
-        "<i>Only valid completed-game outcomes count in W/L/P; "
-        "delivery is not required for grading.</i>",
+        f"→ hit rate <code>{overall_rate}</code> "
+        f"(HIT/(HIT+MISS), n={denominator})",
+        f"  Pending: <b>{pending_count}</b> · "
+        f"Unverified: <b>{unverified_count}</b> (excluded from hit rate)",
+        "<i>Only source-verified completed-game outcomes count. "
+        "Pushes are excluded from the hit-rate denominator.</i>",
     ]
     if by_provider:
         lines += ["", "─ <b>By Provider</b> " + "─" * 15]
         for provider, row in sorted(by_provider.items()):
-            if str(provider).strip().lower() != "underdog":
-                continue
+            provider_hit = int(row.get("hit", 0) or 0)
+            provider_miss = int(row.get("miss", 0) or 0)
+            provider_denom = provider_hit + provider_miss
+            provider_rate = (
+                f"{provider_hit / provider_denom * 100:.0f}%"
+                if provider_denom else "—"
+            )
             lines.append(
                 f"  {_html.escape(str(provider))}: "
-                f"{int(row.get('hit', 0) or 0)}H / "
-                f"{int(row.get('miss', 0) or 0)}M / "
+                f"{provider_hit}H / "
+                f"{provider_miss}M / "
                 f"{int(row.get('push', 0) or 0)}P · "
-                f"{int(row.get('pending', 0) or 0)} pending"
+                f"{int(row.get('pending', 0) or 0)} pending · "
+                f"{int(row.get('unverified', 0) or 0)} unverified · "
+                f"{provider_rate} (n={provider_denom})"
             )
     if by_sport:
         lines += ["", "─ <b>By Sport</b> " + "─" * 18]
@@ -3741,7 +3768,9 @@ async def _cmd_grade_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
                 f"{int(row.get('hit', 0) or 0)}H/"
                 f"{int(row.get('miss', 0) or 0)}M/"
                 f"{int(row.get('push', 0) or 0)}P · "
-                f"{int(row.get('pending', 0) or 0)} pending · {rate}"
+                f"{int(row.get('pending', 0) or 0)} pending · "
+                f"{int(row.get('unverified', 0) or 0)} unverified · "
+                f"{rate} (n={graded})"
             )
 
 
@@ -3901,9 +3930,17 @@ async def _cmd_backfill_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
             )
             if (
                 result_row is not None
-                and _is_underdog_opportunity(opp)
-                and not _is_valid_underdog_settlement(
-                    opp, result_row, game_date
+                and (
+                    not is_gradeable_player_result_source(
+                        getattr(opp, "provider", None) or "Underdog",
+                        getattr(result_row, "source", ""),
+                    )
+                    or (
+                        _is_underdog_opportunity(opp)
+                        and not _is_valid_underdog_settlement(
+                            opp, result_row, game_date
+                        )
+                    )
                 )
             ):
                 result_row = None
@@ -3919,9 +3956,17 @@ async def _cmd_backfill_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
                 )
                 if (
                     result_row is not None
-                    and _is_underdog_opportunity(opp)
-                    and not _is_valid_underdog_settlement(
-                        opp, result_row, game_date
+                    and (
+                        not is_gradeable_player_result_source(
+                            getattr(opp, "provider", None) or "Underdog",
+                            getattr(result_row, "source", ""),
+                        )
+                        or (
+                            _is_underdog_opportunity(opp)
+                            and not _is_valid_underdog_settlement(
+                                opp, result_row, game_date
+                            )
+                        )
                     )
                 ):
                     result_row = None
@@ -3951,10 +3996,22 @@ async def _cmd_backfill_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
                     actual_value=actual,
                     line_value=opp.line_value,
                 )
-            await _db.grade_opportunity(opp.id, outcome, actual, error_type=error_type)
+            await _db.grade_opportunity(
+                opp.id,
+                outcome,
+                actual,
+                error_type=error_type,
+                grade_result_source=getattr(result_row, "source", None),
+            )
             graded += 1
 
-        hit_rate = f"{hits / graded * 100:.0f}%" if graded else "N/A"
+        _hit_rate_denominator = hits + misses
+        hit_rate = (
+            f"{hits / _hit_rate_denominator * 100:.0f}% "
+            f"(n={_hit_rate_denominator})"
+            if _hit_rate_denominator
+            else "N/A"
+        )
         lines_out = [
             "📊 <b>Backfill Complete</b>",
             "",
@@ -4576,7 +4633,13 @@ async def cmd_tracking(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         play_push    += _n(counts, rec, "PUSH")
         play_pending += _n(counts, rec, "PENDING")
     play_graded = play_hit + play_miss + play_push
-    play_total  = play_graded + play_pending
+    play_unverified = sum(_n(counts, rec, "UNVERIFIED") for rec in play_recs)
+    play_void = sum(
+        _n(counts, rec, result)
+        for rec in play_recs
+        for result in ("VOID", "CANCELLED", "INJURY_VOID", "GAME_INTERRUPTED")
+    )
+    play_total = play_graded + play_pending + play_unverified + play_void
 
     # Stored HIT/MISS already reflect whether the recorded direction won.
     under_hit_correct  = _n(counts, "UNDER", "HIT")
@@ -4589,6 +4652,11 @@ async def cmd_tracking(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         f"  Total picks:   <code>{play_total}</code>",
         f"  Graded:        <code>{play_graded}</code>",
     ]
+    if play_unverified:
+        lines.append(
+            f"  Unverified:    <code>{play_unverified}</code> "
+            "<i>(excluded from hit rates)</i>"
+        )
     if play_graded > 0:
         lines += [
             f"  Correct picks: <code>{play_correct}</code>  "
@@ -4599,14 +4667,14 @@ async def cmd_tracking(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         if _n(counts, "OVER", "HIT") or _n(counts, "OVER", "MISS"):
             o_hit  = _n(counts, "OVER", "HIT")
             o_miss = _n(counts, "OVER", "MISS")
-            o_tot  = o_hit + o_miss + _n(counts, "OVER", "PUSH")
+            o_tot  = o_hit + o_miss
             lines.append(
                 f"  <i>OVER  picks: {o_hit}/{o_tot} ({_hit_rate(o_hit, o_tot)})</i>"
             )
         if _n(counts, "UNDER", "HIT") or _n(counts, "UNDER", "MISS"):
             u_hit  = _n(counts, "UNDER", "HIT")
             u_miss = _n(counts, "UNDER", "MISS")
-            u_tot  = u_hit + u_miss + _n(counts, "UNDER", "PUSH")
+            u_tot  = u_hit + u_miss
             lines.append(
                 f"  <i>UNDER picks: {u_hit}/{u_tot} ({_hit_rate(u_hit, u_tot)})</i>"
             )
@@ -5745,7 +5813,10 @@ async def cmd_slipstats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     try:
         slip_stats, sport_rows = await _independent_report_reads([
             _db.get_slip_journal_stats(),
-            _db.get_pick_accuracy_by_sport(limit_sports=10),
+            _db.get_pick_accuracy_by_sport(
+                limit_sports=10,
+                enabled_sports=config.active_sports,
+            ),
         ])
         slip_stats = slip_stats if isinstance(slip_stats, dict) else None
         sport_rows = sport_rows if isinstance(sport_rows, list) else None

@@ -162,7 +162,9 @@ async def test_prediction_persists_and_grades_for_supported_sports(
 
     # The stored result reflects the original UNDER recommendation, so a MISS
     # means this UNDER analyst call lost.
-    await db.grade_opportunity(row_id, "MISS", 12.0)
+    await db.grade_opportunity(
+        row_id, "MISS", 12.0, grade_result_source="propline_history"
+    )
     report = await db.get_analyst_performance(
         group_by="sport", sport=sport, direction="UNDER"
     )

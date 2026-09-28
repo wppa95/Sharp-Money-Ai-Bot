@@ -1119,7 +1119,10 @@ class DashboardEngine:
         """Gather learning and intelligence metrics for the IntelligencePanel."""
         try:
             from sqlalchemy import select, func
-            from database import PropOpportunityLog
+            from database import (
+                PropOpportunityLog,
+                _trusted_directional_grade_filter,
+            )
 
             ip = IntelligencePanel()
 
@@ -1131,7 +1134,7 @@ class DashboardEngine:
                         func.count(),
                     )
                     .where(
-                        PropOpportunityLog.result.in_(["HIT", "MISS", "PUSH"]),
+                        _trusted_directional_grade_filter(),
                         PropOpportunityLog.recommendation.in_(["OVER", "UNDER"]),
                     )
                     .group_by(PropOpportunityLog.result)
@@ -1150,6 +1153,7 @@ class DashboardEngine:
                 err_res = await s.execute(
                     select(PropOpportunityLog.error_type, func.count())
                     .where(
+                        _trusted_directional_grade_filter(),
                         PropOpportunityLog.error_type.isnot(None),
                         PropOpportunityLog.result == "MISS",
                         PropOpportunityLog.recommendation.in_(["OVER", "UNDER"]),
@@ -1177,6 +1181,7 @@ class DashboardEngine:
                         func.count(),
                     )
                     .where(
+                        _trusted_directional_grade_filter(),
                         PropOpportunityLog.result.in_(["HIT", "MISS"]),
                         PropOpportunityLog.recommendation.in_(["OVER", "UNDER"]),
                     )
@@ -1209,7 +1214,7 @@ class DashboardEngine:
                         PropOpportunityLog.result,
                         func.count(),
                     )
-                    .where(PropOpportunityLog.result.in_(["HIT", "MISS", "PUSH"]))
+                    .where(_trusted_directional_grade_filter())
                     .where(PropOpportunityLog.recommendation.in_(["OVER", "UNDER"]))
                     .group_by(
                         PropOpportunityLog.provider,

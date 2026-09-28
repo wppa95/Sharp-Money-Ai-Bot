@@ -539,7 +539,12 @@ class TestGetTrackingSummary:
             pending = await db.get_pending_opportunities(cutoff_hours=4)
             target = next((r for r in pending if r.external_id == ext), None)
             if target:
-                await db.grade_opportunity(target.id, result, 1.0 if result == "HIT" else 0.0)
+                await db.grade_opportunity(
+                    target.id,
+                    result,
+                    1.0 if result == "HIT" else 0.0,
+                    grade_result_source="propline_history",
+                )
 
         summary = await db.get_tracking_summary()
         counts = summary["counts"]

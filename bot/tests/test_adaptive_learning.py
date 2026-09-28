@@ -97,6 +97,7 @@ async def test_adaptive_rebuild_is_provider_sport_market_scoped_and_audited(db):
                 confidence=80,
                 provider="DraftKings",
                 result="HIT" if index < 25 else "MISS",
+                grade_result_source="external_player_stats",
                 error_type=None if index < 25 else "Model",
             )
         )

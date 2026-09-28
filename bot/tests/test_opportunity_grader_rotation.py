@@ -77,7 +77,10 @@ async def test_grader_deduplicates_provider_fetches_and_grades_directions():
     db.get_pending_opportunities = AsyncMock(return_value=[first, duplicate, under])
     db.upsert_player_result = AsyncMock()
     async def get_result(player, sport, stat, game_date, **kwargs):
-        return SimpleNamespace(actual_value=11.0 if player == "Player One" else 9.0)
+        return SimpleNamespace(
+            actual_value=11.0 if player == "Player One" else 9.0,
+            source="player_stats",
+        )
 
     db.get_game_result_for_grading = AsyncMock(side_effect=get_result)
     db.grade_opportunity = AsyncMock()
@@ -127,7 +130,7 @@ async def test_grader_reconciles_utc_event_to_provider_previous_calendar_date():
     async def get_result(player, sport, stat, game_date, **kwargs):
         lookup_dates.append(game_date)
         if game_date == "2026-09-04":
-            return SimpleNamespace(actual_value=11.0)
+            return SimpleNamespace(actual_value=11.0, source="player_stats")
         return None
 
     db.get_game_result_for_grading = AsyncMock(side_effect=get_result)
@@ -162,7 +165,7 @@ async def test_grader_reconciles_old_event_identity_without_game_time():
     async def get_result(player, sport, stat, game_date, **kwargs):
         assert game_date is None
         assert kwargs["game_id"] == "propline-event-22"
-        return SimpleNamespace(actual_value=11.0)
+        return SimpleNamespace(actual_value=11.0, source="player_stats")
 
     db.get_game_result_for_grading = AsyncMock(side_effect=get_result)
     provider = MagicMock()
@@ -174,7 +177,13 @@ async def test_grader_reconciles_old_event_identity_without_game_time():
     ):
         await main._grade_opportunities_job(_context(db))
 
-    db.grade_opportunity.assert_awaited_once_with(22, "HIT", 11.0, error_type=None)
+    db.grade_opportunity.assert_awaited_once_with(
+        22,
+        "HIT",
+        11.0,
+        error_type=None,
+        grade_result_source="player_stats",
+    )
     assert health.cursor == 22
     assert health.failures == []
 
@@ -187,7 +196,11 @@ async def test_grader_uses_database_observation_date_when_event_time_is_missing(
     row.detected_at = datetime(2026, 9, 5, 18, 0)
     row.game_id = "underdog-event-23"
 
-    stored = SimpleNamespace(game_date="2026-09-05", game_id="official-23")
+    stored = SimpleNamespace(
+        game_date="2026-09-05",
+        game_id="official-23",
+        source="player_stats",
+    )
     db = MagicMock()
     db.get_pending_opportunities = AsyncMock(return_value=[row])
     db.get_player_results_bulk = AsyncMock(
@@ -197,7 +210,7 @@ async def test_grader_uses_database_observation_date_when_event_time_is_missing(
     )
     db.get_game_result_for_grading = AsyncMock(
         side_effect=lambda player, sport, stat, game_date, **kwargs: (
-            SimpleNamespace(actual_value=11.0)
+            SimpleNamespace(actual_value=11.0, source="player_stats")
             if game_date == "2026-09-05"
             else None
         )
@@ -215,7 +228,11 @@ async def test_grader_uses_database_observation_date_when_event_time_is_missing(
 
     assert db.get_game_result_for_grading.await_args.args[3] == "2026-09-05"
     db.grade_opportunity.assert_awaited_once_with(
-        23, "HIT", 11.0, error_type=None
+        23,
+        "HIT",
+        11.0,
+        error_type=None,
+        grade_result_source="player_stats",
     )
     provider.fetch_results.assert_not_awaited()
 
@@ -325,7 +342,13 @@ async def test_grader_uses_explicit_propline_settlement_before_writing_grade():
     propline_provider.fetch_resolved_results.assert_not_awaited()
     db.upsert_player_results_bulk.assert_awaited_once_with([propline_result])
     db.grade_opportunities_bulk.assert_awaited_once_with(
-        [{"id": 31, "result": "MISS", "actual_value": 8.0, "error_type": "Market"}]
+        [{
+            "id": 31,
+            "result": "MISS",
+            "actual_value": 8.0,
+            "error_type": "Market",
+            "grade_result_source": "propline_history",
+        }]
     )
     stats_provider.fetch_results.assert_not_awaited()
 
@@ -458,6 +481,7 @@ async def test_grader_closes_explicit_propline_void_without_numeric_history():
                 "actual_value": 0.0,
                 "error_type": None,
                 "void_reason": "PropLine VOID",
+                    "grade_result_source": "propline_event_results_void",
             }
         ]
     )
@@ -540,7 +564,7 @@ async def test_grader_settles_neutral_tracking_rows_without_directional_attribut
     db.get_pending_opportunities = AsyncMock(return_value=[])
     db.get_pending_tracked_props = AsyncMock(return_value=[tracked])
     db.get_game_result_for_grading = AsyncMock(
-        return_value=SimpleNamespace(actual_value=11.0)
+        return_value=SimpleNamespace(actual_value=11.0, source="player_stats")
     )
     db.grade_tracked_prop = AsyncMock()
     health = _Health()

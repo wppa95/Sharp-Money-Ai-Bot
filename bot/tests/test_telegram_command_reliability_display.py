@@ -778,7 +778,7 @@ async def test_tracking_waits_through_extended_history_read_window():
     update, context = _update_and_context()
     db = MagicMock()
 
-    async def delayed_summary():
+    async def delayed_summary(*args, **kwargs):
         await asyncio.sleep(0.03)
         return {
             "counts": {},
@@ -878,7 +878,7 @@ async def test_grade_waits_through_extended_history_read_window():
     update, context = _update_and_context()
     db = MagicMock()
 
-    async def delayed_summary():
+    async def delayed_summary(*args, **kwargs):
         await asyncio.sleep(0.03)
         return {"by_sport": {}, "by_provider": {}}
 
@@ -892,7 +892,7 @@ async def test_grade_waits_through_extended_history_read_window():
 
     message = update.message.reply_text.await_args.args[0]
     assert "Grade data is UNAVAILABLE" not in message
-    assert "No resolved picks yet." in message
+    assert "Stored directional picks:" in message
 
 
 @pytest.mark.asyncio

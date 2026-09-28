@@ -327,7 +327,12 @@ class TestTelegramOnlyPerformance:
             ("tg_push", "PUSH", 0.5),
         ]:
             row = await _fetch_opp(db, ext_id, "hits")
-            await db.grade_opportunity(row.id, result=result, actual_value=actual)
+            await db.grade_opportunity(
+                row.id,
+                result=result,
+                actual_value=actual,
+                grade_result_source="propline_history",
+            )
 
         perf = await db.get_telegram_pick_performance()
         assert perf["total"]   == 4     # 4 alerted (tg_hit + tg_miss + tg_push + tg_pend)
@@ -347,7 +352,12 @@ class TestTelegramOnlyPerformance:
                            recommendation=rec)
             await _confirm_telegram_play(db, ext_id)
             row = await _fetch_opp(db, ext_id, "hits")
-            await db.grade_opportunity(row.id, result=result, actual_value=actual)
+            await db.grade_opportunity(
+                row.id,
+                result=result,
+                actual_value=actual,
+                grade_result_source="propline_history",
+            )
 
         perf = await db.get_telegram_pick_performance()
         assert perf["hit_rate"] == 75.0

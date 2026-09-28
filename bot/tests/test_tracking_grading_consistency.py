@@ -69,8 +69,12 @@ async def test_directional_tracking_and_grading_do_not_require_delivery(db):
     assert await db.count_directional_opportunity_records() == 2
     assert await db.count_actionable_pick_records() == 0
 
-    await db.grade_opportunity(undelivered_id, "HIT", 25.0)
-    await db.grade_opportunity(prizepicks_id, "HIT", 18.0)
+    await db.grade_opportunity(
+        undelivered_id, "HIT", 25.0, grade_result_source="propline_history"
+    )
+    await db.grade_opportunity(
+        prizepicks_id, "HIT", 18.0, grade_result_source="external_player_stats"
+    )
     resolved = await db.get_resolved_tracked_opportunities(limit=10)
 
     assert {row.external_id for row in resolved} == {"ud-1", "pp-1"}
@@ -85,8 +89,12 @@ async def test_resolved_tracked_opportunity_is_not_duplicated_as_evidence(db):
         await session.commit()
         row_id = row.id
 
-    await db.grade_opportunity(row_id, "HIT", 25.0)
-    await db.grade_opportunity(row_id, "HIT", 25.0)
+    await db.grade_opportunity(
+        row_id, "HIT", 25.0, grade_result_source="propline_history"
+    )
+    await db.grade_opportunity(
+        row_id, "HIT", 25.0, grade_result_source="propline_history"
+    )
 
     async with db.session() as session:
         results = await session.execute(
