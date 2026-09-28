@@ -160,6 +160,34 @@ def test_underdog_keeps_football_for_snapshot_creation():
     }
 
 
+def test_underdog_unfiltered_connector_keeps_all_provider_sports():
+    sports = [
+        "MLB",
+        "NBA",
+        "WNBA",
+        "NHL",
+        "NFL",
+        "CFB",
+        "SOCCER",
+        "TENNIS",
+        "CS",
+        "DOTA",
+        "RUGBY",
+    ]
+    connector = UnderdogConnector(active_sports=None)
+    connector._fetch_projections = AsyncMock(
+        return_value=[
+            _projection(f"feed-{sport.lower()}", sport)
+            for sport in sports
+        ]
+    )
+
+    snapshots = asyncio.run(connector.fetch())
+
+    assert {snapshot.sport for snapshot in snapshots} == set(sports)
+    assert connector._active_sports == set()
+
+
 def test_underdog_emits_removal_for_stale_football_state():
     connector = UnderdogConnector()
     nfl = _projection("nfl-1", "NFL")

@@ -861,7 +861,9 @@ async def post_init(application: Application) -> None:
     # ── Multi-platform connector registry ─────────────────────────────────────
     registry = ConnectorRegistry()
     registry.register(UnderdogConnector(
-        # active_sports=None: accept every sport the Underdog API returns.
+        # Do not pass config.active_sports here: it is not the Underdog feed
+        # scope. Accept every sport returned by the current provider payload.
+        active_sports=None,
         # Underdog only lists currently-active props, so out-of-season sports
         # (NFL, NBA) simply don't appear — no explicit blocklist is needed.
         # This gives us MLB, WNBA, Soccer, Tennis, and any other live markets
