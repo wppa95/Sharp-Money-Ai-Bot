@@ -154,3 +154,4 @@
 - [Evidence-only delivery ranking](evidence-only-delivery-ranking.md) — order picks by settled directional hit-rate evidence and sample support; never use confidence or quality labels.
 - [Underdog grading source](underdog-grading-source.md) — official Underdog settlements are required for native grading; never infer outcomes from projected lines or line removals.
 - [Completed-game source boundaries](completed-game-source-boundaries.md) — verify provider fields and confirmed status; current TT/badminton docs establish match/set results, not detailed player stats.
+- [Validated Replit config edits](replit-config-editing.md) — update `.replit` through validated full-file replacement; direct edits are rejected.

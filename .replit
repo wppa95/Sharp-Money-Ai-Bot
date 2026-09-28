@@ -1,3 +1,9 @@
+hidden = [
+  "bot/data/sharp_money.db",
+  "bot/data/sharp_money.db-wal",
+  "bot/data/sharp_money.db-shm",
+]
+
 modules = ["nodejs-24", "python-3.11", "postgresql-16"]
 
 [deployment]
