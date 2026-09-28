@@ -3129,18 +3129,18 @@ class Database:
                     if (row["hit"] + row["miss"] + row["push"])
                     else None
                 )
-        # One performance contract for every consumer: pushes are displayed
-        # separately and excluded from the HIT/(HIT+MISS) denominator.
+        # One performance contract for every consumer: HIT, MISS, and PUSH all
+        # contribute to the outcome denominator.
         for target in (by_sport, by_provider):
             for row in target.values():
-                row["denominator"] = row["hit"] + row["miss"]
+                row["denominator"] = row["hit"] + row["miss"] + row["push"]
                 row["hit_rate"] = (
                     round(row["hit"] / row["denominator"] * 100, 1)
                     if row["denominator"] else 0.0
                 )
         for direction_rows in by_sport_direction.values():
             for row in direction_rows.values():
-                row["denominator"] = row["hit"] + row["miss"]
+                row["denominator"] = row["hit"] + row["miss"] + row["push"]
                 row["hit_rate"] = (
                     round(row["hit"] / row["denominator"] * 100, 1)
                     if row["denominator"] else 0.0
@@ -9587,8 +9587,7 @@ class Database:
                     bucket["unverified"] = int(bucket["unverified"] or 0) + 1
 
         for bucket in buckets.values():
-            graded = int(bucket["graded"] or 0)
-            denominator = int(bucket["hits"] or 0) + int(bucket["misses"] or 0)
+            denominator = int(bucket["graded"] or 0)
             bucket["denominator"] = denominator
             bucket["hit_rate"] = (
                 round(int(bucket["hits"] or 0) / denominator * 100, 2)
@@ -9898,7 +9897,7 @@ class Database:
                       if k not in ("HIT", "MISS", "PUSH", "UNVERIFIED")
                       and k not in _void_codes)
         graded  = hit + miss + push
-        denominator = hit + miss
+        denominator = graded
         total   = graded + pending + void + unverified
         hit_rate = round(hit / denominator * 100, 1) if denominator > 0 else 0.0
         def _provider_summary(source_buckets: dict) -> dict:
@@ -9913,7 +9912,7 @@ class Database:
             source_void = sum(n for k, n in source_buckets.items() if k in _void_codes)
             source_unverified = source_buckets.get("UNVERIFIED", 0)
             source_graded = source_hit + source_miss + source_push
-            source_denominator = source_hit + source_miss
+            source_denominator = source_graded
             return {
                 "total": (
                     source_graded + source_pending + source_void + source_unverified
@@ -10249,7 +10248,7 @@ class Database:
                     elif res == "MISS": entry["L"] += n
                     else:              entry["P"] += n
             for v in acc.values():
-                t = v["W"] + v["L"]
+                t = v["total"]
                 v["denominator"] = t
                 v["win_pct"] = round(v["W"] / t * 100, 1) if t else 0.0
             return acc
@@ -10370,8 +10369,8 @@ class Database:
                 {
                     "player": k[0], "sport": k[1], "stat_type": k[2],
                     "W": v["W"], "L": v["L"], "P": v["P"], "total": v["total"],
-                    "win_pct": round(v["W"] / (v["W"] + v["L"]) * 100, 1)
-                              if (v["W"] + v["L"]) > 0 else 0.0,
+                    "win_pct": round(v["W"] / v["total"] * 100, 1)
+                              if v["total"] > 0 else 0.0,
                 }
                 for k, v in sorted(_player_acc.items(), key=lambda kv: -kv[1]["total"])[:10]
             ]

@@ -70,7 +70,7 @@ class TierPerf:
     count:     int
     avg_edge:  Optional[float] = None   # avg best_edge from pp_edge_records
     avg_clv:   Optional[float] = None   # avg clv_pct from clv_records (if linked)
-    hit_rate:  Optional[float] = None   # resolved WIN / (WIN+LOSS)
+    hit_rate:  Optional[float] = None   # resolved WIN / (WIN+LOSS+PUSH)
 
     @property
     def tier_emoji(self) -> str:
@@ -132,6 +132,7 @@ class IntelligencePanel:
     total_graded:      int             = 0
     total_hits:        int             = 0
     total_misses:      int             = 0
+    total_pushes:      int             = 0
     hit_rate:          Optional[float] = None
     model_errors:      int             = 0
     market_errors:     int             = 0
@@ -399,6 +400,8 @@ class DashboardReport:
             if ip.hit_rate is not None:
                 parts.append(
                     f"  Graded: <code>{ip.total_graded}</code>  "
+                    f"H/M/P: <code>{ip.total_hits}/{ip.total_misses}/"
+                    f"{ip.total_pushes}</code>  "
                     f"Hit rate: <code>{ip.hit_rate*100:.0f}%</code>"
                 )
             if ip.total_misses > 0:
@@ -1144,8 +1147,12 @@ class DashboardEngine:
                         ip.total_hits = cnt
                     elif result_val == "MISS":
                         ip.total_misses = cnt
+                    elif result_val == "PUSH":
+                        ip.total_pushes = cnt
 
-                ip.total_graded = ip.total_hits + ip.total_misses
+                ip.total_graded = (
+                    ip.total_hits + ip.total_misses + ip.total_pushes
+                )
                 if ip.total_graded > 0:
                     ip.hit_rate = ip.total_hits / ip.total_graded
 

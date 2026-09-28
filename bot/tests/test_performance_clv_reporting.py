@@ -188,8 +188,8 @@ async def test_reports_exclude_unverified_grades_and_filter_enabled_sports(db):
     assert mlb["push"] == 1
     assert mlb["void"] == 1
     assert mlb["unverified"] == 0
-    assert mlb["denominator"] == 1
-    assert mlb["hit_rate"] == 100.0
+    assert mlb["denominator"] == 2
+    assert mlb["hit_rate"] == 50.0
 
     all_sports = await db.get_directional_performance_summary()
     nba = all_sports["by_sport"]["NBA"]

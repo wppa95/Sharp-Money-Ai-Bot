@@ -344,9 +344,10 @@ class TestTelegramOnlyPerformance:
 
     async def test_hit_rate_calculation(self, db):
         """Hit rate is calculated from graded picks only."""
-        # 3 hits, 1 miss → hit rate = 75%
+        # 3 hits, 1 miss, 1 push → push is part of the denominator (60%).
         picks = [("hr1","OVER","HIT",1.0), ("hr2","OVER","HIT",1.0),
-                 ("hr3","OVER","HIT",1.0), ("hr4","OVER","MISS",0.0)]
+                 ("hr3","OVER","HIT",1.0), ("hr4","OVER","MISS",0.0),
+                 ("hr5","OVER","PUSH",0.5)]
         for ext_id, rec, result, actual in picks:
             await _log_opp(db, external_id=ext_id, stat_type="hits",
                            recommendation=rec)
@@ -360,7 +361,8 @@ class TestTelegramOnlyPerformance:
             )
 
         perf = await db.get_telegram_pick_performance()
-        assert perf["hit_rate"] == 75.0
+        assert perf["push"] == 1
+        assert perf["hit_rate"] == 60.0
 
     async def test_zero_picks_returns_zero_totals(self, db):
         """When no Telegram picks have been sent, totals are all zero."""
