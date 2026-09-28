@@ -26,6 +26,7 @@ from sqlalchemy import (
 )
 from sqlalchemy import insert as sa_insert
 from sqlalchemy import event
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 from sqlalchemy.orm import DeclarativeBase
 
@@ -1447,6 +1448,18 @@ class SlipJournalLeg(Base):
     result       = Column(String(8),  nullable=False, default="PENDING")  # HIT/MISS/PUSH/PENDING
     actual_value = Column(Float,      nullable=True)
     graded_at    = Column(DateTime,   nullable=True)
+
+
+class AutoSlipNotification(Base):
+    """Durable deduplication record for proactively delivered slip combinations."""
+    __tablename__ = "auto_slip_notifications"
+
+    id         = Column(Integer, primary_key=True, autoincrement=True)
+    signature  = Column(String(64), nullable=False, unique=True, index=True)
+    slip_size  = Column(Integer, nullable=False)
+    status     = Column(String(12), nullable=False, default="SENDING")
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    sent_at    = Column(DateTime, nullable=True)
 
 
 # ── Database manager ──────────────────────────────────────────────────────────
@@ -11201,6 +11214,78 @@ class Database:
             return result.scalar() or 0
 
     # ── Slip Journal CRUD (P9/P10) ───────────────────────────────────────────
+
+    async def claim_auto_slip_notification(
+        self,
+        signature: str,
+        slip_size: int,
+        *,
+        stale_after: timedelta = timedelta(minutes=15),
+    ) -> bool:
+        """Atomically claim a new slip notification, or reclaim a stale send."""
+        now = datetime.utcnow()
+        cutoff = now - stale_after
+        async with self.session() as s:
+            result = await s.execute(
+                select(AutoSlipNotification).where(
+                    AutoSlipNotification.signature == signature
+                )
+            )
+            existing = result.scalar_one_or_none()
+            if existing is not None:
+                if existing.status != "SENDING":
+                    return False
+                reclaimed = await s.execute(
+                    update(AutoSlipNotification)
+                    .where(
+                        AutoSlipNotification.signature == signature,
+                        AutoSlipNotification.status == "SENDING",
+                        AutoSlipNotification.created_at < cutoff,
+                    )
+                    .values(created_at=now, slip_size=slip_size, sent_at=None)
+                )
+                await s.commit()
+                return reclaimed.rowcount == 1
+
+            s.add(
+                AutoSlipNotification(
+                    signature=signature,
+                    slip_size=slip_size,
+                    status="SENDING",
+                    created_at=now,
+                )
+            )
+            try:
+                await s.commit()
+            except IntegrityError:
+                await s.rollback()
+                return False
+            return True
+
+    async def mark_auto_slip_notification_sent(self, signature: str) -> bool:
+        """Mark a claimed notification delivered after Telegram accepts it."""
+        async with self.session() as s:
+            result = await s.execute(
+                update(AutoSlipNotification)
+                .where(
+                    AutoSlipNotification.signature == signature,
+                    AutoSlipNotification.status == "SENDING",
+                )
+                .values(status="SENT", sent_at=datetime.utcnow())
+            )
+            await s.commit()
+            return result.rowcount == 1
+
+    async def release_auto_slip_notification(self, signature: str) -> None:
+        """Release an unsent claim so the next completed scan can retry it."""
+        async with self.session() as s:
+            await s.execute(
+                delete(AutoSlipNotification).where(
+                    AutoSlipNotification.signature == signature,
+                    AutoSlipNotification.status == "SENDING",
+                )
+            )
+            await s.commit()
 
     async def create_slip_journal(
         self,

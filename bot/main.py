@@ -56,6 +56,7 @@ from commands import (
     cmd_ev,
     cmd_picks,
     cmd_slip,
+    auto_slip_notifications_job,
     cmd_dashboard,
     cmd_alerts,
     cmd_reconcile,
@@ -1214,6 +1215,13 @@ _GRADE_CYCLE_HEADROOM_SECONDS = 10
 async def _underdog_monitor_cycle(context) -> None:
     """Run only the continuous Underdog monitoring cycle."""
     await underdog_job(context)
+    try:
+        # Build slips only after the feed scan has persisted its current cycle.
+        # Notification failures must not turn a completed market scan into a
+        # failed monitoring run.
+        await auto_slip_notifications_job(context)
+    except Exception:
+        logger.exception("auto_slip_notifications: post-scan check failed")
 
 
 # Keep the scheduler-facing callback name stable while retaining the shared

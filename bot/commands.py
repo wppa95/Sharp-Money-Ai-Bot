@@ -3377,6 +3377,12 @@ async def cmd_slip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     slips = build_all_slips(_candidates, max_size=6)
 
+    _slip_build_capture = getattr(context, "_slip_build_capture", None)
+    if isinstance(_slip_build_capture, dict):
+        _slip_build_capture["slips"] = slips
+        _slip_build_capture["candidate_count"] = len(_candidates)
+        return
+
     if not slips:
         await update.message.reply_text(
             "🎯 <b>Sharp Money Prop Slip</b>\n\n"
@@ -3420,6 +3426,169 @@ async def cmd_slip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     lines.append("<i>⚠️ Research tool — not betting advice.</i>")
     await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML)
+
+
+def _auto_slip_signature(size: int, slip: object) -> str:
+    """Stable identity for a slip; score changes alone do not create a new slip."""
+    import hashlib
+    import json
+
+    leg_identities = []
+    for leg in getattr(slip, "legs", []):
+        line = getattr(leg, "pp_line_value", None)
+        try:
+            line_key = format(float(line), ".8g") if line is not None else None
+        except (TypeError, ValueError):
+            line_key = str(line)
+        game_time = getattr(leg, "game_time", None)
+        if hasattr(game_time, "isoformat"):
+            game_time = game_time.isoformat()
+        leg_identities.append(
+            {
+                "provider": str(getattr(leg, "sportsbook", "Underdog") or "Underdog")
+                .strip()
+                .lower(),
+                "external_id": str(getattr(leg, "external_id", "") or "").strip(),
+                "game_id": str(getattr(leg, "game_id", "") or "").strip(),
+                "player": str(getattr(leg, "player_name", "") or "")
+                .strip()
+                .casefold(),
+                "sport": str(getattr(leg, "sport", "") or "").strip().upper(),
+                "stat": str(getattr(leg, "stat_type", "") or "")
+                .strip()
+                .casefold(),
+                "direction": str(getattr(leg, "best_side", "") or "")
+                .strip()
+                .upper(),
+                "line": line_key,
+                "game_time": str(game_time or ""),
+            }
+        )
+    leg_identities.sort(
+        key=lambda item: json.dumps(item, sort_keys=True, separators=(",", ":"))
+    )
+    payload = json.dumps(
+        {"size": int(size), "legs": leg_identities},
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+async def auto_slip_notifications_job(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Send newly qualifying 2- and 3-leg slips after an Underdog scan."""
+    if _db is None:
+        return
+    recipients = sorted(config.allowed_user_ids)
+    if not recipients:
+        return
+
+    import hashlib
+    from types import SimpleNamespace
+
+    async def _discard_command_reply(*_args, **_kwargs) -> None:
+        return None
+
+    try:
+        # Reuse the same eligibility, freshness, history, and correlation logic
+        # as /slip instead of maintaining a second selection pipeline.
+        capture: dict = {}
+        fake_update = SimpleNamespace(
+            source=None,
+            effective_user=SimpleNamespace(id=recipients[0]),
+            message=SimpleNamespace(reply_text=_discard_command_reply),
+        )
+        fake_context = SimpleNamespace(args=[], _slip_build_capture=capture)
+        await cmd_slip(fake_update, fake_context)
+        slips = capture.get("slips") or {}
+        if not slips:
+            return
+    except Exception:
+        logger.exception("auto_slip_notifications: slip build failed")
+        return
+
+    bot = getattr(getattr(context, "application", None), "bot", None)
+    if bot is None:
+        logger.warning("auto_slip_notifications: bot client unavailable")
+        return
+
+    for chat_id in recipients:
+        claimed: list[tuple[str, int, object]] = []
+        try:
+            for size in (2, 3):
+                slip = slips.get(size)
+                if slip is None:
+                    continue
+                combination_signature = _auto_slip_signature(size, slip)
+                claim_signature = hashlib.sha256(
+                    f"{chat_id}:{combination_signature}".encode("utf-8")
+                ).hexdigest()
+                if await _db.claim_auto_slip_notification(
+                    claim_signature,
+                    size,
+                ):
+                    claimed.append((claim_signature, size, slip))
+        except Exception:
+            for signature, _, _ in claimed:
+                try:
+                    await _db.release_auto_slip_notification(signature)
+                except Exception:
+                    logger.exception(
+                        "auto_slip_notifications: could not release failed claim"
+                    )
+            logger.exception("auto_slip_notifications: dedup claim failed")
+            continue
+
+        if not claimed:
+            continue
+
+        lines = [
+            "🔔 <b>New qualifying player-prop slip</b>",
+            "",
+            "<i>Built from the current eligible Underdog picks.</i>",
+            "",
+        ]
+        for _, size, slip in claimed:
+            lines.extend(_render_slip_section(size, slip))
+            lines.append("")
+        lines.append(
+            "<i>Research only — outcomes are uncertain; this does not place a bet.</i>"
+        )
+        try:
+            await bot.send_message(
+                chat_id=chat_id,
+                text="\n".join(lines),
+                parse_mode=ParseMode.HTML,
+                disable_web_page_preview=True,
+            )
+        except Exception:
+            for signature, _, _ in claimed:
+                try:
+                    await _db.release_auto_slip_notification(signature)
+                except Exception:
+                    logger.exception(
+                        "auto_slip_notifications: could not release failed claim"
+                    )
+            logger.exception(
+                "auto_slip_notifications: Telegram delivery failed for recipient"
+            )
+            continue
+
+        for signature, size, _ in claimed:
+            try:
+                marked = await _db.mark_auto_slip_notification_sent(signature)
+                if not marked:
+                    logger.warning(
+                        "auto_slip_notifications: sent %d-leg slip but could not "
+                        "mark its dedup record",
+                        size,
+                    )
+            except Exception:
+                logger.exception(
+                    "auto_slip_notifications: sent %d-leg slip but failed to "
+                    "persist its delivery marker",
+                    size,
+                )
 
 
 async def cmd_dashboard(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
