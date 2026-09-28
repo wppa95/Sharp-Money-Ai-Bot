@@ -409,7 +409,8 @@ def has_qualifying_pick_history(
 
     Callers making an eligibility decision should use
     ``has_qualifying_directional_pick`` so sports that do not require completed
-    results use direction-only qualification instead.
+    results use direction-only qualification instead. OVER requires at least a
+    75% hit rate; UNDER requires at least a 75% miss rate in every window.
     """
     return has_strong_directional_history(
         value,

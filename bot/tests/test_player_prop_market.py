@@ -624,8 +624,8 @@ class TestRunCycle:
         assert sent == 0
         mock_bc.assert_not_called()
 
-    def test_s_tier_prop_sends_alert(self):
-        """S-tier props with sufficient confidence trigger broadcast."""
+    def test_s_tier_prop_without_history_does_not_bypass_delivery_gate(self):
+        """A high score cannot replace the required completed history."""
         db   = self._make_db()
         bot  = self._make_bot()
         alerted: dict = {}
@@ -640,8 +640,8 @@ class TestRunCycle:
                 alerted_set  = alerted,
                 now          = NOW,
             ))
-        # Should attempt to send (confidence is high for MLB/strikeouts)
-        assert sent >= 0   # passes if build returns None due to test env
+        assert sent == 0
+        m.assert_not_called()
 
     def test_dedup_prevents_resend(self):
         """Same player/sport/stat within window and same line not alerted twice."""
@@ -841,11 +841,23 @@ class TestRunCycleBPlus:
         db.get_recent_player_prop_lines  = AsyncMock(return_value=[])
         return db
 
-    def _prop(self, tier="B", avg=0, sta=0, direction="OVER"):
+    def _prop(
+        self,
+        tier="B",
+        avg=0,
+        sta=0,
+        direction="OVER",
+        sport="TENNIS",
+        player="Allisha Gray",
+        evidence_available=False,
+        decision=None,
+        validation=None,
+        intelligence_trace=None,
+    ):
         return {
-            "player":    "Allisha Gray",
+            "player":    player,
             "stat_type": "points",
-            "sport":     "WNBA",
+            "sport":     sport,
             "tier":      tier,
             "direction": direction,
             "line":      18.5,
@@ -853,12 +865,97 @@ class TestRunCycleBPlus:
             "avg":       avg,
             "sta":       sta,
             "total":     52,
-            "evidence_available": True,
+            "evidence_available": evidence_available,
+            "decision": decision,
+            "validation": validation,
+            "intelligence_trace": intelligence_trace,
             "game_time": datetime.utcnow() + timedelta(hours=1),
         }
 
+    @staticmethod
+    def _history(direction):
+        over_count = 15 if direction == "OVER" else 5
+        windows = {
+            key: {"games": 20, "over": over_count, "under": 20 - over_count}
+            for key in ("l5", "l10", "l15", "l20", "l30", "season")
+        }
+        return {
+            "recommendation": direction,
+            "data_source": "game_results",
+            "n_real_games": 20,
+            **windows,
+        }
+
+    def test_five_history_sports_reject_unverified_direction(self):
+        props = [
+            self._prop(
+                sport=sport,
+                player=f"{sport} Player",
+                evidence_available=True,
+            )
+            for sport in ("MLB", "NBA", "NFL", "WNBA", "NHL")
+        ]
+        with patch("alerts.broadcast_alert", new_callable=AsyncMock) as broadcast:
+            broadcast.return_value = {"sent": 1}
+            sent = LOOP.run_until_complete(run_player_prop_market_cycle(
+                db=self._make_db(),
+                bot=MagicMock(),
+                chat_ids=[123],
+                scored_props=props,
+                alerted_set={},
+                now=NOW,
+            ))
+
+        assert sent == 0
+        broadcast.assert_not_called()
+
+    def test_high_over_hit_rate_and_under_miss_rate_are_accepted(self):
+        props = [
+            self._prop(
+                sport="MLB",
+                player="Over History Player",
+                direction="OVER",
+                decision=self._history("OVER"),
+            ),
+            self._prop(
+                sport="NHL",
+                player="Under History Player",
+                direction="UNDER",
+                decision=self._history("UNDER"),
+            ),
+        ]
+        with patch("alerts.broadcast_alert", new_callable=AsyncMock) as broadcast:
+            broadcast.return_value = {"sent": 1}
+            sent = LOOP.run_until_complete(run_player_prop_market_cycle(
+                db=self._make_db(),
+                bot=MagicMock(),
+                chat_ids=[123],
+                scored_props=props,
+                alerted_set={},
+                now=NOW,
+            ))
+
+        assert sent == 2
+        assert broadcast.await_count == 2
+
+    def test_optional_sport_rejects_claimed_but_unverified_evidence(self):
+        prop = self._prop(sport="TENNIS", evidence_available=True)
+        with patch("alerts.broadcast_alert", new_callable=AsyncMock) as broadcast:
+            broadcast.return_value = {"sent": 1}
+            sent = LOOP.run_until_complete(run_player_prop_market_cycle(
+                db=self._make_db(),
+                bot=MagicMock(),
+                chat_ids=[123],
+                scored_props=[prop],
+                alerted_set={},
+                now=NOW,
+            ))
+
+        assert sent == 0
+        broadcast.assert_not_called()
+
     def test_weak_b_directional_prop_is_admitted(self):
-        """Low-quality metadata does not block a directional prop."""
+        """Optional sports need direction, not history or quality metadata."""
         with patch("alerts.broadcast_alert", new_callable=AsyncMock) as m:
             m.return_value = {"sent": 1}
             sent = LOOP.run_until_complete(run_player_prop_market_cycle(

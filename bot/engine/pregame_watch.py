@@ -495,12 +495,54 @@ class PregameWatchEngine:
             if comp is None:
                 continue   # below confidence threshold
 
-            # Pregame watch currently has no directional decision or player
-            # result evidence attached to its comparison. Keep the legacy
-            # broadcaster behind the same canonical gate; it therefore remains
-            # monitoring-only until a real decision/evidence payload is wired.
-            _watch_direction = str(getattr(comp, "direction", "") or "").upper()
-            _watch_evidence = bool(getattr(comp, "evidence_available", False))
+            # A market comparison is not itself a bet recommendation. Require
+            # an explicit decision and apply the same sport-aware history gate
+            # used by the normal alert path; do not infer direction from line
+            # movement or provider consensus.
+            from alerts import _has_strong_underdog_evidence
+
+            _watch_decision = getattr(comp, "decision", None)
+            if _watch_decision is None:
+                _watch_recommendation = str(
+                    getattr(comp, "recommendation", "") or ""
+                ).strip().upper()
+                if _watch_recommendation in {"OVER", "UNDER"}:
+                    _watch_decision = {
+                        "recommendation": _watch_recommendation
+                    }
+            elif isinstance(_watch_decision, str):
+                _watch_recommendation = _watch_decision.strip().upper()
+                _watch_decision = (
+                    {"recommendation": _watch_recommendation}
+                    if _watch_recommendation in {"OVER", "UNDER"}
+                    else None
+                )
+
+            if isinstance(_watch_decision, dict):
+                _watch_direction = str(
+                    _watch_decision.get("recommendation")
+                    or _watch_decision.get("rec")
+                    or ""
+                ).strip().upper()
+            else:
+                _watch_direction = str(
+                    getattr(_watch_decision, "recommendation", "") or ""
+                ).strip().upper()
+
+            _watch_validation = getattr(comp, "validation", None)
+            _watch_trace = getattr(comp, "intelligence_trace", None)
+            if bool(getattr(comp, "evidence_available", False)):
+                _watch_trace = {
+                    "evidence_source": "unverified",
+                    **({"evidence": _watch_trace} if _watch_trace is not None else {}),
+                }
+            _watch_evidence = _has_strong_underdog_evidence(
+                score=getattr(comp, "score", None),
+                validation=_watch_validation,
+                decision=_watch_decision,
+                intelligence_trace=_watch_trace,
+                sport=entry.sport,
+            )
             if not _directional_evidence_gate(
                 _watch_direction,
                 evidence_available=_watch_evidence,

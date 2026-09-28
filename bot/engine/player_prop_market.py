@@ -772,8 +772,9 @@ async def run_player_prop_market_cycle(
     """
     Run the Player Prop Market Engine over the current cycle's high-scoring props.
 
-    Qualification requires the canonical OVER/UNDER plus evidence gate.
-    Score, proxy confidence, and legacy tier labels are informational.
+    Qualification requires the canonical OVER/UNDER and the shared
+    sport-specific history gate. Score, proxy confidence, and legacy tier
+    labels are informational.
 
     For each qualifying candidate:
     1. Fetch PP PropLineHistory rows (one DB query for the batch).
@@ -783,7 +784,11 @@ async def run_player_prop_market_cycle(
 
     Returns the number of alerts sent.
     """
-    from alerts import _is_fresh_delivery_line, broadcast_alert  # local to avoid circular
+    from alerts import (
+        _has_strong_underdog_evidence,
+        _is_fresh_delivery_line,
+        broadcast_alert,
+    )  # local to avoid circular
 
     if now is None:
         now = datetime.utcnow()
@@ -846,12 +851,53 @@ async def run_player_prop_market_cycle(
             logger.debug("player_prop_market: alert suppressed (%s scope) — %s / %s", sport, player, stat_type)
             continue
 
-        _evidence_available = bool(
+        direction = str(p.get("direction") or "").strip().upper()
+        decision = p.get("decision")
+        if decision is None:
+            decision = {"recommendation": direction}
+        else:
+            decision_direction = str(
+                (
+                    decision.get("recommendation") or decision.get("rec") or ""
+                    if isinstance(decision, dict)
+                    else getattr(decision, "recommendation", "") or ""
+                )
+            ).strip().upper()
+            if decision_direction and decision_direction != direction:
+                logger.debug(
+                    "player_prop_market: decision direction mismatch blocked — %s / %s / %s",
+                    player, stat_type, sport,
+                )
+                continue
+
+        validation = p.get("validation")
+        intelligence_trace = p.get("intelligence_trace")
+        evidence_claimed = bool(
             p.get("evidence_available")
-            or getattr(p.get("validation"), "has_supporting_data", False)
+            or getattr(validation, "has_supporting_data", False)
+        )
+        if evidence_claimed:
+            # A bare evidence_available flag is a claim, not proof. Preserve
+            # any structured trace under the recognized nested evidence key so
+            # the shared gate can validate it and reject unsupported claims.
+            intelligence_trace = {
+                "evidence_source": "unverified",
+                **(
+                    {"evidence": intelligence_trace}
+                    if intelligence_trace is not None
+                    else {}
+                ),
+            }
+
+        _evidence_available = _has_strong_underdog_evidence(
+            score=p.get("score"),
+            validation=validation,
+            decision=decision,
+            intelligence_trace=intelligence_trace,
+            sport=sport,
         )
         if not _directional_evidence_gate(
-            str(p.get("direction") or ""),
+            direction,
             evidence_available=_evidence_available,
         ):
             logger.debug(
