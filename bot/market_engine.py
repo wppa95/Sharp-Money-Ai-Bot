@@ -934,7 +934,7 @@ _player_result_fetch_cache: set = set()
 # Maximum entries before the cache is wiped.  Each key is (player,sport,stat,date_iso);
 # the date component means old entries are already bypassed by logic, but they
 # accumulate in memory.  Clear the entire set once it grows past this ceiling so
-# the next cycle re-fetches fresh data — a safe, cheap reset at the six-minute cadence.
+# the next cycle re-fetches fresh data — a safe reset at the live-feed cadence.
 _PLAYER_RESULT_CACHE_MAX = 5_000
 _prizepicks_cycle_task: Optional[asyncio.Task] = None
 _prizepicks_processing_tasks: set[asyncio.Task] = set()
@@ -958,7 +958,7 @@ _PROPLINE_EMPTY_BACKOFF_BASE_SECONDS = 15 * 60
 _PROPLINE_EMPTY_BACKOFF_MAX_SECONDS = 2 * 60 * 60
 # Four bookmaker requests per sport take about 15 seconds under the shared
 # 1,020/hour provider pacing. Five sports therefore leave enough headroom for
-# native-feed evaluation and persistence inside the six-minute cycle.
+# native-feed evaluation and persistence inside the live-feed cycle.
 _PROPLINE_SPORTS_PER_CYCLE = 5
 
 _PROPLINE_BOOKMAKER_PROVIDERS = {
@@ -1918,7 +1918,7 @@ _prop_market_alerted: dict = {}
 
 # Previous fetched Underdog state used for in-process line-change detection.
 # The database remains the durable source of record; this avoids a full-table
-# grouped-history scan on every six-minute polling cycle.
+# grouped-history scan on every live-feed polling cycle.
 _ud_scan_state: dict[tuple[str, str], object] = {}
 _ud_known_keys: set[tuple[str, str]] = set()
 _ud_scan_db_id: int | None = None
@@ -4603,7 +4603,7 @@ async def underdog_job(context) -> None:
     # unrelated jobs remain free to run concurrently.
     _cycle_deadline = time.monotonic() + max(
         5.0,
-        float(getattr(config, "UNDERDOG_POLL_INTERVAL", 360)) - 5.0,
+        float(getattr(config, "UNDERDOG_POLL_INTERVAL", 300)) - 5.0,
     )
 
     async def _await_cycle_budget(awaitable, operation: str):
@@ -7602,7 +7602,7 @@ async def underdog_job(context) -> None:
     )
     _job_activity_end("underdog")
     _cycle_elapsed = time.monotonic() - _cycle_timing.started_mono
-    _cycle_cadence = float(getattr(config, "UNDERDOG_POLL_INTERVAL", 360))
+    _cycle_cadence = float(getattr(config, "UNDERDOG_POLL_INTERVAL", 300))
     _cycle_complete = (
         not _cycle_budget_exhausted
         and _snapshot_failed_records == 0
@@ -7676,7 +7676,7 @@ async def _stable_refresh_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
         _health.record_job_started("stable_refresh_job")
 
     # Do not compete with the first Underdog scan while it restores state and
-    # establishes the canonical active pool.  The next six-minute trigger will
+    # establishes the canonical active pool.  The next live-feed trigger will
     # retry after the scan releases the slot.
     if _ud_full_scan_running:
         logger.info(

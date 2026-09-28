@@ -798,7 +798,7 @@ async def test_concurrent_file_backed_writers_stay_within_cadence(
 def test_poll_interval_is_bounded_to_one_to_ten_minutes():
     """Underdog cadence must remain between one and ten minutes."""
     src = _src("config.py")
-    assert "os.environ.get(\"UNDERDOG_POLL_INTERVAL\", \"360\")" in src
+    assert "os.environ.get(\"UNDERDOG_POLL_INTERVAL\", \"300\")" in src
     assert "max(" in src and "min(600" in src
     from config import Config
     assert 60 <= Config().UNDERDOG_POLL_INTERVAL <= 600

@@ -3,11 +3,17 @@ name: Cadence runtime overlap
 description: Observed runtime behavior when the Underdog full scan exceeds its configured scheduler interval.
 ---
 
-The configured 150-second cadence is not a guarantee of 150-second scan completion. Stateful full-feed Underdog work and opportunity grading share one execution slot. Scheduler triggers are retained and queue behind their named or shared slot; they must not be coalesced, cancelled, skipped, or overlapped.
+The polling interval is a schedule target, not a guarantee that a full-feed
+cycle completes within it. Cycle time includes feed evaluation and database
+persistence, so cadence changes must leave headroom for shared-database work.
 
-**Why:** Coalesced monitor/history triggers lost required work. Queued non-overlapping execution preserves every trigger while the scan’s dynamic grading budget prevents one cycle from monopolizing the shared slot.
+**Why:** A recent full-feed scan took nearly as long as the configured cadence.
+Tightening it without measured headroom can queue scans and increase database
+contention instead of improving line freshness.
 
-**How to apply:** Keep per-job slots and the Underdog/history shared slot. Derive grading timeout from cadence minus actual scan elapsed time and headroom. Do not add overlap flags, max-instance workarounds, or scan-time provider hydration.
+**How to apply:** Choose the interval from observed completed-cycle timings,
+including persistence; keep the existing single full-feed rotation and avoid
+overlapping scans or scan-time provider hydration.
 
 The production full-pool monitoring rotation uses the same cadence as the
 active Underdog monitor; its legacy interval setting is only an enable/disable
