@@ -34,7 +34,7 @@ from alerts import (
     is_telegram_suppressed_sport,
 )
 from config import config
-from database import Database
+from database import Database, is_official_underdog_settlement_source
 from engine import AnalysisEngine
 from engine.strongest_pick import (
     is_strong_actionable_pick,
@@ -3793,6 +3793,22 @@ async def _cmd_backfill_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
             propline_history = None
         propline_results_cache: dict[tuple[str, str, str], list] = {}
 
+        def _is_underdog_opportunity(opp) -> bool:
+            provider_name = str(
+                getattr(opp, "provider", None) or ""
+            ).strip().casefold()
+            return not provider_name or provider_name == "underdog"
+
+        def _is_valid_underdog_settlement(opp, result_row, game_date) -> bool:
+            if not is_official_underdog_settlement_source(
+                getattr(result_row, "source", "")
+            ):
+                return False
+            event_id = str(getattr(opp, "game_id", "") or "").strip()
+            if event_id:
+                return str(getattr(result_row, "game_id", "") or "").strip() == event_id
+            return str(getattr(result_row, "game_date", "") or "") == game_date
+
         async def _fetch_propline_results_for_grading(opp) -> list:
             """Fetch resolved event history only when primary grading misses."""
             if propline_history is None:
@@ -3841,6 +3857,8 @@ async def _cmd_backfill_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
         fetched_keys:  set   = set()
         players_found: int   = 0
         for opp in pending:
+            if _is_underdog_opportunity(opp):
+                continue
             key = (opp.player_name, opp.sport, opp.stat_type.lower().strip())
             if key in fetched_keys:
                 continue
@@ -3874,12 +3892,21 @@ async def _cmd_backfill_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
             _result_lookup_kwargs = {}
             if getattr(opp, "game_id", ""):
                 _result_lookup_kwargs["game_id"] = opp.game_id
-            if getattr(opp, "provider", None):
-                _result_lookup_kwargs["provider"] = opp.provider
+            _result_lookup_kwargs["provider"] = (
+                getattr(opp, "provider", None) or "Underdog"
+            )
             result_row = await _db.get_game_result_for_grading(
                 opp.player_name, opp.sport, opp.stat_type, game_date,
                 **_result_lookup_kwargs,
             )
+            if (
+                result_row is not None
+                and _is_underdog_opportunity(opp)
+                and not _is_valid_underdog_settlement(
+                    opp, result_row, game_date
+                )
+            ):
+                result_row = None
             if result_row is None:
                 for _propline_result in await _fetch_propline_results_for_grading(opp):
                     await _db.upsert_player_result(_propline_result)
@@ -3890,6 +3917,14 @@ async def _cmd_backfill_inner(update: Update, context: ContextTypes.DEFAULT_TYPE
                     game_date,
                     **_result_lookup_kwargs,
                 )
+                if (
+                    result_row is not None
+                    and _is_underdog_opportunity(opp)
+                    and not _is_valid_underdog_settlement(
+                        opp, result_row, game_date
+                    )
+                ):
+                    result_row = None
             if result_row is None:
                 no_data += 1
                 continue

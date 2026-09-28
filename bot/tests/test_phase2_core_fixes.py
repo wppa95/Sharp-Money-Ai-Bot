@@ -317,6 +317,7 @@ class TestAutoGradingFetchLoop:
         opp.recommendation = "OVER"
         opp.result      = "PENDING"
         opp.decision_tier = "S"
+        opp.provider    = "PrizePicks"
 
         db     = AsyncMock()
         db.get_pending_opportunities = AsyncMock(return_value=[opp])
@@ -357,6 +358,7 @@ class TestAutoGradingFetchLoop:
             o.sport       = sport
             o.stat_type   = stat
             o.game_time   = datetime.utcnow() - timedelta(hours=6)
+            o.provider    = "PrizePicks"
             return o
 
         # Two pending rows for the same player/stat

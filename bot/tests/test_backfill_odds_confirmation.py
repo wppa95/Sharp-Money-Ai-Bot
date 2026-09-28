@@ -72,6 +72,77 @@ class TestBackfillGradingLogic:
         assert self._grade("UNDER", 0.0, 0.5) == "HIT"
 
 
+@pytest.mark.asyncio
+async def test_backfill_rejects_player_stats_as_underdog_settlement():
+    from datetime import datetime, timedelta
+    from types import SimpleNamespace
+
+    import commands
+
+    opportunity = SimpleNamespace(
+        id=991,
+        player_name="Backfill Player",
+        sport="NBA",
+        stat_type="Points",
+        game_time=datetime.utcnow() - timedelta(hours=2),
+        game_id="underdog-event-991",
+        provider="Underdog",
+        line_value=20.5,
+        recommendation="OVER",
+        decision_tier="B",
+        confidence=60,
+    )
+    unofficial_result = SimpleNamespace(
+        actual_value=30.0,
+        game_date=opportunity.game_time.strftime("%Y-%m-%d"),
+        game_id=opportunity.game_id,
+        source="espn_gamelog",
+    )
+    db = MagicMock()
+    db.get_pending_opportunities = AsyncMock(return_value=[opportunity])
+    db.get_game_result_for_grading = AsyncMock(
+        return_value=unofficial_result
+    )
+    db.upsert_player_result = AsyncMock()
+    db.grade_opportunity = AsyncMock()
+
+    stats_provider = MagicMock()
+    stats_provider.fetch_results = AsyncMock(return_value=[unofficial_result])
+    propline_provider = SimpleNamespace(
+        fetch_resolved_results=AsyncMock(return_value=[])
+    )
+    update = SimpleNamespace(
+        message=SimpleNamespace(reply_text=AsyncMock())
+    )
+
+    with (
+        patch.object(commands, "_db", db),
+        patch(
+            "providers.player_stats.PlayerStatsProvider",
+            return_value=stats_provider,
+        ),
+        patch(
+            "providers.player_history.get_player_history_provider",
+            return_value=propline_provider,
+        ),
+    ):
+        await commands._cmd_backfill_inner(update, SimpleNamespace())
+
+    stats_provider.fetch_results.assert_not_awaited()
+    propline_provider.fetch_resolved_results.assert_awaited_once_with(
+        "Backfill Player",
+        "NBA",
+        "Points",
+        source_provider="Underdog",
+    )
+    assert db.get_game_result_for_grading.await_count == 2
+    assert all(
+        call.kwargs.get("provider") == "Underdog"
+        for call in db.get_game_result_for_grading.await_args_list
+    )
+    db.grade_opportunity.assert_not_awaited()
+
+
 class TestBackfillStatNormalization:
     """stat_type normalization: lookup must be case-insensitive."""
 

@@ -28,7 +28,12 @@ from telegram.ext import Application, CommandHandler
 sys.path.insert(0, os.path.dirname(__file__))
 
 from config import config
-from database import Database, OddsRecord, get_sqlite_backpressure_metrics
+from database import (
+    Database,
+    OddsRecord,
+    get_sqlite_backpressure_metrics,
+    is_official_underdog_settlement_source,
+)
 from engine import AnalysisEngine
 from engine.season_check import SeasonChecker
 from engine.analysis import _SPORT_TO_ODDS_API_KEY
@@ -1367,6 +1372,37 @@ async def _grade_opportunities_job(context) -> None:
             elif isinstance(_bulk_result, dict):
                 _stored_grade_results = _bulk_result
 
+        def _is_underdog_opportunity(opp) -> bool:
+            provider = str(getattr(opp, "provider", None) or "").strip().casefold()
+            # Missing provenance is treated as the native Underdog path, not
+            # as permission to settle from a general player-stat feed.
+            return not provider or provider == "underdog"
+
+        def _is_official_underdog_result(opp, row) -> bool:
+            if not is_official_underdog_settlement_source(
+                getattr(row, "source", "")
+            ):
+                return False
+            event_id = str(getattr(opp, "game_id", "") or "").strip()
+            if event_id:
+                return str(getattr(row, "game_id", "") or "").strip() == event_id
+
+            row_date = str(getattr(row, "game_date", "") or "")
+            game_time = getattr(opp, "game_time", None)
+            if game_time:
+                valid_dates = {
+                    game_time.strftime("%Y-%m-%d"),
+                    (game_time - timedelta(days=1)).strftime("%Y-%m-%d"),
+                }
+            else:
+                detected_at = getattr(opp, "detected_at", None)
+                valid_dates = (
+                    {detected_at.strftime("%Y-%m-%d")}
+                    if detected_at
+                    else set()
+                )
+            return bool(row_date and row_date in valid_dates)
+
         def _has_stored_grade_result(opp) -> bool:
             _key = (
                 str(opp.player_name),
@@ -1389,6 +1425,11 @@ async def _grade_opportunities_job(context) -> None:
             ):
                 _event_date = opp.detected_at.strftime("%Y-%m-%d")
             _game_id = str(getattr(opp, "game_id", "") or "")
+            if _is_underdog_opportunity(opp):
+                return any(
+                    _is_official_underdog_result(opp, row)
+                    for row in _stored_grade_results.get(_key, [])
+                )
             return any(
                 (
                     _event_date
@@ -1402,7 +1443,7 @@ async def _grade_opportunities_job(context) -> None:
             )
 
         def _has_explicit_propline_event_settlement(opp) -> bool:
-            """Only an event-scoped PropLine result is reusable as settlement."""
+            """Only a matching event-scoped PropLine settlement is reusable."""
             event_id = str(getattr(opp, "game_id", "") or "").strip()
             if not event_id:
                 return False
@@ -1413,17 +1454,15 @@ async def _grade_opportunities_job(context) -> None:
             )
             return any(
                 str(getattr(row, "game_id", "") or "").strip() == event_id
-                and str(getattr(row, "source", "") or "").lower().startswith(
-                    ("propline_history", "propline_event_results")
+                and is_official_underdog_settlement_source(
+                    getattr(row, "source", "")
                 )
                 for row in _stored_grade_results.get(key, [])
             )
 
-        # ── Proactively fetch player results so grading works without /backfill ──
-        # The grader previously only looked up pre-existing PlayerResult rows.
-        # Props removed from Underdog before the game finished would never get
-        # a result row from scanning, leaving them PENDING forever.
-        # This mirrors the /backfill fetch pattern so auto-grading is self-contained.
+        # ── Fetch general player stats only for non-Underdog opportunities ──
+        # Underdog-native grading is restricted to explicit PropLine
+        # settlements; public player-stat feeds are not settlement evidence.
         _grade_stat_prov = None
         try:
             from providers.player_stats import PlayerStatsProvider as _GradeStatProvider
@@ -1438,6 +1477,8 @@ async def _grade_opportunities_job(context) -> None:
             _grade_fetched: set = set()
             _grade_targets = []
             for _gopp in pending:
+                if _is_underdog_opportunity(_gopp):
+                    continue
                 _gkey = (_gopp.player_name, _gopp.sport, (_gopp.stat_type or "").lower().strip())
                 if _gkey in _grade_fetched:
                     continue
@@ -1729,7 +1770,14 @@ async def _grade_opportunities_job(context) -> None:
                 str(getattr(opp, "sport", "") or ""),
                 str(getattr(opp, "stat_type", "") or "").lower().strip(),
             )
-            return _stored_grade_results.get(_key, [])
+            rows = _stored_grade_results.get(_key, [])
+            if _is_underdog_opportunity(opp):
+                return [
+                    row
+                    for row in rows
+                    if _is_official_underdog_result(opp, row)
+                ]
+            return rows
 
         for opp in pending:
             game_date = (
@@ -1777,8 +1825,9 @@ async def _grade_opportunities_job(context) -> None:
             _result_lookup_kwargs = {}
             if getattr(opp, "game_id", ""):
                 _result_lookup_kwargs["game_id"] = opp.game_id
-            if getattr(opp, "provider", None):
-                _result_lookup_kwargs["provider"] = opp.provider
+            _result_lookup_kwargs["provider"] = (
+                getattr(opp, "provider", None) or "Underdog"
+            )
             result_row = None
             _matched_game_date = game_date
             if _bulk_settlement_matches is not None:
@@ -1799,6 +1848,15 @@ async def _grade_opportunities_job(context) -> None:
                     if result_row is not None:
                         _matched_game_date = _candidate_game_date
                         break
+            if (
+                result_row is not None
+                and _is_underdog_opportunity(opp)
+                and not _is_official_underdog_result(opp, result_row)
+            ):
+                # Defense in depth for compatibility resolvers or stale
+                # PlayerGameResult rows written by a generic stats provider.
+                result_row = None
+                _matched_game_date = game_date
             _void_row = _void_settlements.get(
                 (
                     str(getattr(opp, "player_name", "") or "").lower().strip(),

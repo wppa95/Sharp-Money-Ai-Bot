@@ -44,10 +44,18 @@ _TRACKING_BATCH_SIZE = 200
 _CLV_BULK_BATCH_SIZE = 100
 PLAYER_PROPS_PRODUCT = "Player Props"
 _PLAYER_PROP_PROVIDERS = ("Underdog", "PrizePicks", "DraftKings", "FanDuel")
+_UNDERDOG_SETTLEMENT_RESULT_SOURCES = frozenset(
+    {"propline_event_results", "propline_history"}
+)
 _DB_WRITE_MAX_RETRIES = 4
 _DB_WRITE_RETRY_DELAYS = (1.0, 3.0, 7.0, 15.0)
 _PRIZEPICKS_EXTERNAL_PREFIX = "PrizePicks::"
 _TELEGRAM_DELIVERY_KEY_VERSION = "v1"
+
+
+def is_official_underdog_settlement_source(source: object) -> bool:
+    """Return whether a stored result came from an explicit PropLine settlement."""
+    return str(source or "").strip().casefold() in _UNDERDOG_SETTLEMENT_RESULT_SOURCES
 
 
 def _analyst_grade(
@@ -10199,9 +10207,9 @@ class Database:
 
         Matching stays strict: a dated opportunity requires that date (or the
         provider-local previous date already allowed by the grader), while an
-        undated opportunity requires its event identity.  Provider fallback
-        may reconcile event-ID namespaces, but never removes the date/event
-        boundary.
+        undated opportunity requires its event identity. Underdog accepts only
+        explicit PropLine settlement rows and keeps supplied event IDs strict;
+        other providers may use the existing dated fallback.
         """
         if not opportunities:
             return {}
@@ -10250,7 +10258,7 @@ class Database:
                 stat,
                 dates,
                 str(getattr(opp, "game_id", "") or ""),
-                bool(getattr(opp, "provider", None)),
+                str(getattr(opp, "provider", None) or "").strip().casefold(),
                 stats,
             )
 
@@ -10339,10 +10347,15 @@ class Database:
         resolved: dict[int, tuple[Optional[PlayerGameResult], Optional[str]]] = {}
         for opp_id, (opp, info) in metadata.items():
             player_name, sport, stat, candidate_dates, game_id, provider, _ = info
+            is_underdog = not provider or provider == "underdog"
             player_key = player_name.lower().strip()
             event_row = None
             if game_id:
                 for row in by_event.get((player_key, sport, stat, game_id), []):
+                    if is_underdog and not is_official_underdog_settlement_source(
+                        row.source
+                    ):
+                        continue
                     event_row = row
                     break
                 if event_row is not None:
@@ -10355,20 +10368,29 @@ class Database:
                 dated_rows = by_date.get(
                     (player_key, sport, stat, candidate_date), []
                 )
+                if is_underdog:
+                    dated_rows = [
+                        row
+                        for row in dated_rows
+                        if is_official_underdog_settlement_source(row.source)
+                        and (
+                            not game_id
+                            or str(row.game_id or "") == game_id
+                        )
+                    ]
+                elif game_id and not provider:
+                    dated_rows = [
+                        row for row in dated_rows
+                        if str(row.game_id or "") == game_id
+                    ]
                 if dated_rows:
-                    if game_id and not provider:
-                        dated_rows = [
-                            row for row in dated_rows
-                            if str(row.game_id or "") == game_id
-                        ]
-                    if dated_rows:
-                        resolved[opp_id] = (dated_rows[0], candidate_date)
-                        break
+                    resolved[opp_id] = (dated_rows[0], candidate_date)
+                    break
             if opp_id in resolved:
                 continue
 
             components = composite_components.get(stat)
-            if not components or not provider:
+            if not components or not provider or is_underdog:
                 continue
             for candidate_date in candidate_dates:
                 component_rows = {
@@ -10419,9 +10441,9 @@ class Database:
     ) -> "Optional[PlayerGameResult]":
         """
         Return the PlayerGameResult for a given player / sport / stat / date and
-        optional event identity, or None. Provider is accepted for call-site clarity:
-        game results are shared official-stat evidence, while provider remains
-        an opportunity identity and settlement-rule input.
+        optional event identity, or None. Underdog opportunities accept only
+        explicit PropLine settlement rows; other providers keep their existing
+        dated-stat lookup behavior.
 
         stat_type is normalised to lowercase before lookup because upsert_player_result
         stores all stat types in lowercase.  This prevents silent mismatches between
@@ -10433,12 +10455,19 @@ class Database:
         cross-provider fallback.
         """
         normalised_stat = stat_type.lower().strip()
+        is_underdog = str(provider or "").strip().casefold() == "underdog"
         async with self.session() as s:
             filters = [
                 PlayerGameResult.player_name == player_name,
                 PlayerGameResult.sport       == sport,
                 PlayerGameResult.stat_type   == normalised_stat,
             ]
+            if is_underdog:
+                filters.append(
+                    func.lower(PlayerGameResult.source).in_(
+                        tuple(_UNDERDOG_SETTLEMENT_RESULT_SOURCES)
+                    )
+                )
             if game_date:
                 filters.append(PlayerGameResult.game_date == game_date)
             # Some stat providers do not expose an event ID. Requiring an
@@ -10460,23 +10489,27 @@ class Database:
             if row is not None:
                 return row
 
-            if game_date and provider:
-                # Underdog/PrizePicks event IDs and ESPN/MLB result IDs are
-                # not guaranteed to share a namespace. The dated identity is
-                # the authoritative cross-provider fallback. Use normalized
-                # text here because provider display names can differ only by
-                # case while still representing the same player/stat.
+            if game_date and provider and not (is_underdog and game_id):
+                # Other providers may reconcile distinct event-ID namespaces
+                # by date. Underdog keeps a supplied event ID strict.
+                fallback_filters = [
+                    func.lower(PlayerGameResult.player_name)
+                    == str(player_name).lower().strip(),
+                    func.upper(PlayerGameResult.sport)
+                    == str(sport).upper().strip(),
+                    func.lower(PlayerGameResult.stat_type)
+                    == normalised_stat,
+                    PlayerGameResult.game_date == game_date,
+                ]
+                if is_underdog:
+                    fallback_filters.append(
+                        func.lower(PlayerGameResult.source).in_(
+                            tuple(_UNDERDOG_SETTLEMENT_RESULT_SOURCES)
+                        )
+                    )
                 fallback = await s.execute(
                     select(PlayerGameResult)
-                    .where(
-                        func.lower(PlayerGameResult.player_name)
-                        == str(player_name).lower().strip(),
-                        func.upper(PlayerGameResult.sport)
-                        == str(sport).upper().strip(),
-                        func.lower(PlayerGameResult.stat_type)
-                        == normalised_stat,
-                        PlayerGameResult.game_date == game_date,
-                    )
+                    .where(*fallback_filters)
                     .order_by(PlayerGameResult.id.desc())
                     .limit(1)
                 )
@@ -10505,7 +10538,7 @@ class Database:
                 "g+a": ("goals", "assists"),
             }
             components = composite_components.get(normalised_stat)
-            if not components or not game_date or not provider:
+            if is_underdog or not components or not game_date or not provider:
                 return None
 
             component_result = await s.execute(

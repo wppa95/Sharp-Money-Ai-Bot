@@ -18,7 +18,11 @@ async def db():
     await database.close()
 
 
-def _result(game_id: str, actual_value: float) -> SimpleNamespace:
+def _result(
+    game_id: str,
+    actual_value: float,
+    source: str = "test_stats",
+) -> SimpleNamespace:
     return SimpleNamespace(
         player_name="Same Player",
         sport="NBA",
@@ -26,7 +30,7 @@ def _result(game_id: str, actual_value: float) -> SimpleNamespace:
         game_date="2026-08-20",
         actual_value=actual_value,
         opponent="OPP",
-        source="test_stats",
+        source=source,
         game_id=game_id,
     )
 
@@ -127,7 +131,9 @@ class TestSettlementIdentity:
         await db.log_prop_opportunity(
             **_opportunity("PrizePicks", "pp-event", "shared-prop")
         )
-        await db.upsert_player_result(_result("ud-event", 25.0))
+        await db.upsert_player_result(
+            _result("ud-event", 25.0, source="propline_event_results")
+        )
         await db.upsert_player_result(_result("pp-event", 10.0))
 
         async with db.session() as session:

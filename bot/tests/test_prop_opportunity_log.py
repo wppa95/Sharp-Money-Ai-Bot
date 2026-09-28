@@ -13,6 +13,7 @@ Covers:
 from __future__ import annotations
 
 from datetime import datetime, timedelta
+from types import SimpleNamespace
 
 import pytest
 
@@ -385,7 +386,7 @@ class TestGetGameResultForGrading:
         assert row is None
 
     @pytest.mark.asyncio
-    async def test_falls_back_when_source_and_result_event_ids_differ(
+    async def test_underdog_lookup_rejects_unofficial_cross_provider_result(
         self, db: Database
     ) -> None:
         game_date = "2026-08-31"
@@ -410,11 +411,36 @@ class TestGetGameResultForGrading:
             game_id="underdog-event-1",
             provider="Underdog",
         )
+        assert row is None
+
+    @pytest.mark.asyncio
+    async def test_underdog_lookup_accepts_event_scoped_propline_settlement(
+        self, db: Database
+    ) -> None:
+        await db.upsert_player_result(PlayerGameResult(
+            player_name="A. Guard",
+            sport="NBA",
+            stat_type="points",
+            game_date="2026-08-31",
+            actual_value=24.0,
+            source="propline_event_results",
+            game_id="underdog-event-1",
+        ))
+
+        row = await db.get_game_result_for_grading(
+            "A. Guard",
+            "NBA",
+            "Points",
+            "2026-08-31",
+            game_id="underdog-event-1",
+            provider="Underdog",
+        )
+
         assert row is not None
         assert row.actual_value == 24.0
 
     @pytest.mark.asyncio
-    async def test_derives_composite_from_stored_component_results(
+    async def test_underdog_composite_does_not_derive_from_player_stats(
         self, db: Database
     ) -> None:
         for stat_type, actual_value in (
@@ -442,9 +468,61 @@ class TestGetGameResultForGrading:
             provider="Underdog",
         )
 
-        assert row is not None
-        assert row.actual_value == 5.0
-        assert row.source == "derived_from_db"
+        assert row is None
+
+    @pytest.mark.asyncio
+    async def test_bulk_underdog_resolver_rejects_unofficial_result(
+        self, db: Database
+    ) -> None:
+        opportunity = SimpleNamespace(
+            id=901,
+            player_name="A. Guard",
+            sport="NBA",
+            stat_type="Points",
+            game_time=datetime(2026, 8, 31, 18, 0),
+            game_id="underdog-event-901",
+            provider="Underdog",
+        )
+        await db.upsert_player_result(PlayerGameResult(
+            player_name="A. Guard",
+            sport="NBA",
+            stat_type="points",
+            game_date="2026-08-31",
+            actual_value=24.0,
+            source="espn_gamelog",
+            game_id="underdog-event-901",
+        ))
+
+        matches = await db.get_game_results_for_grading_bulk([opportunity])
+
+        assert 901 not in matches
+
+    @pytest.mark.asyncio
+    async def test_bulk_underdog_resolver_accepts_explicit_event_settlement(
+        self, db: Database
+    ) -> None:
+        opportunity = SimpleNamespace(
+            id=902,
+            player_name="A. Guard",
+            sport="NBA",
+            stat_type="Points",
+            game_time=datetime(2026, 8, 31, 18, 0),
+            game_id="underdog-event-902",
+            provider="Underdog",
+        )
+        await db.upsert_player_result(PlayerGameResult(
+            player_name="A. Guard",
+            sport="NBA",
+            stat_type="points",
+            game_date="2026-08-31",
+            actual_value=24.0,
+            source="propline_event_results",
+            game_id="underdog-event-902",
+        ))
+
+        matches = await db.get_game_results_for_grading_bulk([opportunity])
+
+        assert matches[902][0].actual_value == 24.0
 
 
 class TestGetTrackingSummary:

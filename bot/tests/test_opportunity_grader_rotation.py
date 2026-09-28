@@ -40,7 +40,14 @@ class _Health:
         self.failures.append((name, reason))
 
 
-def _opp(opp_id: int, player: str, stat: str, *, recommendation="OVER"):
+def _opp(
+    opp_id: int,
+    player: str,
+    stat: str,
+    *,
+    recommendation="OVER",
+    provider="PrizePicks",
+):
     return SimpleNamespace(
         id=opp_id,
         player_name=player,
@@ -52,6 +59,7 @@ def _opp(opp_id: int, player: str, stat: str, *, recommendation="OVER"):
         result="PENDING",
         decision_tier="B",
         confidence=60,
+        provider=provider,
     )
 
 
@@ -68,7 +76,7 @@ async def test_grader_deduplicates_provider_fetches_and_grades_directions():
     db = MagicMock()
     db.get_pending_opportunities = AsyncMock(return_value=[first, duplicate, under])
     db.upsert_player_result = AsyncMock()
-    async def get_result(player, sport, stat, game_date):
+    async def get_result(player, sport, stat, game_date, **kwargs):
         return SimpleNamespace(actual_value=11.0 if player == "Player One" else 9.0)
 
     db.get_game_result_for_grading = AsyncMock(side_effect=get_result)
@@ -263,6 +271,7 @@ async def test_grader_uses_explicit_propline_settlement_before_writing_grade():
     row = _opp(31, "PropLine Player", "Points")
     row.game_time = datetime(2026, 9, 5, 18, 0)
     row.game_id = "propline-event-31"
+    row.provider = "Underdog"
     propline_result = SimpleNamespace(
         player_name="PropLine Player",
         sport="NBA",
@@ -276,6 +285,7 @@ async def test_grader_uses_explicit_propline_settlement_before_writing_grade():
         actual_value=8.0,
         game_date="2026-09-05",
         source="propline_history",
+        game_id="propline-event-31",
     )
 
     db = MagicMock()
@@ -317,6 +327,70 @@ async def test_grader_uses_explicit_propline_settlement_before_writing_grade():
     db.grade_opportunities_bulk.assert_awaited_once_with(
         [{"id": 31, "result": "MISS", "actual_value": 8.0, "error_type": "Market"}]
     )
+    stats_provider.fetch_results.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_grader_does_not_use_player_stats_for_underdog_settlement():
+    row = _opp(
+        33,
+        "Third Party Player",
+        "Points",
+        provider="Underdog",
+    )
+    row.game_time = datetime(2026, 9, 5, 18, 0)
+    row.game_id = "underdog-event-33"
+    player_stats_result = SimpleNamespace(
+        player_name="Third Party Player",
+        sport="NBA",
+        stat_type="points",
+        game_date="2026-09-05",
+        actual_value=30.0,
+        source="espn_gamelog",
+        game_id="underdog-event-33",
+    )
+
+    db = MagicMock()
+    db.get_pending_opportunities = AsyncMock(return_value=[row])
+    db.get_player_results_bulk = AsyncMock(
+        return_value={
+            ("Third Party Player", "NBA", "points"): [player_stats_result],
+        }
+    )
+    db.upsert_player_results_bulk = AsyncMock()
+    db.get_game_results_for_grading_bulk = AsyncMock(
+        return_value={33: (player_stats_result, "2026-09-05")}
+    )
+    db.grade_opportunities_bulk = AsyncMock()
+    health = _Health()
+    stats_provider = MagicMock()
+    stats_provider.fetch_results = AsyncMock(return_value=[player_stats_result])
+    propline_provider = SimpleNamespace(
+        fetch_resolved_event_results=AsyncMock(return_value=[]),
+        fetch_resolved_results=AsyncMock(return_value=[]),
+    )
+
+    with (
+        patch.object(main, "get_health_tracker", return_value=health),
+        patch(
+            "providers.player_stats.PlayerStatsProvider",
+            return_value=stats_provider,
+        ),
+        patch(
+            "providers.player_history.get_player_history_provider",
+            return_value=propline_provider,
+        ),
+    ):
+        await main._grade_opportunities_job(_context(db))
+
+    stats_provider.fetch_results.assert_not_awaited()
+    propline_provider.fetch_resolved_event_results.assert_awaited_once_with(
+        "underdog-event-33",
+        "NBA",
+        source_provider="Underdog",
+    )
+    db.grade_opportunities_bulk.assert_not_awaited()
+    assert health.runs == 1
 
 
 @pytest.mark.asyncio
@@ -460,6 +534,7 @@ async def test_grader_settles_neutral_tracking_rows_without_directional_attribut
         game_time=datetime.utcnow() - timedelta(hours=6),
         line_value=10.0,
         result="PENDING",
+        provider="PrizePicks",
     )
     db = MagicMock()
     db.get_pending_opportunities = AsyncMock(return_value=[])
