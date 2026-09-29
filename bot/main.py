@@ -1401,13 +1401,17 @@ async def _grade_opportunities_job(context) -> None:
                     asyncio.create_task(_fetch_grade_results(_gopp))
                     for _gopp in _grade_targets
                 ]
-                _grade_done, _grade_deferred = await asyncio.wait(
-                    _grade_tasks,
-                    timeout=max(
-                        1,
-                        _GRADE_CYCLE_BUDGET_SECONDS - _GRADE_CYCLE_HEADROOM_SECONDS,
-                    ),
-                )
+                if _grade_tasks:
+                    _grade_done, _grade_deferred = await asyncio.wait(
+                        _grade_tasks,
+                        timeout=max(
+                            1,
+                            _GRADE_CYCLE_BUDGET_SECONDS
+                            - _GRADE_CYCLE_HEADROOM_SECONDS,
+                        ),
+                    )
+                else:
+                    _grade_done, _grade_deferred = set(), set()
                 for _deferred_task in _grade_deferred:
                     _deferred_task.cancel()
                 if _grade_deferred:
@@ -1472,32 +1476,81 @@ async def _grade_opportunities_job(context) -> None:
             )
 
         if _propline_history is not None and pending:
-            _propline_targets: list = []
-            _propline_keys: set[tuple[str, str, str, str]] = set()
+            _propline_event_fetcher = getattr(
+                _propline_history,
+                "fetch_resolved_event_results",
+                None,
+            )
+            _propline_event_by_key: dict[tuple[str, str, str], Any] = {}
+            _propline_identity_by_key: dict[tuple[str, str, str, str], Any] = {}
             for _gopp in pending:
-                if _has_explicit_propline_event_settlement(_gopp):
+                if (
+                    _has_explicit_propline_event_settlement(_gopp)
+                    or _has_stored_grade_result(_gopp)
+                ):
                     continue
-                _gkey = (
-                    str(_gopp.player_name),
-                    str(_gopp.sport).upper(),
-                    str(_gopp.stat_type or "").lower().strip(),
-                    str(getattr(_gopp, "game_id", "") or "").strip()
-                    or (
-                        _gopp.game_time.strftime("%Y-%m-%d")
-                        if getattr(_gopp, "game_time", None)
-                        else ""
-                    ),
+                _source_provider = str(
+                    getattr(_gopp, "provider", None)
+                    or getattr(_gopp, "source_provider", None)
+                    or "Underdog"
                 )
-                if _gkey in _propline_keys:
-                    continue
-                _propline_keys.add(_gkey)
-                _propline_targets.append(_gopp)
-                if len(_propline_targets) >= _GRADE_PROPLINE_FETCH_BATCH_SIZE:
-                    break
+                _provider_key = _source_provider.strip().casefold()
+                _sport_key = str(_gopp.sport or "").upper().strip()
+                _player_key = str(_gopp.player_name or "").casefold().strip()
+                _stat_key = str(_gopp.stat_type or "").lower().strip()
+
+                # The resolved-history endpoint returns all events for a
+                # player/stat identity. Do not repeat that request for each
+                # saved event or line variant.
+                _identity_key = (
+                    _player_key,
+                    _sport_key,
+                    _stat_key,
+                    _provider_key,
+                )
+                _propline_identity_by_key.setdefault(_identity_key, _gopp)
+
+                # Event settlement lookup is event-wide: one response can
+                # settle many players and markets. Deduplicate by event and
+                # source bookmaker, not by player/stat.
+                _event_id = str(getattr(_gopp, "game_id", "") or "").strip()
+                if _event_id and callable(_propline_event_fetcher):
+                    _event_key = (
+                        _provider_key,
+                        _sport_key,
+                        _event_id,
+                    )
+                    _propline_event_by_key.setdefault(_event_key, _gopp)
 
             _propline_sem = asyncio.Semaphore(_GRADE_FETCH_CONCURRENCY)
+            _propline_batch_limit = max(
+                0,
+                int(_GRADE_PROPLINE_FETCH_BATCH_SIZE),
+            )
+            # Leave room for player/stat fallback requests when the event
+            # endpoint has no settlement for an event. This keeps the total
+            # number of PropLine targets bounded while making event requests
+            # substantially more productive.
+            _identity_reserve = min(
+                5,
+                _propline_batch_limit,
+                len(_propline_identity_by_key),
+            )
+            _event_limit = (
+                max(0, _propline_batch_limit - _identity_reserve)
+                if callable(_propline_event_fetcher)
+                else 0
+            )
+            _propline_event_targets = list(
+                _propline_event_by_key.values()
+            )[:_event_limit]
+            _propline_loop = asyncio.get_running_loop()
+            _propline_deadline = _propline_loop.time() + max(
+                1,
+                _GRADE_CYCLE_BUDGET_SECONDS - _GRADE_CYCLE_HEADROOM_SECONDS,
+            )
 
-            async def _fetch_propline_results(_gopp):
+            async def _fetch_propline_event_results(_gopp):
                 async with _propline_sem:
                     try:
                         _event_id = str(
@@ -1508,25 +1561,41 @@ async def _grade_opportunities_job(context) -> None:
                             or getattr(_gopp, "source_provider", None)
                             or "Underdog"
                         )
-                        if _event_id:
-                            _event_fetcher = getattr(
-                                _propline_history,
-                                "fetch_resolved_event_results",
-                                None,
-                            )
-                            if callable(_event_fetcher):
-                                _event_rows = await asyncio.wait_for(
-                                    _event_fetcher(
-                                        _event_id,
-                                        _gopp.sport,
-                                        source_provider=_source_provider,
-                                    ),
-                                    timeout=_GRADE_FETCH_TIMEOUT_SECONDS,
-                                )
-                                if _event_rows:
-                                    return _event_rows
                         return await asyncio.wait_for(
-                            _propline_history.fetch_resolved_results(
+                            _propline_event_fetcher(
+                                _event_id,
+                                _gopp.sport,
+                                source_provider=_source_provider,
+                            ),
+                            timeout=_GRADE_FETCH_TIMEOUT_SECONDS,
+                        )
+                    except Exception as _propline_fetch_exc:
+                        logger.debug(
+                            "_grade_opportunities_job: PropLine event "
+                            "settlement fetch failed for %s/%s: %s",
+                            _gopp.player_name,
+                            _gopp.stat_type,
+                            _propline_fetch_exc,
+                        )
+                        return []
+
+            async def _fetch_propline_identity_results(_gopp):
+                async with _propline_sem:
+                    try:
+                        _identity_fetcher = getattr(
+                            _propline_history,
+                            "fetch_resolved_results",
+                            None,
+                        )
+                        if not callable(_identity_fetcher):
+                            return []
+                        _source_provider = (
+                            getattr(_gopp, "provider", None)
+                            or getattr(_gopp, "source_provider", None)
+                            or "Underdog"
+                        )
+                        return await asyncio.wait_for(
+                            _identity_fetcher(
                                 _gopp.player_name,
                                 _gopp.sport,
                                 _gopp.stat_type,
@@ -1536,7 +1605,7 @@ async def _grade_opportunities_job(context) -> None:
                         )
                     except Exception as _propline_fetch_exc:
                         logger.debug(
-                            "_grade_opportunities_job: PropLine settlement "
+                            "_grade_opportunities_job: PropLine history "
                             "fetch failed for %s/%s: %s",
                             _gopp.player_name,
                             _gopp.stat_type,
@@ -1544,67 +1613,172 @@ async def _grade_opportunities_job(context) -> None:
                         )
                         return []
 
-            try:
-                _propline_tasks = [
-                    asyncio.create_task(_fetch_propline_results(_gopp))
-                    for _gopp in _propline_targets
+            async def _run_propline_tasks(_tasks):
+                if not _tasks:
+                    return [], 0
+                _remaining = _propline_deadline - _propline_loop.time()
+                if _remaining <= 0:
+                    for _task in _tasks:
+                        _task.cancel()
+                    await asyncio.gather(*_tasks, return_exceptions=True)
+                    return [], len(_tasks)
+                _done, _deferred = await asyncio.wait(
+                    _tasks,
+                    timeout=_remaining,
+                )
+                for _task in _deferred:
+                    _task.cancel()
+                if _deferred:
+                    await asyncio.gather(*_deferred, return_exceptions=True)
+                _rows = [
+                    _row
+                    for _task in _done
+                    if not _task.cancelled()
+                    and _task.exception() is None
+                    for _row in (_task.result() or [])
                 ]
-                if _propline_tasks:
-                    _propline_done, _propline_deferred = await asyncio.wait(
-                        _propline_tasks,
-                        timeout=max(
-                            1,
-                            _GRADE_CYCLE_BUDGET_SECONDS - _GRADE_CYCLE_HEADROOM_SECONDS,
-                        ),
+                return _rows, len(_deferred)
+
+            async def _persist_propline_rows(_rows):
+                _void_rows = [
+                    _row
+                    for _row in _rows
+                    if str(getattr(_row, "source", "") or "")
+                    == "propline_event_results_void"
+                ]
+                _propline_void_rows.extend(_void_rows)
+                _value_rows = [
+                    _row
+                    for _row in _rows
+                    if str(getattr(_row, "source", "") or "")
+                    != "propline_event_results_void"
+                ]
+                _propline_writer = getattr(
+                    db,
+                    "upsert_player_results_bulk",
+                    None,
+                )
+                if callable(_propline_writer) and _value_rows:
+                    await _propline_writer(_value_rows)
+                else:
+                    for _row in _value_rows:
+                        await db.upsert_player_result(_row)
+                for _row in _value_rows:
+                    _row_key = (
+                        str(getattr(_row, "player_name", "") or ""),
+                        str(getattr(_row, "sport", "") or "").upper(),
+                        str(getattr(_row, "stat_type", "") or "")
+                        .lower()
+                        .strip(),
                     )
-                    for _deferred_task in _propline_deferred:
-                        _deferred_task.cancel()
-                    if _propline_deferred:
-                        await asyncio.gather(
-                            *_propline_deferred,
-                            return_exceptions=True,
-                        )
-                    _propline_rows = [
-                        _row
-                        for _result_task in _propline_done
-                        if not _result_task.cancelled()
-                        and _result_task.exception() is None
-                        for _row in (_result_task.result() or [])
-                    ]
-                    _propline_void_rows = [
-                        _row
-                        for _row in _propline_rows
-                        if str(getattr(_row, "source", "") or "")
-                        == "propline_event_results_void"
-                    ]
-                    _propline_rows = [
-                        _row
-                        for _row in _propline_rows
-                        if str(getattr(_row, "source", "") or "")
-                        != "propline_event_results_void"
-                    ]
-                    _propline_writer = getattr(
-                        db, "upsert_player_results_bulk", None
+                    _stored_grade_results.setdefault(_row_key, []).append(_row)
+                return len(_rows)
+
+            _propline_event_deferred = 0
+            _propline_identity_deferred = 0
+            _propline_fetched_rows = 0
+            try:
+                _event_tasks = [
+                    asyncio.create_task(
+                        _fetch_propline_event_results(_gopp)
                     )
-                    if callable(_propline_writer) and _propline_rows:
-                        await _propline_writer(_propline_rows)
-                    else:
-                        for _row in _propline_rows:
-                            await db.upsert_player_result(_row)
-                    for _row in _propline_rows:
-                        _row_key = (
-                            str(getattr(_row, "player_name", "") or ""),
-                            str(getattr(_row, "sport", "") or "").upper(),
-                            str(getattr(_row, "stat_type", "") or "").lower().strip(),
-                        )
-                        _stored_grade_results.setdefault(_row_key, []).append(_row)
-                    if _propline_rows:
-                        logger.info(
-                            "_grade_opportunities_job: PropLine explicit "
-                            "settlements fetched=%d targets=%d",
-                            len(_propline_rows),
-                            len(_propline_targets),
-                        )
+                    for _gopp in _propline_event_targets
+                ]
+                _event_rows, _propline_event_deferred = (
+                    await _run_propline_tasks(_event_tasks)
+                )
+                _propline_fetched_rows += await _persist_propline_rows(
+                    _event_rows
+                )
+
+                _fallback_budget = max(
+                    0,
+                    _propline_batch_limit - len(_propline_event_targets),
+                )
+                _identity_targets_by_key: dict[
+                    tuple[str, str, str, str], Any
+                ] = {}
+                for _gopp in pending:
+                    if (
+                        _has_explicit_propline_event_settlement(_gopp)
+                        or _has_stored_grade_result(_gopp)
+                    ):
+                        continue
+                    _event_id = str(
+                        getattr(_gopp, "game_id", "") or ""
+                    ).strip()
+                    _player_key = str(
+                        getattr(_gopp, "player_name", "") or ""
+                    ).casefold().strip()
+                    _sport_key = str(
+                        getattr(_gopp, "sport", "") or ""
+                    ).upper().strip()
+                    _stat_key = str(
+                        getattr(_gopp, "stat_type", "") or ""
+                    ).lower().strip()
+                    if _event_id and any(
+                        str(getattr(_void, "game_id", "") or "").strip()
+                        == _event_id
+                        and str(
+                            getattr(_void, "player_name", "") or ""
+                        ).casefold().strip()
+                        == _player_key
+                        and str(
+                            getattr(_void, "sport", "") or ""
+                        ).upper().strip()
+                        == _sport_key
+                        and str(
+                            getattr(_void, "stat_type", "") or ""
+                        ).lower().strip()
+                        == _stat_key
+                        for _void in _propline_void_rows
+                    ):
+                        continue
+                    _source_provider = str(
+                        getattr(_gopp, "provider", None)
+                        or getattr(_gopp, "source_provider", None)
+                        or "Underdog"
+                    )
+                    _identity_key = (
+                        _player_key,
+                        _sport_key,
+                        _stat_key,
+                        _source_provider.strip().casefold(),
+                    )
+                    _identity_targets_by_key.setdefault(_identity_key, _gopp)
+
+                _propline_identity_targets = list(
+                    _identity_targets_by_key.values()
+                )[:_fallback_budget]
+                _identity_tasks = [
+                    asyncio.create_task(
+                        _fetch_propline_identity_results(_gopp)
+                    )
+                    for _gopp in _propline_identity_targets
+                ]
+                _identity_rows, _propline_identity_deferred = (
+                    await _run_propline_tasks(_identity_tasks)
+                )
+                _propline_fetched_rows += await _persist_propline_rows(
+                    _identity_rows
+                )
+                if (
+                    _propline_event_targets
+                    or _propline_identity_targets
+                    or _propline_fetched_rows
+                    or _propline_event_deferred
+                    or _propline_identity_deferred
+                ):
+                    logger.info(
+                        "_grade_opportunities_job: PropLine settlement "
+                        "lookups events=%d identities=%d result_rows=%d "
+                        "deferred=%d",
+                        len(_propline_event_targets),
+                        len(_propline_identity_targets),
+                        _propline_fetched_rows,
+                        _propline_event_deferred
+                        + _propline_identity_deferred,
+                    )
             except Exception as _propline_fetch_exc:
                 logger.warning(
                     "_grade_opportunities_job: PropLine settlement "

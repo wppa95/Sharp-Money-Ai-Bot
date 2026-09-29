@@ -354,6 +354,144 @@ async def test_grader_uses_explicit_propline_settlement_before_writing_grade():
 
 
 @pytest.mark.asyncio
+async def test_grader_fetches_event_settlement_once_for_all_event_props():
+    first = _opp(34, "First Player", "Hits", provider="Underdog")
+    second = _opp(
+        35,
+        "Second Player",
+        "Runs",
+        recommendation="UNDER",
+        provider="Underdog",
+    )
+    for row in (first, second):
+        row.sport = "MLB"
+        row.game_time = datetime(2026, 9, 5, 18, 0)
+        row.game_id = "shared-event-34"
+
+    event_results = [
+        SimpleNamespace(
+            player_name="First Player",
+            sport="MLB",
+            stat_type="hits",
+            game_date="2026-09-05",
+            actual_value=12.0,
+            source="propline_history",
+            game_id="shared-event-34",
+        ),
+        SimpleNamespace(
+            player_name="Second Player",
+            sport="MLB",
+            stat_type="runs",
+            game_date="2026-09-05",
+            actual_value=8.0,
+            source="propline_history",
+            game_id="shared-event-34",
+        ),
+    ]
+    db = MagicMock()
+    db.get_pending_opportunities = AsyncMock(return_value=[first, second])
+    db.get_player_results_bulk = AsyncMock(return_value={})
+    db.upsert_player_results_bulk = AsyncMock()
+    db.get_game_results_for_grading_bulk = AsyncMock(
+        return_value={
+            34: (event_results[0], "2026-09-05"),
+            35: (event_results[1], "2026-09-05"),
+        }
+    )
+    db.grade_opportunities_bulk = AsyncMock()
+    health = _Health()
+    stats_provider = MagicMock()
+    stats_provider.fetch_results = AsyncMock(return_value=[])
+    propline_provider = SimpleNamespace(
+        fetch_resolved_event_results=AsyncMock(return_value=event_results),
+        fetch_resolved_results=AsyncMock(return_value=[]),
+    )
+
+    with (
+        patch.object(main, "get_health_tracker", return_value=health),
+        patch(
+            "providers.player_stats.PlayerStatsProvider",
+            return_value=stats_provider,
+        ),
+        patch(
+            "providers.player_history.get_player_history_provider",
+            return_value=propline_provider,
+        ),
+    ):
+        await main._grade_opportunities_job(_context(db))
+
+    propline_provider.fetch_resolved_event_results.assert_awaited_once_with(
+        "shared-event-34",
+        "MLB",
+        source_provider="Underdog",
+    )
+    propline_provider.fetch_resolved_results.assert_not_awaited()
+    db.upsert_player_results_bulk.assert_awaited_once_with(event_results)
+    db.grade_opportunities_bulk.assert_awaited_once_with(
+        [
+            {
+                "id": 34,
+                "result": "HIT",
+                "actual_value": 12.0,
+                "error_type": None,
+                "grade_result_source": "propline_history",
+            },
+            {
+                "id": 35,
+                "result": "HIT",
+                "actual_value": 8.0,
+                "error_type": None,
+                "grade_result_source": "propline_history",
+            },
+        ]
+    )
+
+
+@pytest.mark.asyncio
+async def test_grader_deduplicates_player_history_fallback_across_events():
+    first = _opp(36, "Same Player", "Points", provider="Underdog")
+    second = _opp(37, "Same Player", "Points", provider="Underdog")
+    first.game_id = "event-36"
+    second.game_id = "event-37"
+
+    db = MagicMock()
+    db.get_pending_opportunities = AsyncMock(return_value=[first, second])
+    db.get_player_results_bulk = AsyncMock(return_value={})
+    db.get_game_results_for_grading_bulk = AsyncMock(return_value={})
+    db.grade_opportunities_bulk = AsyncMock()
+    health = _Health()
+    stats_provider = MagicMock()
+    stats_provider.fetch_results = AsyncMock(return_value=[])
+    propline_provider = SimpleNamespace(
+        fetch_resolved_event_results=AsyncMock(return_value=[]),
+        fetch_resolved_results=AsyncMock(return_value=[]),
+    )
+
+    with (
+        patch.object(main, "get_health_tracker", return_value=health),
+        patch(
+            "providers.player_stats.PlayerStatsProvider",
+            return_value=stats_provider,
+        ),
+        patch(
+            "providers.player_history.get_player_history_provider",
+            return_value=propline_provider,
+        ),
+    ):
+        await main._grade_opportunities_job(_context(db))
+
+    assert propline_provider.fetch_resolved_event_results.await_count == 2
+    propline_provider.fetch_resolved_results.assert_awaited_once_with(
+        "Same Player",
+        "NBA",
+        "Points",
+        source_provider="Underdog",
+    )
+    db.get_game_results_for_grading_bulk.assert_awaited_once()
+    db.grade_opportunities_bulk.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_grader_does_not_use_player_stats_for_underdog_settlement():
     row = _opp(
         33,
