@@ -1,0 +1,50 @@
+📊 Player Prop Grades
+
+🧾 ALL TRACKED PROP LINES
+  Distinct tracked lines: 258,503
+  Pending: 243,660 · Resolved: 14,843 · Source-verified: 14,843 · Unverified: 0
+  Above line: 5,775 · Below line: 9,047 · Push: 1 · Void/other: 20
+  Above-line rate: 39.0% (HIT / (HIT + MISS + PUSH), n=14,823)
+  For neutral rows, HIT/MISS means above/below the line, not a recommended pick.
+  By provider
+    Underdog: 225,590 lines · 5,710 above / 8,948 below / 0 push · 210,926 pending
+    PrizePicks: 32,065 lines · 40 above / 72 below / 1 push · 31,938 pending
+    FanDuel: 500 lines · 23 above / 25 below / 0 push · 452 pending
+    DraftKings: 348 lines · 2 above / 2 below / 0 push · 344 pending
+  By sport
+    MLB: 70,477 lines · 56,005 pending · 14,472 verified · 0 unverified
+    NFL: 53,134 lines · 53,073 pending · 61 verified · 0 unverified
+    CFB: 44,154 lines · 44,154 pending · 0 verified · 0 unverified
+    TENNIS: 26,524 lines · 26,516 pending · 8 verified · 0 unverified
+    WNBA: 16,622 lines · 16,550 pending · 72 verified · 0 unverified
+    FIFA: 10,586 lines · 10,586 pending · 0 verified · 0 unverified
+    CS: 8,093 lines · 8,093 pending · 0 verified · 0 unverified
+    MLS: 6,581 lines · 6,581 pending · 0 verified · 0 unverified
+    Other 32 sports: 22,332 lines
+
+─ Directional Picks (OVER/UNDER) ───
+  Stored directional picks: 66863
+  13043 verified outcomes  W:8378  L:4665  P:0  → hit rate 64% (HIT/(HIT+MISS+PUSH), n=13043)
+  Pending: 43059 · Unverified: 10761 (excluded from hit rate)
+  Cross-checked against exact tracked lines: 13043
+Verified picks include exact source-ID, line, event, actual-value, and direction matches to source-verified automatic tracking grades. Neutral tracking results are mapped through OVER/UNDER; unmatched source-less grades remain unverified. Tracked-line and pick totals are separate populations and may overlap. Pushes count in the denominator.
+
+─ By Provider ───────────────
+  PrizePicks: 0H / 0M / 0P · 394 pending · 16 unverified · — (n=0)
+  Underdog: 8378H / 4665M / 0P · 42665 pending · 10745 unverified · 64% (n=13043) · 13043 tracked-line matches
+
+─ By Sport ──────────────────
+  CFB: 861 picks · 0H/0M/0P · 861 pending · 0 unverified · — (n=0)
+  CS: 535 picks · 0H/0M/0P · 535 pending · 0 unverified · — (n=0)
+  DOTA: 147 picks · 9H/2M/0P · 129 pending · 7 unverified · 82% (n=11) · 11 tracked-line matches
+  LIGUE1: 1 picks · 0H/0M/0P · 0 pending · 1 unverified · — (n=0)
+  LOL: 46 picks · 0H/0M/0P · 46 pending · 0 unverified · — (n=0)
+  MLB: 58529 picks · 8358H/4657M/0P · 34892 pending · 10622 unverified · 64% (n=13015) · 13015 tracked-line matches
+  NBA: 106 picks · 0H/0M/0P · 106 pending · 0 unverified · — (n=0)
+  NFL: 4512 picks · 11H/6M/0P · 4405 pending · 90 unverified · 65% (n=17) · 17 tracked-line matches
+  NHL: 1196 picks · 0H/0M/0P · 1196 pending · 0 unverified · — (n=0)
+  NPB: 2 picks · 0H/0M/0P · 2 pending · 0 unverified · — (n=0)
+  SERIEA: 1 picks · 0H/0M/0P · 0 pending · 1 unverified · — (n=0)
+  TENNIS: 99 picks · 0H/0M/0P · 98 pending · 1 unverified · — (n=0)
+  VAL: 19 picks · 0H/0M/0P · 19 pending · 0 unverified · — (n=0)
+  WNBA: 809 picks · 0H/0M/0P · 770 pending · 39 unverified · — (n=0)
