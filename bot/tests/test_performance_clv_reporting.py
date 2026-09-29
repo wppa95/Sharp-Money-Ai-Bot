@@ -26,6 +26,8 @@ async def _opportunity(
     recommendation: str = "OVER",
     *,
     sport: str = "MLB",
+    game_id: str = "",
+    game_time: datetime | None = None,
 ):
     await db.log_prop_opportunity(
         external_id=external_id,
@@ -37,7 +39,8 @@ async def _opportunity(
         recommendation=recommendation,
         decision_tier="S",
         confidence=90,
-        game_time=datetime.utcnow() - timedelta(hours=2),
+        game_time=game_time or datetime.utcnow() - timedelta(hours=2),
+        game_id=game_id,
         provider="Underdog",
         bet_quality_score=90,
     )
@@ -202,3 +205,102 @@ async def test_reports_exclude_unverified_grades_and_filter_enabled_sports(db):
     assert rollups["unverified_graded"] == 0
     all_rollups = await db.get_learning_rollups()
     assert all_rollups["unverified_graded"] == 1
+
+
+@pytest.mark.asyncio
+async def test_directional_summary_cross_checks_exact_auto_graded_tracking_lines(db):
+    from database import PropTrackingLog
+
+    game_time = datetime.utcnow() - timedelta(days=2)
+    await _opportunity(
+        db,
+        "cross-checked-under",
+        recommendation="UNDER",
+        game_id="event-cross-checked",
+        game_time=game_time,
+    )
+    await _opportunity(
+        db,
+        "wrong-actual",
+        game_id="event-wrong-actual",
+        game_time=game_time,
+    )
+    await _opportunity(
+        db,
+        "wrong-event",
+        game_id="event-opportunity",
+        game_time=game_time,
+    )
+
+    for external_id, result in (
+        ("cross-checked-under", "MISS"),
+        ("wrong-actual", "HIT"),
+        ("wrong-event", "HIT"),
+    ):
+        row = await _fetch_opportunity(db, external_id)
+        await db.grade_opportunity(
+            row.id,
+            result=result,
+            actual_value=1.0,
+            grade_result_source=None,
+        )
+
+    async with db.session() as session:
+        session.add_all([
+            PropTrackingLog(
+                provider="Underdog",
+                product="Player Props",
+                external_id="cross-checked-under:line=0.5",
+                player_name="CLV Player",
+                team="TST",
+                sport="MLB",
+                stat_type="hits",
+                line_value=0.5,
+                game_time=game_time,
+                game_id="event-cross-checked",
+                result="HIT",
+                actual_value=1.0,
+                settlement_source="auto_grade",
+            ),
+            PropTrackingLog(
+                provider="Underdog",
+                product="Player Props",
+                external_id="wrong-actual:line=0.5",
+                player_name="CLV Player",
+                team="TST",
+                sport="MLB",
+                stat_type="hits",
+                line_value=0.5,
+                game_time=game_time,
+                game_id="event-wrong-actual",
+                result="HIT",
+                actual_value=2.0,
+                settlement_source="auto_grade",
+            ),
+            PropTrackingLog(
+                provider="Underdog",
+                product="Player Props",
+                external_id="wrong-event:line=0.5",
+                player_name="CLV Player",
+                team="TST",
+                sport="MLB",
+                stat_type="hits",
+                line_value=0.5,
+                game_time=game_time,
+                game_id="different-event",
+                result="HIT",
+                actual_value=1.0,
+                settlement_source="auto_grade",
+            ),
+        ])
+        await session.commit()
+
+    summary = await db.get_directional_performance_summary()
+    mlb = summary["by_sport"]["MLB"]
+
+    assert mlb["directional"] == 3
+    assert mlb["hit"] == 0
+    assert mlb["miss"] == 1
+    assert mlb["resolved"] == 1
+    assert mlb["tracked_line_verified"] == 1
+    assert mlb["unverified"] == 2

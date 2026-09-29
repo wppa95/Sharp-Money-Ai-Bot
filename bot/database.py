@@ -3115,6 +3115,11 @@ class Database:
             if enabled_sport_keys is not None
             else []
         )
+        tracking_sport_filter = (
+            [func.upper(PropTrackingLog.sport).in_(enabled_sport_keys)]
+            if enabled_sport_keys is not None
+            else []
+        )
         async with self.session() as s:
             result = await s.execute(
                 select(
@@ -3178,6 +3183,46 @@ class Database:
                     *sport_filter,
                 )
             )
+            grouped_rows = result.all()
+            clv_rows = clv_result.all()
+
+            # Older directional grades may have lost their source field even
+            # though the same exact prop line was independently graded in the
+            # universal tracking ledger. Keep the ledgers separate, but allow
+            # a report-only cross-check when source ID, line, event, timestamp,
+            # actual value, and direction all agree.
+            legacy_result = await s.execute(
+                select(PropOpportunityLog).where(
+                    PropOpportunityLog.recommendation.in_(("OVER", "UNDER")),
+                    PropOpportunityLog.result.in_(
+                        tuple(_DIRECTIONAL_GRADE_RESULTS)
+                    ),
+                    func.trim(
+                        func.coalesce(PropOpportunityLog.grade_result_source, "")
+                    ) == "",
+                    *sport_filter,
+                )
+            )
+            legacy_opportunities = list(legacy_result.scalars().all())
+            tracking_rows = []
+            if legacy_opportunities:
+                tracking_result = await s.execute(
+                    select(PropTrackingLog).where(
+                        PropTrackingLog.product == PLAYER_PROPS_PRODUCT,
+                        PropTrackingLog.result.in_(
+                            tuple(_DIRECTIONAL_GRADE_RESULTS)
+                        ),
+                        func.lower(
+                            func.trim(
+                                func.coalesce(
+                                    PropTrackingLog.settlement_source, ""
+                                )
+                            )
+                        ) == "auto_grade",
+                        *tracking_sport_filter,
+                    )
+                )
+                tracking_rows = list(tracking_result.scalars().all())
 
         by_sport: dict[str, dict] = {}
         by_provider: dict[str, dict] = {}
@@ -3196,8 +3241,144 @@ class Database:
                 "miss": 0,
                 "push": 0,
                 "void": 0,
+                "tracked_line_verified": 0,
                 "raw": {},
             }
+
+        def _crosswalk_source_id(value: object, provider: object) -> str:
+            external_id = str(value or "").strip()
+            if (
+                str(provider or "").strip().casefold() == "prizepicks"
+                and external_id.startswith(_PRIZEPICKS_EXTERNAL_PREFIX)
+            ):
+                external_id = external_id[len(_PRIZEPICKS_EXTERNAL_PREFIX):]
+            return external_id
+
+        def _same_number(left: object, right: object) -> bool:
+            try:
+                left_number = float(left)
+                right_number = float(right)
+            except (TypeError, ValueError):
+                return False
+            return (
+                math.isfinite(left_number)
+                and math.isfinite(right_number)
+                and math.isclose(
+                    left_number,
+                    right_number,
+                    rel_tol=0.0,
+                    abs_tol=1e-8,
+                )
+            )
+
+        tracking_by_source_id: dict[str, list[tuple[object, float]]] = {}
+        for tracking_row in tracking_rows:
+            tracked_external_id = str(
+                getattr(tracking_row, "external_id", "") or ""
+            ).strip()
+            base_external_id, separator, line_suffix = (
+                tracked_external_id.rpartition(":line=")
+            )
+            if not separator:
+                continue
+            try:
+                tracked_line_suffix = float(line_suffix)
+            except (TypeError, ValueError):
+                continue
+            base_external_id = _crosswalk_source_id(
+                base_external_id,
+                getattr(tracking_row, "provider", None),
+            )
+            if not base_external_id:
+                continue
+            tracking_by_source_id.setdefault(base_external_id, []).append(
+                (tracking_row, tracked_line_suffix)
+            )
+
+        tracked_line_verified: dict[tuple, int] = {}
+        for opportunity in legacy_opportunities:
+            if not _is_supported_tracking_sport(opportunity.sport):
+                continue
+            provider = str(opportunity.provider or "Underdog").strip()
+            provider_key = provider.casefold()
+            source_id = _crosswalk_source_id(
+                opportunity.external_id,
+                provider,
+            )
+            game_id = str(opportunity.game_id or "").strip()
+            game_time = opportunity.game_time
+            if not source_id or not game_id or game_time is None:
+                continue
+            recommendation = str(
+                opportunity.recommendation or ""
+            ).strip().upper()
+            outcome = str(opportunity.result or "").strip().upper()
+            expected_matches = 0
+            for tracking_row, tracked_line_suffix in tracking_by_source_id.get(
+                source_id, ()
+            ):
+                if (
+                    str(tracking_row.provider or "").strip().casefold()
+                    != provider_key
+                    or str(tracking_row.product or "").strip().casefold()
+                    != str(opportunity.product or PLAYER_PROPS_PRODUCT)
+                    .strip()
+                    .casefold()
+                    or str(tracking_row.player_name or "").strip().casefold()
+                    != str(opportunity.player_name or "").strip().casefold()
+                    or str(tracking_row.sport or "").strip().upper()
+                    != str(opportunity.sport or "").strip().upper()
+                    or str(tracking_row.stat_type or "").strip().casefold()
+                    != str(opportunity.stat_type or "").strip().casefold()
+                    or str(tracking_row.game_id or "").strip() != game_id
+                    or tracking_row.game_time is None
+                    or tracking_row.game_time != game_time
+                    or not _same_number(
+                        tracking_row.line_value, opportunity.line_value
+                    )
+                    or not _same_number(
+                        tracked_line_suffix, opportunity.line_value
+                    )
+                    or not _same_number(
+                        tracking_row.actual_value, opportunity.actual_value
+                    )
+                ):
+                    continue
+
+                neutral_result = str(tracking_row.result or "").strip().upper()
+                actual_value = float(tracking_row.actual_value)
+                line_value = float(tracking_row.line_value)
+                derived_neutral_result = (
+                    "PUSH"
+                    if abs(actual_value - line_value) < 0.01
+                    else "HIT"
+                    if actual_value > line_value
+                    else "MISS"
+                )
+                if neutral_result != derived_neutral_result:
+                    continue
+                directional_result = neutral_result
+                if recommendation == "UNDER" and neutral_result in {"HIT", "MISS"}:
+                    directional_result = (
+                        "MISS" if neutral_result == "HIT" else "HIT"
+                    )
+                if directional_result == outcome:
+                    expected_matches += 1
+
+            # The tracking identity is unique. If corrupted/duplicate rows
+            # make the crosswalk ambiguous, keep the opportunity unverified.
+            if expected_matches != 1:
+                continue
+            group_key = (
+                provider_key,
+                str(opportunity.sport or "UNKNOWN").strip().upper(),
+                recommendation,
+                outcome,
+                opportunity.grade_result_source,
+            )
+            tracked_line_verified[group_key] = (
+                tracked_line_verified.get(group_key, 0) + 1
+            )
 
         def _add_outcome(
             target: dict,
@@ -3207,6 +3388,7 @@ class Database:
             outcome: str,
             grade_result_source: str,
             count: int,
+            tracked_line_verified_count: int = 0,
         ) -> None:
             row = target.setdefault(key, _new_performance_row())
             row["directional"] += count
@@ -3218,7 +3400,22 @@ class Database:
             elif not is_trusted_directional_grade_source(
                 provider, outcome, grade_result_source
             ):
-                row["unverified"] += count
+                linked_count = (
+                    min(count, max(0, int(tracked_line_verified_count or 0)))
+                    if outcome in _DIRECTIONAL_GRADE_RESULTS
+                    else 0
+                )
+                row["tracked_line_verified"] += linked_count
+                row["unverified"] += count - linked_count
+                if linked_count:
+                    row["resolved"] += linked_count
+                    row["graded"] += linked_count
+                    if outcome == "HIT":
+                        row["hit"] += linked_count
+                    elif outcome == "MISS":
+                        row["miss"] += linked_count
+                    elif outcome == "PUSH":
+                        row["push"] += linked_count
             elif outcome in _DIRECTIONAL_GRADE_RESULTS:
                 row["resolved"] += count
                 row["graded"] += count
@@ -3240,7 +3437,7 @@ class Database:
             outcome,
             grade_result_source,
             count,
-        ) in result.all():
+        ) in grouped_rows:
             if not _is_supported_tracking_sport(sport):
                 continue
             provider_key = str(provider or "Underdog")
@@ -3248,6 +3445,16 @@ class Database:
             rec_key = str(recommendation or "").upper()
             outcome_key = str(outcome or "PENDING").upper()
             count = int(count or 0)
+            linked_count = tracked_line_verified.get(
+                (
+                    provider_key.casefold(),
+                    sport_key.strip().upper(),
+                    rec_key,
+                    outcome_key,
+                    grade_result_source,
+                ),
+                0,
+            )
             _add_outcome(
                 by_sport,
                 sport_key,
@@ -3256,6 +3463,7 @@ class Database:
                 outcome_key,
                 str(grade_result_source or ""),
                 count,
+                linked_count,
             )
             _add_outcome(
                 by_provider,
@@ -3265,6 +3473,7 @@ class Database:
                 outcome_key,
                 str(grade_result_source or ""),
                 count,
+                linked_count,
             )
             _add_outcome(
                 by_sport_direction.setdefault(sport_key, {}),
@@ -3274,6 +3483,7 @@ class Database:
                 outcome_key,
                 str(grade_result_source or ""),
                 count,
+                linked_count,
             )
 
         # One opportunity can have several snapshots/seeds as a line moves.
@@ -3291,7 +3501,7 @@ class Database:
             clv_pct,
             alerted_at,
             seed_id,
-        ) in clv_result.all():
+        ) in clv_rows:
             if not _is_supported_tracking_sport(sport) or clv_pct is None:
                 continue
             candidate = (

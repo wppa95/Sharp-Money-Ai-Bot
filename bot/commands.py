@@ -4347,6 +4347,10 @@ async def _cmd_grade_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     overall_w = sum(int(row.get("hit", 0) or 0) for row in by_sport.values())
     overall_l = sum(int(row.get("miss", 0) or 0) for row in by_sport.values())
     overall_p = sum(int(row.get("push", 0) or 0) for row in by_sport.values())
+    tracked_line_verified_count = sum(
+        int(row.get("tracked_line_verified", 0) or 0)
+        for row in by_sport.values()
+    )
     unverified_count = sum(
         int(row.get("unverified", 0) or 0) for row in by_sport.values()
     )
@@ -4377,8 +4381,14 @@ async def _cmd_grade_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         f"(HIT/(HIT+MISS+PUSH), n={denominator})",
         f"  Pending: <b>{pending_count}</b> · "
         f"Unverified: <b>{unverified_count}</b> (excluded from hit rate)",
-        "<i>Only source-verified completed-game outcomes count. "
-        "Pushes are included in the hit-rate denominator.</i>",
+        f"  Cross-checked against exact tracked lines: "
+        f"<b>{tracked_line_verified_count}</b>",
+        "<i>Verified picks include exact source-ID, line, event, actual-value, "
+        "and direction matches to source-verified automatic tracking grades. "
+        "Neutral tracking results are mapped through OVER/UNDER; unmatched "
+        "source-less grades remain unverified. Tracked-line and pick totals "
+        "are separate populations and may overlap. Pushes count in the "
+        "denominator.</i>",
     ]
     if by_provider:
         lines += ["", "─ <b>By Provider</b> " + "─" * 15]
@@ -4392,6 +4402,12 @@ async def _cmd_grade_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
                 f"{provider_hit / provider_denom * 100:.0f}%"
                 if provider_denom else "—"
             )
+            provider_linked = int(row.get("tracked_line_verified", 0) or 0)
+            provider_linked_note = (
+                f" · {provider_linked} tracked-line matches"
+                if provider_linked
+                else ""
+            )
             lines.append(
                 f"  {_html.escape(str(provider))}: "
                 f"{provider_hit}H / "
@@ -4400,6 +4416,7 @@ async def _cmd_grade_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
                 f"{int(row.get('pending', 0) or 0)} pending · "
                 f"{int(row.get('unverified', 0) or 0)} unverified · "
                 f"{provider_rate} (n={provider_denom})"
+                f"{provider_linked_note}"
             )
     if by_sport:
         lines += ["", "─ <b>By Sport</b> " + "─" * 18]
@@ -4410,6 +4427,12 @@ async def _cmd_grade_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
                 + int(row.get("push", 0) or 0)
             )
             rate = f"{int(row.get('hit', 0) or 0) / graded * 100:.0f}%" if graded else "—"
+            sport_linked = int(row.get("tracked_line_verified", 0) or 0)
+            sport_linked_note = (
+                f" · {sport_linked} tracked-line matches"
+                if sport_linked
+                else ""
+            )
             lines.append(
                 f"  {_html.escape(str(sport))}: "
                 f"{int(row.get('directional', 0) or 0)} picks · "
@@ -4419,6 +4442,7 @@ async def _cmd_grade_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
                 f"{int(row.get('pending', 0) or 0)} pending · "
                 f"{int(row.get('unverified', 0) or 0)} unverified · "
                 f"{rate} (n={graded})"
+                f"{sport_linked_note}"
             )
 
 

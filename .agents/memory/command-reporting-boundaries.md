@@ -33,6 +33,19 @@ grades makes the tracking funnel falsely appear empty.
 the primary tracking/grading display use the universal ledger and preserve
 provider-level result counts.
 
+Directional performance may cross-check a source-less grade against a
+source-verified automatic tracking grade only when provider, base source ID,
+line, event ID/time, product, player/stat, actual value, and mapped OVER/UNDER
+outcome all match. This is report-only corroboration; it does not rewrite the
+opportunity's provenance or qualify the row for adaptive learning.
+
+**Why:** The universal ledger stores neutral above/below outcomes separately.
+Some older directional grades lost their source field, but exact shared
+identity can corroborate a subset without treating all tracked lines as picks.
+
+**How to apply:** Show exact cross-checks as a separate count, keep the two
+populations distinct, and leave every unmatched source-less result unverified.
+
 Per-sport report tables must union normalized database maps with live FPR
 telemetry and compatibility rows before rendering. Aggregate totals can be
 correct while the table is empty if the renderer only trusts normalized

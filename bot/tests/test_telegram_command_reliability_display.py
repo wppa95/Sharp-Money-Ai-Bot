@@ -917,7 +917,15 @@ async def test_grade_shows_all_tracked_lines_separately_from_directional_picks()
     update, context = _update_and_context()
     db = MagicMock()
     db.get_directional_performance_summary = AsyncMock(return_value={
-        "by_sport": {"NBA": {"directional": 2, "pending": 2}},
+        "by_sport": {
+            "NBA": {
+                "directional": 2,
+                "pending": 1,
+                "resolved": 1,
+                "hit": 1,
+                "tracked_line_verified": 1,
+            }
+        },
         "by_provider": {},
     })
     db.get_tracked_prop_grade_summary = AsyncMock(return_value={
@@ -945,6 +953,8 @@ async def test_grade_shows_all_tracked_lines_separately_from_directional_picks()
     assert "ALL TRACKED PROP LINES" in message
     assert "Distinct tracked lines: <b>1,234</b>" in message
     assert "Stored directional picks: <b>2</b>" in message
+    assert "Cross-checked against exact tracked lines: <b>1</b>" in message
+    assert "1 tracked-line matches" in message
     assert "not a recommended pick" in message
 
 
