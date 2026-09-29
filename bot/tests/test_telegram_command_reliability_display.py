@@ -805,6 +805,44 @@ async def test_tracking_waits_through_extended_history_read_window():
 
 
 @pytest.mark.asyncio
+async def test_tracking_shows_all_observations_without_directional_pick_noise():
+    update, context = _update_and_context()
+    db = MagicMock()
+
+    async def tracking_summary():
+        return {
+            "historical_observations": 177,
+            "active_tracked": 2,
+            "observations_by_sport": {"MLB": 100, "BKFC": 77},
+            "active_by_sport": {"MLB": 2},
+            "historical_observations_by_provider": {"Underdog": 100},
+            "active_by_provider": {"Underdog": 2},
+            # These fields remain in the shared DB summary for other reports,
+            # but /tracking should not render directional-pick noise.
+            "directional_total": 9,
+            "pending": 8,
+            "directional_by_sport": {"MLB": 9},
+        }
+
+    db.get_tracking_summary = tracking_summary
+    with (
+        patch("commands._check_allowed", return_value=True),
+        patch("commands._db", db),
+    ):
+        await commands.cmd_tracking(update, context)
+
+    message = update.message.reply_text.await_args.args[0]
+    assert "Historical observations: 177" in message
+    assert "Active tracked props: 2" in message
+    assert "All tracked observations by sport" in message
+    assert "BKFC:</b> observations 77 · active 0" in message
+    assert "MLB:</b> observations 100 · active 2" in message
+    assert "directional" not in message.lower()
+    assert "pending grading" not in message.lower()
+    assert "Pick Results" not in message
+
+
+@pytest.mark.asyncio
 async def test_analyst_reports_unavailable_when_recent_picks_read_is_busy():
     update, context = _update_and_context()
     db = MagicMock()

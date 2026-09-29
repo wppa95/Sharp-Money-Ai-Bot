@@ -5231,7 +5231,7 @@ async def cmd_config(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
 
 
 async def cmd_tracking(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """/tracking — Show persistent monitoring and directional grading results."""
+    """/tracking — Show the full observed prop universe and active counts."""
     if not _check_allowed(update):
         await update.message.reply_text("⛔ Unauthorized.")
         return
@@ -5271,187 +5271,59 @@ async def cmd_tracking(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         )
         return
 
-    counts   = data.get("counts", {})
-    by_sport = data.get("by_sport", {})
-    total    = data.get("total", 0)
-    pending  = data.get("pending", 0)
     active_by_sport = data.get("active_by_sport", {}) or {}
     observations_by_sport = data.get("observations_by_sport", {}) or {}
-    directional_by_sport = data.get("directional_by_sport", {}) or {}
     tracking_sports = (
         set(active_by_sport)
         | set(observations_by_sport)
-        | set(directional_by_sport)
-        | set(by_sport)
     )
-
-    def _n(d: dict, *keys) -> int:
-        """Safely walk nested dict and return int."""
-        cur = d
-        for k in keys:
-            if not isinstance(cur, dict):
-                return 0
-            cur = cur.get(k, 0)
-        return cur if isinstance(cur, int) else 0
-
-    def _hit_rate(hits: int, total_graded: int) -> str:
-        if total_graded == 0:
-            return "—"
-        return f"{hits / total_graded:.1%}"
 
     lines: list[str] = [
         "📊 <b>Prop Opportunity Tracker</b>",
         f"<i>Historical observations: "
         f"{int(data.get('historical_observations', data.get('tracked_observations', 0)) or 0)}  ·  "
-        f"Active tracked props: {int(data.get('active_tracked', data.get('tracked', 0)) or 0)}  ·  "
-        f"Directional opportunities: {total}  ·  Pending grading: {pending}</i>",
+        f"Active tracked props: {int(data.get('active_tracked', data.get('tracked', 0)) or 0)}</i>",
         "",
     ]
 
-    # ── Directional picks (OVER + UNDER) ───────────────────────────────────────
-    play_recs = ("OVER", "UNDER")
-    play_hit = play_miss = play_push = play_pending = 0
-    for rec in play_recs:
-        play_hit     += _n(counts, rec, "HIT")
-        play_miss    += _n(counts, rec, "MISS")
-        play_push    += _n(counts, rec, "PUSH")
-        play_pending += _n(counts, rec, "PENDING")
-    play_graded = play_hit + play_miss + play_push
-    play_unverified = sum(_n(counts, rec, "UNVERIFIED") for rec in play_recs)
-    play_void = sum(
-        _n(counts, rec, result)
-        for rec in play_recs
-        for result in ("VOID", "CANCELLED", "INJURY_VOID", "GAME_INTERRUPTED")
-    )
-    play_total = play_graded + play_pending + play_unverified + play_void
-
-    # Stored HIT/MISS already reflect whether the recorded direction won.
-    under_hit_correct  = _n(counts, "UNDER", "HIT")
-    over_hit_correct   = _n(counts, "OVER",  "HIT")
-    play_correct       = over_hit_correct + under_hit_correct
-
-    lines += [
-        "━━━━━━━━━━━━━━━━━━",
-        "✅ <b>Directional Pick Results</b>",
-        f"  Total picks:   <code>{play_total}</code>",
-        f"  Graded:        <code>{play_graded}</code>",
-    ]
-    if play_unverified:
-        lines.append(
-            f"  Unverified:    <code>{play_unverified}</code> "
-            "<i>(excluded from hit rates)</i>"
-        )
-    if play_graded > 0:
-        lines += [
-            f"  Correct picks: <code>{play_correct}</code>  "
-            f"({_hit_rate(play_correct, play_graded)})",
-            f"  ➖ Push:       <code>{play_push}</code>",
-            f"  ⏳ Pending:    <code>{play_pending}</code>",
-        ]
-        if any(_n(counts, "OVER", result) for result in ("HIT", "MISS", "PUSH")):
-            o_hit  = _n(counts, "OVER", "HIT")
-            o_miss = _n(counts, "OVER", "MISS")
-            o_tot  = o_hit + o_miss + _n(counts, "OVER", "PUSH")
-            lines.append(
-                f"  <i>OVER  picks: {o_hit}/{o_tot} ({_hit_rate(o_hit, o_tot)})</i>"
-            )
-        if any(_n(counts, "UNDER", result) for result in ("HIT", "MISS", "PUSH")):
-            u_hit  = _n(counts, "UNDER", "HIT")
-            u_miss = _n(counts, "UNDER", "MISS")
-            u_tot  = u_hit + u_miss + _n(counts, "UNDER", "PUSH")
-            lines.append(
-                f"  <i>UNDER picks: {u_hit}/{u_tot} ({_hit_rate(u_hit, u_tot)})</i>"
-            )
-    else:
-        lines.append("  <i>No graded directional pick results yet.</i>")
-
-    # ── Full tracked universe by sport ─────────────────────────────────────────
+    # Show the observation universe, including sports with no evaluated plays.
     if tracking_sports:
         lines += [
-            "",
-            "━━━━━━━━━━━━━━━━━━",
-            "<b>By Sport (all tracked observations)</b>",
-            "<i>Directional opportunities and grading are subsets of observations.</i>",
+            "<b>All tracked observations by sport</b>",
         ]
         for sport in sorted(tracking_sports):
-            sport_data = by_sport.get(sport, {})
-            s_correct = (
-                _n(sport_data, "OVER",  "HIT")
-                + _n(sport_data, "UNDER", "HIT")
-            )
-            s_graded = sum(
-                _n(sport_data, rec, res)
-                for rec in ("OVER", "UNDER")
-                for res in ("HIT", "MISS", "PUSH")
-            )
-            line = (
+            lines.append(
                 f"  <b>{_html.escape(str(sport))}:</b> "
                 f"observations {int(observations_by_sport.get(sport, 0) or 0):,}"
                 f" · active {int(active_by_sport.get(sport, 0) or 0):,}"
-                f" · directional {int(directional_by_sport.get(sport, 0) or 0):,}"
             )
-            if s_graded > 0:
-                line += (
-                    f" · PLAY correct {s_correct}/{s_graded} "
-                    f"({_hit_rate(s_correct, s_graded)})"
-                )
-            lines.append(line)
 
-    by_provider = data.get("by_provider", {}) or {}
     _active_by_provider = data.get("active_by_provider", {}) or {}
     _observed_by_provider = data.get(
         "historical_observations_by_provider",
         data.get("tracked_observations_by_provider", {}),
     ) or {}
-    _directional_by_provider = data.get("directional_by_provider", {}) or {}
-    _delivered_by_provider = data.get(
-        "delivered_by_provider", data.get("provider_delivered", {})
-    ) or {}
-    _pending_by_provider = data.get("pending_by_provider", {}) or {}
-    _resolved_by_provider = data.get("resolved_by_provider", {}) or {}
     _provider_names = (
-        set(by_provider)
-        | set(_active_by_provider)
+        set(_active_by_provider)
         | set(_observed_by_provider)
-        | set(_directional_by_provider)
     )
     _provider_names = {
         provider for provider in _provider_names
         if str(provider).strip().lower() == "underdog"
     }
     if _provider_names:
-        lines += ["", "━━━━━━━━━━━━━━━━━━", "<b>By Provider</b>"]
+        lines += ["", "<b>By Provider (observations + active)</b>"]
         for provider in sorted(_provider_names):
-            provider_data = by_provider.get(provider, {})
-            p_correct = (
-                _n(provider_data, "OVER", "HIT")
-                + _n(provider_data, "UNDER", "HIT")
-            )
-            p_resolved = sum(
-                _n(provider_data, rec, res)
-                for rec in ("OVER", "UNDER")
-                for res in ("HIT", "MISS", "PUSH")
-            )
-            p_pending = sum(
-                _n(provider_data, rec, "PENDING")
-                for rec in ("OVER", "UNDER")
-            )
             lines.append(
                 f"  <b>{_html.escape(provider)}:</b> "
                 f"active {int(_active_by_provider.get(provider, 0) or 0):,}"
                 f" · observed {int(_observed_by_provider.get(provider, 0) or 0):,}"
-                f" · directional {int(_directional_by_provider.get(provider, 0) or 0):,}"
-                f" · delivered {int(_delivered_by_provider.get(provider, 0) or 0):,}"
-                f" · pending {int(_pending_by_provider.get(provider, 0) or 0):,}"
-                f" · resolved {int(_resolved_by_provider.get(provider, 0) or 0):,}"
-                f" · {p_correct}/{p_resolved} correct"
             )
 
     lines += [
         "",
-        "━━━━━━━━━━━━━━━━━━",
-        "<i>Results graded every 1 h from stored game stats.</i>",
-        "<i>HIT means the recorded OVER or UNDER pick won; MISS means it lost.</i>",
+        "<i>Observation counts include stored feed snapshots; one prop can have multiple observations.</i>",
+        "<i>Active counts are the latest non-removed upcoming props.</i>",
     ]
 
     try:
