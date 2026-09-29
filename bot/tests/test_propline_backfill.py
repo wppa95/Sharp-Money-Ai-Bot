@@ -83,10 +83,11 @@ class _ExportClient:
 @pytest.mark.asyncio
 async def test_backfill_fetches_once_and_reuses_sqlite_request_marker(db):
     client = _ExportClient()
+    now = datetime.utcnow().replace(microsecond=0)
     kwargs = {
         "sport": "basketball_nba",
-        "since": "2026-07-01T00:00:00Z",
-        "until": "2026-09-24T00:00:00Z",
+        "since": (now - timedelta(days=89)).isoformat() + "Z",
+        "until": (now - timedelta(days=1)).isoformat() + "Z",
     }
 
     first = await backfill_propline_resolved_props(db, client, **kwargs)

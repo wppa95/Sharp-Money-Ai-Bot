@@ -705,7 +705,7 @@ async def test_read_only_player_history_rotation_persists_verified_rows():
 
 
 @pytest.mark.asyncio
-async def test_read_only_history_persistence_stays_closed_for_football_and_incomplete():
+async def test_read_only_history_persists_settled_nfl_and_rejects_incomplete():
     from types import SimpleNamespace
     from unittest.mock import AsyncMock, MagicMock
 
@@ -717,7 +717,7 @@ async def test_read_only_history_persistence_stays_closed_for_football_and_incom
         family="player_history",
         canonical_sport="NFL",
         player_name="Alex Example",
-        market="goals",
+        market="passing yards",
     )
     settled_entry = SimpleNamespace(
         event_id="match-1",
@@ -748,9 +748,15 @@ async def test_read_only_history_persistence_stays_closed_for_football_and_incom
         ),
     )
 
-    assert football_count == 0
+    assert football_count == 1
     assert incomplete_count == 0
-    db.upsert_player_results_bulk.assert_not_awaited()
+    db.upsert_player_results_bulk.assert_awaited_once()
+    saved = db.upsert_player_results_bulk.await_args.args[0]
+    assert len(saved) == 1
+    assert saved[0].sport == "NFL"
+    assert saved[0].stat_type == "passing yards"
+    assert saved[0].game_id == "match-1"
+    assert saved[0].source == "propline_history"
 
 
 @pytest.mark.asyncio
