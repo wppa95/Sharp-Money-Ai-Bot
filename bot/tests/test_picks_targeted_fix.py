@@ -11,7 +11,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 import commands
-from database import Database, PropLineHistory, UnderdogSnapshotRecord
+from database import Database, PlayerGameResult, PropLineHistory, UnderdogSnapshotRecord
 from providers.propline import normalize_propline_prizepicks_record
 from providers.prop_provider import PlayerProp
 
@@ -63,6 +63,93 @@ def test_direction_is_resolved_before_fair_result_cap_for_underdog():
 
     assert [(provider, row.player_name) for provider, row in selected] == [
         ("Underdog", "UD Directional"),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_picks_player_history_uses_one_bulk_read(monkeypatch):
+    first = ("Player One", "NBA", "points")
+    second = ("Player Two", "NFL", "passing yards")
+    first_rows = [SimpleNamespace(actual_value=12.0)]
+    second_rows = [SimpleNamespace(actual_value=255.0)]
+
+    class BulkHistoryDB:
+        def __init__(self):
+            self.requested = None
+
+        async def get_player_results_bulk(self, requested, limit):
+            self.requested = (requested, limit)
+            return {first: first_rows, second: second_rows}
+
+        async def get_player_results(self, *args, **kwargs):
+            raise AssertionError("bulk history should avoid per-player queries")
+
+    database = BulkHistoryDB()
+    monkeypatch.setattr(commands, "_db", database)
+    picks = [
+        (
+            SimpleNamespace(
+                player_name=first[0], sport=first[1], stat_type="Points"
+            ),
+            None,
+        ),
+        (
+            SimpleNamespace(
+                player_name=first[0], sport=first[1], stat_type="Points"
+            ),
+            None,
+        ),
+        (
+            SimpleNamespace(
+                player_name=second[0],
+                sport=second[1],
+                stat_type="Passing Yards",
+            ),
+            None,
+        ),
+    ]
+
+    rows_by_identity = await commands._load_picks_player_results(picks)
+
+    assert database.requested == ([first, second], 30)
+    assert rows_by_identity == {first: first_rows, second: second_rows}
+
+
+@pytest.mark.asyncio
+async def test_picks_bulk_history_read_uses_shared_player_results(db, monkeypatch):
+    await db.upsert_player_results_bulk(
+        [
+            PlayerGameResult(
+                player_name="Shared History Player",
+                sport="NFL",
+                stat_type="passing yards",
+                game_date="2026-09-28",
+                actual_value=251.0,
+                source="propline_player_games",
+                game_id="shared-event",
+            ),
+            PlayerGameResult(
+                player_name="Shared History Player",
+                sport="NFL",
+                stat_type="rushing yards",
+                game_date="2026-09-28",
+                actual_value=19.0,
+                source="propline_player_games",
+                game_id="other-stat-event",
+            ),
+        ]
+    )
+    monkeypatch.setattr(commands, "_db", db)
+    prop = SimpleNamespace(
+        player_name="Shared History Player",
+        sport="NFL",
+        stat_type="Passing Yards",
+    )
+
+    rows = await commands._load_picks_player_results([(prop, None)])
+
+    assert [row.actual_value for row in rows[("Shared History Player", "NFL", "passing yards")]] == [
+        251.0
     ]
 
 

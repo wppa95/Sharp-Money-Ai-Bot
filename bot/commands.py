@@ -120,6 +120,61 @@ async def _bounded(coro, timeout: Optional[float] = None):
     raise asyncio.TimeoutError
 
 
+async def _picks_report_read(coro):
+    """Give /picks stages the command's dedicated report deadline."""
+    return await _bounded(coro, timeout=_PICKS_TIMEOUT_SECONDS)
+
+
+async def _load_picks_player_results(picks) -> dict[tuple[str, str, str], list]:
+    """Load hit-rate evidence with one bulk query when the database supports it."""
+    identities = list(dict.fromkeys(
+        (
+            str(prop.player_name or ""),
+            str(prop.sport or ""),
+            str(prop.stat_type or "").lower().strip(),
+        )
+        for prop, _comparison in picks
+        if prop.player_name and prop.sport and prop.stat_type
+    ))
+    if not identities:
+        return {}
+
+    bulk_reader = getattr(_db, "get_player_results_bulk", None)
+    if callable(bulk_reader):
+        bulk_rows = await _picks_report_read(
+            bulk_reader(identities, limit=30)
+        )
+        if isinstance(bulk_rows, dict):
+            return {
+                identity: list(bulk_rows.get(identity) or [])
+                for identity in identities
+            }
+        logger.warning(
+            "cmd_picks: bulk player-history lookup returned an invalid payload"
+        )
+
+    # Compatibility fallback for older database adapters and focused mocks.
+    # Bound concurrent sessions so a report does not compete with a live scan
+    # using dozens of independent per-player reads.
+    reader = getattr(_db, "get_player_results", None)
+    if not callable(reader):
+        return {identity: [] for identity in identities}
+    semaphore = asyncio.Semaphore(8)
+
+    async def read_one(identity):
+        async with semaphore:
+            try:
+                rows = await reader(*identity, limit=30)
+                return identity, list(rows or [])
+            except Exception:
+                return identity, []
+
+    fetched = await _picks_report_read(
+        asyncio.gather(*(read_one(identity) for identity in identities))
+    )
+    return dict(fetched)
+
+
 async def _independent_report_reads(
     reads: list,
     timeout: Optional[float] = None,
@@ -2129,14 +2184,9 @@ async def cmd_picks(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     logger.info("cmd_picks: command received from user %s",
                 update.effective_user.id if update.effective_user else "?")
     try:
-      picks_timeout = (
-          _PICKS_TIMEOUT_SECONDS
-          if _COMMAND_TIMEOUT_SECONDS == 3.0
-          else _COMMAND_TIMEOUT_SECONDS
-      )
       return await _bounded(
           _cmd_picks_inner(update, context),
-          timeout=picks_timeout,
+          timeout=_PICKS_TIMEOUT_SECONDS,
       )
     except asyncio.TimeoutError:
         logger.warning(
@@ -2224,7 +2274,7 @@ async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     _provider_overfetch = max(limit * 4, 40)
     logger.info("cmd_picks: fetching current provider props (sport=%s)", sport_filter)
     _stage_started = time.monotonic()
-    ud_props = await _bounded(_db.get_top_ud_props_for_picks(
+    ud_props = await _picks_report_read(_db.get_top_ud_props_for_picks(
         limit=_provider_overfetch,
         since_hours=_since_hours,
         sports=[sport_filter] if sport_filter else config.active_sports,
@@ -2254,7 +2304,7 @@ async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         # them ahead of the live observation pool so a later removed snapshot
     # cannot make a sent alert disappear from /picks.
     try:
-        _alerted_opps = await _bounded(
+        _alerted_opps = await _picks_report_read(
             _db.get_current_actionable_opportunities(limit=500)
         )
     except Exception as _alerted_exc:
@@ -2288,7 +2338,7 @@ async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     # provider. Keep the bounded legacy read for comparison compatibility, but
     # never expose those rows as a command provider or candidate.
     try:
-        await _bounded(_db.get_latest_props_for_provider(
+        await _picks_report_read(_db.get_latest_props_for_provider(
             "PrizePicks",
             since_hours=_since_hours,
             limit=_provider_overfetch,
@@ -2303,7 +2353,7 @@ async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     _rec_map: dict = {}
     try:
         _stage_started = time.monotonic()
-        _rec_map = await _bounded(_db.get_ud_recommendations_bulk(
+        _rec_map = await _picks_report_read(_db.get_ud_recommendations_bulk(
             [_ud_recommendation_identity(p) for p in ud_props],
             since_hours=24,
         ))
@@ -2338,7 +2388,7 @@ async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     _provenance_reader = getattr(_db, "get_ud_evidence_provenance_bulk", None)
     if callable(_provenance_reader):
         try:
-            _provenance_map = await _bounded(_provenance_reader(
+            _provenance_map = await _picks_report_read(_provenance_reader(
                 [_ud_recommendation_identity(p) for p in ud_props],
                 since_hours=24,
             ))
@@ -2422,12 +2472,9 @@ async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     from engine.player_results import compute_hit_rates as _compute_hr
     import asyncio as _asyncio
 
-    async def _get_hr(plh: "PropLineHistory") -> "tuple":
+    def _hit_rate_for(plh: "PropLineHistory", results) -> "tuple":
         """Return (PlayerHitRates | None, opponent_str | None)."""
         try:
-            results = await _db.get_player_results(
-                plh.player_name, plh.sport, plh.stat_type, limit=30
-            )
             if not results:
                 return None, None
             # Never infer the current opponent from the newest historical
@@ -2439,11 +2486,22 @@ async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         except Exception:
             return None, None
 
-    logger.info("cmd_picks: starting hit-rate gather for %d props", len(picks))
-    _hr_raw    = await _bounded(
-        _asyncio.gather(*[_get_hr(plh) for plh, _ in picks], return_exceptions=True)
-    )
-    _hit_rates = [(None, None) if isinstance(r, Exception) else r for r in _hr_raw]
+    logger.info("cmd_picks: loading hit-rate history for %d props", len(picks))
+    _history_by_prop = await _load_picks_player_results(picks)
+    _hit_rates = [
+        _hit_rate_for(
+            plh,
+            _history_by_prop.get(
+                (
+                    str(plh.player_name or ""),
+                    str(plh.sport or ""),
+                    str(plh.stat_type or "").lower().strip(),
+                ),
+                [],
+            ),
+        )
+        for plh, _ in picks
+    ]
     logger.info("cmd_picks: hit-rate gather complete")
 
     # Apply the same strongest-pick eligibility and one-per-player selection
@@ -2530,7 +2588,7 @@ async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             plh.player_name, plh.sport, plh.stat_type, since_hours=24
         )
 
-    _alt_raw = await _bounded(_asyncio.gather(
+    _alt_raw = await _picks_report_read(_asyncio.gather(
         *[_get_alt_lines(plh) for plh, _ in picks],
         return_exceptions=True,
     ))
@@ -2541,7 +2599,7 @@ async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     logger.info("cmd_picks: recs=%d, alt-line queries done", len(_rec_map))
 
     try:
-        _intel_map = await _bounded(_db.get_latest_downstream_intelligence(
+        _intel_map = await _picks_report_read(_db.get_latest_downstream_intelligence(
             [
                 (
                     getattr(plh, "provider", None) or "Underdog",

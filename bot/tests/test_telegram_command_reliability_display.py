@@ -836,7 +836,7 @@ async def test_picks_reports_unavailable_when_live_report_exceeds_deadline():
     with (
         patch("commands._check_allowed", return_value=True),
         patch("commands._db", db),
-        patch("commands._COMMAND_TIMEOUT_SECONDS", 0.01),
+        patch("commands._PICKS_TIMEOUT_SECONDS", 0.01),
         patch("commands._cmd_picks_inner", AsyncMock(side_effect=slow_picks)),
     ):
         await asyncio.wait_for(commands.cmd_picks(update, context), timeout=0.2)
@@ -845,6 +845,26 @@ async def test_picks_reports_unavailable_when_live_report_exceeds_deadline():
     assert "Picks are temporarily unavailable" in message
     assert "scan continues independently" in message
     assert "failed" not in message.lower()
+
+
+@pytest.mark.asyncio
+async def test_picks_uses_its_dedicated_deadline_not_the_generic_command_timeout():
+    update, context = _update_and_context()
+    db = MagicMock()
+
+    async def quick_picks(*args, **kwargs):
+        await asyncio.sleep(0.03)
+
+    with (
+        patch("commands._check_allowed", return_value=True),
+        patch("commands._db", db),
+        patch("commands._COMMAND_TIMEOUT_SECONDS", 0.01),
+        patch("commands._PICKS_TIMEOUT_SECONDS", 0.08),
+        patch("commands._cmd_picks_inner", AsyncMock(side_effect=quick_picks)),
+    ):
+        await asyncio.wait_for(commands.cmd_picks(update, context), timeout=0.2)
+
+    update.message.reply_text.assert_not_awaited()
 
 
 @pytest.mark.asyncio
