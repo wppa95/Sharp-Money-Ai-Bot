@@ -1,4 +1,4 @@
-"""Focused tests for the authorized PropLine → PrizePicks adapter."""
+"""Focused tests for authorized PropLine bookmaker adapters."""
 
 from __future__ import annotations
 
@@ -1300,6 +1300,43 @@ def test_propline_result_evidence_preserves_prizepicks_provenance_and_timestamps
     assert evidence.is_settled is True
 
 
+def test_propline_result_evidence_preserves_underdog_bookmaker_identity():
+    observed_at = datetime(2026, 8, 29, 2, 0)
+    evidence = build_propline_result_evidence(
+        {
+            "provider": "Underdog",
+            "event_id": "game-ud-1",
+            "sport_key": "basketball_nba",
+            "event_status": "final",
+            "bookmaker_key": "underdog",
+            "bookmaker_title": "Underdog",
+            "market_key": "player_points",
+            "market_description": "Player Points",
+            "player_name": "Alex Example",
+            "player_id": "player-1",
+            "direction": "Over",
+            "line": 24.5,
+            "resolution": "won",
+            "actual_value": 30,
+            "resolved_at": "2026-08-29T01:55:00Z",
+            "redacted": False,
+            "supplemental_source": "PropLine",
+        },
+        observed_at=observed_at,
+        provider="Underdog",
+    )
+
+    assert isinstance(evidence, PropLineResultEvidence)
+    assert evidence.provider == "Underdog"
+    assert evidence.bookmaker_key == "underdog"
+    assert evidence.bookmaker_title == "Underdog"
+    assert evidence.supplemental_source == "PropLine"
+    assert evidence.event_id == "game-ud-1"
+    assert evidence.actual_value == 30.0
+    assert evidence.resolution_state == PROPLINE_RESULT_WON
+    assert evidence.is_settled is True
+
+
 def test_propline_result_evidence_does_not_infer_from_final_status_or_actual_value():
     evidence = build_propline_result_evidence(
         {
@@ -1326,7 +1363,7 @@ def test_propline_result_evidence_does_not_infer_from_final_status_or_actual_val
     assert evidence.is_settled is False
 
 
-def test_propline_result_evidence_rejects_underdog_or_missing_event_identity():
+def test_propline_result_evidence_rejects_provider_mismatch_or_missing_event_identity():
     base = {
         "event_id": "game-1",
         "sport_key": "basketball_nba",
@@ -1344,6 +1381,14 @@ def test_propline_result_evidence_rejects_underdog_or_missing_event_identity():
     ) is None
     assert build_propline_result_evidence(
         {**base, "provider": "PrizePicks", "event_id": ""},
+        observed_at=datetime(2026, 8, 29, 2, 0),
+    ) is None
+    assert build_propline_result_evidence(
+        {
+            **base,
+            "provider": "Underdog",
+            "bookmaker_key": "underdog",
+        },
         observed_at=datetime(2026, 8, 29, 2, 0),
     ) is None
 
@@ -1666,6 +1711,36 @@ def test_official_event_results_uses_documented_route():
         "https://api.prop-line.com/v1/sports/basketball_nba/events/game-1/results"
     )
     assert session.calls[0][1]["params"] == {"markets": "player_points"}
+
+
+def test_official_event_results_preserves_underdog_bookmaker_identity():
+    payload = _event_results("game-ud-1")
+    payload["bookmakers"][1]["key"] = "underdog"
+    payload["bookmakers"][1]["title"] = "Underdog"
+    session = _Session(_Response(200, payload))
+    client = PropLineClient(
+        api_key="test-only-key",
+        api_url="https://api.prop-line.com",
+        session=session,
+        min_request_interval=0,
+        request_budget=PropLineRequestBudget(10),
+    )
+
+    result = asyncio.run(
+        client.fetch_event_results(
+            "basketball_nba",
+            "game-ud-1",
+            bookmaker="underdog",
+        )
+    )
+
+    assert result.succeeded is True
+    assert result.complete is True
+    assert len(result.results) == 1
+    assert result.results[0].provider == "Underdog"
+    assert result.results[0].bookmaker_key == "underdog"
+    assert result.results[0].bookmaker_title == "Underdog"
+    assert result.results[0].supplemental_source == "PropLine"
 
 
 def test_official_event_results_keeps_unresolved_distinct_from_incomplete_payload():

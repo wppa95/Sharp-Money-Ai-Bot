@@ -319,38 +319,47 @@ async def test_directional_summary_cross_checks_exact_auto_graded_tracking_lines
 
 
 @pytest.mark.asyncio
-async def test_prizepicks_source_less_grades_use_exact_propline_results(db):
+@pytest.mark.parametrize(
+    "provider, prefix",
+    [("PrizePicks", "pp"), ("Underdog", "ud")],
+)
+async def test_source_less_grades_use_exact_propline_results_report_only(
+    db, provider, prefix
+):
     from database import PlayerGameResult, PropOpportunityLog
 
     game_time = datetime.utcnow() - timedelta(days=2)
     shared = {
         "sport": "WNBA",
         "game_time": game_time,
-        "provider": "PrizePicks",
-        "player_name": "PP Player",
+        "provider": provider,
+        "player_name": f"{prefix} Player",
         "stat_type": "rebounds",
     }
+    valid_event = f"event-{prefix}-valid"
+    wrong_event = f"event-{prefix}-wrong"
+    self_event = f"event-{prefix}-self"
     await _opportunity(
         db,
-        "pp-propline-valid",
+        f"{prefix}-propline-valid",
         "UNDER",
-        game_id="event-pp-valid",
+        game_id=valid_event,
         line_value=19.5,
         **shared,
     )
     await _opportunity(
         db,
-        "pp-propline-wrong-event",
+        f"{prefix}-propline-wrong-event",
         "OVER",
-        game_id="event-pp-wrong",
+        game_id=wrong_event,
         line_value=8.5,
         **shared,
     )
     await _opportunity(
         db,
-        "pp-propline-self-graded",
+        f"{prefix}-propline-self-graded",
         "OVER",
-        game_id="event-pp-self",
+        game_id=self_event,
         line_value=8.5,
         **shared,
     )
@@ -359,7 +368,7 @@ async def test_prizepicks_source_less_grades_use_exact_propline_results(db):
         opportunity = await _fetch_opportunity(
             db,
             external_id,
-            provider="PrizePicks",
+            provider=provider,
             stat_type="rebounds",
         )
         async with db.session() as session:
@@ -371,12 +380,12 @@ async def test_prizepicks_source_less_grades_use_exact_propline_results(db):
             await session.commit()
         return opportunity.id
 
-    await store_source_less_grade("pp-propline-valid", 10.0)
-    await store_source_less_grade("pp-propline-wrong-event", 10.0)
+    await store_source_less_grade(f"{prefix}-propline-valid", 10.0)
+    await store_source_less_grade(f"{prefix}-propline-wrong-event", 10.0)
     self_graded = await _fetch_opportunity(
         db,
-        "pp-propline-self-graded",
-        provider="PrizePicks",
+        f"{prefix}-propline-self-graded",
+        provider=provider,
         stat_type="rebounds",
     )
     await db.grade_opportunity(
@@ -389,17 +398,17 @@ async def test_prizepicks_source_less_grades_use_exact_propline_results(db):
     async with db.session() as session:
         session.add_all([
             PlayerGameResult(
-                player_name="PP Player",
+                player_name=f"{prefix} Player",
                 sport="WNBA",
                 stat_type="rebounds",
                 game_date=game_time.strftime("%Y-%m-%d"),
                 opponent="OPP",
                 actual_value=10.0,
                 source="propline_player_games",
-                game_id="event-pp-valid",
+                game_id=valid_event,
             ),
             PlayerGameResult(
-                player_name="PP Player",
+                player_name=f"{prefix} Player",
                 sport="WNBA",
                 stat_type="rebounds",
                 game_date=game_time.strftime("%Y-%m-%d"),
@@ -412,11 +421,21 @@ async def test_prizepicks_source_less_grades_use_exact_propline_results(db):
         await session.commit()
 
     summary = await db.get_directional_performance_summary()
-    prizepicks = summary["by_provider"]["PrizePicks"]
+    provider_summary = summary["by_provider"][provider]
 
-    assert prizepicks["directional"] == 3
-    assert prizepicks["hit"] == 1
-    assert prizepicks["resolved"] == 1
-    assert prizepicks["unverified"] == 2
-    assert prizepicks["tracked_line_verified"] == 0
-    assert prizepicks["propline_result_verified"] == 1
+    assert provider_summary["directional"] == 3
+    assert provider_summary["hit"] == 1
+    assert provider_summary["resolved"] == 1
+    assert provider_summary["unverified"] == 2
+    assert provider_summary["tracked_line_verified"] == 0
+    assert provider_summary["propline_result_verified"] == 1
+
+    saved = await _fetch_opportunity(
+        db,
+        f"{prefix}-propline-valid",
+        provider=provider,
+        stat_type="rebounds",
+    )
+    assert saved.result == "HIT"
+    assert saved.actual_value == 10.0
+    assert saved.grade_result_source is None

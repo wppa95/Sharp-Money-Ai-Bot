@@ -804,7 +804,7 @@ def normalize_propline_result_state(
 
 @dataclass(frozen=True)
 class PropLineResultEvidence:
-    """One read-only PrizePicks result returned by PropLine."""
+    """One explicit bookmaker result returned by PropLine."""
 
     observed_at: datetime
     resolution_state: str
@@ -1279,14 +1279,12 @@ def build_propline_result_evidence(
     if not isinstance(record, dict):
         return None
     expected_provider = _clean(provider)
-    if expected_provider != PROPLINE_PROVIDER_NAME:
+    if expected_provider not in {PROPLINE_PROVIDER_NAME, "Underdog"}:
         return None
     if _clean(record.get("provider")) != expected_provider:
         return None
-    if _clean(record.get("bookmaker_key")).replace("_", "").lower() not in {
-        "prizepicks",
-        "prizepick",
-    }:
+    bookmaker_key = _clean(record.get("bookmaker_key"))
+    if provider_name_for_bookmaker(bookmaker_key) != expected_provider:
         return None
 
     event_id = _clean(record.get("event_id"))
@@ -3298,7 +3296,7 @@ def _official_result_records(
                     return [], False, "PropLine results outcome is incomplete"
                 records.append(
                     {
-                        "provider": PROPLINE_PROVIDER_NAME,
+                        "provider": provider_name_for_bookmaker(bookmaker_key),
                         "event_id": _clean(payload.get("id")),
                         "sport_key": _clean(payload.get("sport_key")),
                         "event_status": _clean(payload.get("status")),
@@ -5324,6 +5322,9 @@ class PropLineClient:
                     evidence := build_propline_result_evidence(
                         record,
                         observed_at=fetched_at,
+                        provider=provider_name_for_bookmaker(
+                            record.get("bookmaker_key")
+                        ),
                         response_complete=complete,
                     )
                 )

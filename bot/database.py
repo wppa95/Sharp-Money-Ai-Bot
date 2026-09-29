@@ -3224,11 +3224,11 @@ class Database:
                 )
                 tracking_rows = list(tracking_result.scalars().all())
 
-            prizepicks_game_ids = sorted({
+            propline_game_ids = sorted({
                 str(opportunity.game_id or "").strip()
                 for opportunity in legacy_opportunities
                 if str(opportunity.provider or "").strip().casefold()
-                == "prizepicks"
+                in {"prizepicks", "underdog"}
                 and str(opportunity.product or PLAYER_PROPS_PRODUCT)
                 .strip()
                 .casefold()
@@ -3236,8 +3236,8 @@ class Database:
                 and str(opportunity.game_id or "").strip()
             })
             propline_result_rows = []
-            for start in range(0, len(prizepicks_game_ids), 400):
-                game_id_batch = prizepicks_game_ids[start:start + 400]
+            for start in range(0, len(propline_game_ids), 400):
+                game_id_batch = propline_game_ids[start:start + 400]
                 propline_result = await s.execute(
                     select(PlayerGameResult).where(
                         PlayerGameResult.game_id.in_(game_id_batch),
@@ -3397,11 +3397,12 @@ class Database:
             if expected_matches == 1:
                 tracked_line_verified_ids.add(int(opportunity.id))
 
-        # PrizePicks' authoritative results arrive through PropLine. The
-        # provider-owned projection ID is not necessarily the same ID written
-        # into PlayerGameResult, so corroborate only by exact event/player/
-        # sport/stat identity plus matching actual and direction. Self-generated
-        # graded_prop rows are excluded by the allowlisted PropLine sources.
+        # PrizePicks and Underdog's authoritative results arrive through
+        # PropLine. The provider-owned projection ID is not necessarily the
+        # same ID written into PlayerGameResult, so corroborate only by exact
+        # event/player/sport/stat identity plus matching actual and direction.
+        # Self-generated graded_prop rows are excluded by the allowlisted
+        # PropLine sources.
         propline_results_by_identity: dict[tuple, list[object]] = {}
         for result_row in propline_result_rows:
             source = str(result_row.source or "").strip().casefold()
@@ -3424,7 +3425,7 @@ class Database:
         for opportunity in legacy_opportunities:
             if (
                 str(opportunity.provider or "").strip().casefold()
-                != "prizepicks"
+                not in {"prizepicks", "underdog"}
                 or str(opportunity.product or PLAYER_PROPS_PRODUCT)
                 .strip()
                 .casefold()
