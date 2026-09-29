@@ -5277,6 +5277,13 @@ async def cmd_tracking(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     pending  = data.get("pending", 0)
     active_by_sport = data.get("active_by_sport", {}) or {}
     observations_by_sport = data.get("observations_by_sport", {}) or {}
+    directional_by_sport = data.get("directional_by_sport", {}) or {}
+    tracking_sports = (
+        set(active_by_sport)
+        | set(observations_by_sport)
+        | set(directional_by_sport)
+        | set(by_sport)
+    )
 
     def _n(d: dict, *keys) -> int:
         """Safely walk nested dict and return int."""
@@ -5300,23 +5307,6 @@ async def cmd_tracking(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         f"Directional opportunities: {total}  ·  Pending grading: {pending}</i>",
         "",
     ]
-
-    # Current tracking is shown independently from directional grading. This
-    # keeps a sport with observations but no OVER/UNDER rows visible.
-    tracking_sports = (
-        set(active_by_sport)
-        | set(observations_by_sport)
-        | set(by_sport)
-    )
-    if tracking_sports:
-        lines += ["<b>Current tracking by sport</b>"]
-        for sport in sorted(tracking_sports):
-            lines.append(
-                f"  <b>{_html.escape(str(sport))}:</b> "
-                f"active {int(active_by_sport.get(sport, 0) or 0):,} · "
-                f"observations {int(observations_by_sport.get(sport, 0) or 0):,} · "
-                f"directional {int((data.get('directional_by_sport', {}) or {}).get(sport, 0) or 0):,}"
-            )
 
     # ── Directional picks (OVER + UNDER) ───────────────────────────────────────
     play_recs = ("OVER", "UNDER")
@@ -5375,10 +5365,16 @@ async def cmd_tracking(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     else:
         lines.append("  <i>No graded directional pick results yet.</i>")
 
-    # ── By Sport ──────────────────────────────────────────────────────────────
-    if by_sport:
-        lines += ["", "━━━━━━━━━━━━━━━━━━", "<b>By Sport (PLAY correct pick rate)</b>"]
-        for sport, sport_data in sorted(by_sport.items()):
+    # ── Full tracked universe by sport ─────────────────────────────────────────
+    if tracking_sports:
+        lines += [
+            "",
+            "━━━━━━━━━━━━━━━━━━",
+            "<b>By Sport (all tracked observations)</b>",
+            "<i>Directional opportunities and grading are subsets of observations.</i>",
+        ]
+        for sport in sorted(tracking_sports):
+            sport_data = by_sport.get(sport, {})
             s_correct = (
                 _n(sport_data, "OVER",  "HIT")
                 + _n(sport_data, "UNDER", "HIT")
@@ -5388,11 +5384,18 @@ async def cmd_tracking(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
                 for rec in ("OVER", "UNDER")
                 for res in ("HIT", "MISS", "PUSH")
             )
+            line = (
+                f"  <b>{_html.escape(str(sport))}:</b> "
+                f"observations {int(observations_by_sport.get(sport, 0) or 0):,}"
+                f" · active {int(active_by_sport.get(sport, 0) or 0):,}"
+                f" · directional {int(directional_by_sport.get(sport, 0) or 0):,}"
+            )
             if s_graded > 0:
-                lines.append(
-                    f"  <b>{sport}:</b>  {s_correct}/{s_graded} "
+                line += (
+                    f" · PLAY correct {s_correct}/{s_graded} "
                     f"({_hit_rate(s_correct, s_graded)})"
                 )
+            lines.append(line)
 
     by_provider = data.get("by_provider", {}) or {}
     _active_by_provider = data.get("active_by_provider", {}) or {}

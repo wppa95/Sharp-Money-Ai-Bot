@@ -1,0 +1,54 @@
+📊 Prop Opportunity Tracker
+Historical observations: 340594  ·  Active tracked props: 18898  ·  Directional opportunities: 68194  ·  Pending grading: 44390
+
+Current tracking by sport
+  BASKETBALL: active 0 · observations 138 · directional 6
+  BKFC: active 0 · observations 77 · directional 0
+  BUNDESLIGA: active 0 · observations 1,251 · directional 0
+  CFB: active 1,468 · observations 31,346 · directional 1,121
+  CFL: active 0 · observations 72 · directional 0
+  CS: active 126 · observations 6,125 · directional 555
+  DGPT: active 9 · observations 9 · directional 0
+  DOTA: active 40 · observations 864 · directional 147
+  EPL: active 0 · observations 441 · directional 0
+  F1SZN: active 57 · observations 135 · directional 0
+  FIFA: active 0 · observations 4,355 · directional 0
+  HIGHLIMIT: active 21 · observations 43 · directional 0
+  KBO: active 0 · observations 168 · directional 0
+  LALIGA: active 0 · observations 3,927 · directional 0
+  LIGUE1: active 0 · observations 2,895 · directional 1
+  LOL: active 17 · observations 1,262 · directional 48
+  MLB: active 873 · observations 40,124 · directional 58,831
+  MLS: active 0 · observations 55,708 · directional 0
+  MMA: active 992 · observations 1,751 · directional 13
+  MOTORCYCLE: active 11 · observations 32 · directional 0
+  MOTORSPORTS: active 12 · observations 120 · directional 0
+  NBA: active 130 · observations 35,837 · directional 106
+  NCAAF: active 0 · observations 388 · directional 0
+  NFL: active 3,208 · observations 43,110 · directional 4,920
+  NHL: active 1,590 · observations 6,801 · directional 1,343
+  NPB: active 0 · observations 68 · directional 2
+  PGA: active 103 · observations 117 · directional 0
+  RACING: active 36 · observations 36 · directional 0
+  SERIEA: active 0 · observations 2,609 · directional 1
+  TENNIS: active 7,891 · observations 55,463 · directional 139
+  UFC: active 10 · observations 1,850 · directional 0
+  VAL: active 94 · observations 390 · directional 19
+  WNBA: active 2,210 · observations 43,082 · directional 942
+━━━━━━━━━━━━━━━━━━
+✅ Directional Pick Results
+  Total picks:   68194
+  Graded:        0
+  Unverified:    23804 (excluded from hit rates)
+  No graded directional pick results yet.
+
+━━━━━━━━━━━━━━━━━━
+By Sport (PLAY correct pick rate)
+
+━━━━━━━━━━━━━━━━━━
+By Provider
+  Underdog: active 17,880 · observed 168,003 · directional 67,784 · delivered 1,649 · pending 43,996 · resolved 0 · 0/0 correct
+
+━━━━━━━━━━━━━━━━━━
+Results graded every 1 h from stored game stats.
+HIT means the recorded OVER or UNDER pick won; MISS means it lost.
