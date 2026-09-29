@@ -227,6 +227,57 @@ class TestUnderdogConnector:
     def _make_connector(self) -> UnderdogConnector:
         return UnderdogConnector(active_sports=["NFL"], enabled=True)
 
+    def test_parse_keeps_team_ids_separate_from_explicit_event_labels(self):
+        home_id = "11111111-1111-4111-8111-111111111111"
+        away_id = "22222222-2222-4222-8222-222222222222"
+        payload = {
+            "over_under_lines": [
+                {
+                    "id": "line-team-identity",
+                    "stat_value": 22.5,
+                    "over_under": {
+                        "appearance_stat": {
+                            "appearance_id": "appearance-team-identity",
+                            "display_stat": "Points",
+                        }
+                    },
+                }
+            ],
+            "appearances": [
+                {
+                    "id": "appearance-team-identity",
+                    "player_id": "player-team-identity",
+                    "match_id": "event-team-identity",
+                }
+            ],
+            "players": [
+                {
+                    "id": "player-team-identity",
+                    "first_name": "Event",
+                    "last_name": "Player",
+                    "sport_id": "nba",
+                    "team_id": home_id,
+                }
+            ],
+            "games": [
+                {
+                    "id": "event-team-identity",
+                    "scheduled_at": "2026-08-10T18:00:00Z",
+                    "home_team": {"id": home_id, "name": "Boston Celtics"},
+                    "away_team": {"id": away_id, "name": "New York Knicks"},
+                }
+            ],
+        }
+
+        projection = UnderdogConnector()._parse(payload)[0]
+
+        assert projection.team == home_id
+        assert projection.opponent == "New York Knicks"
+        assert projection.event_teams == (
+            (home_id, "Boston Celtics"),
+            (away_id, "New York Knicks"),
+        )
+
     def test_parse_valid_projection(self):
         c = self._make_connector()
         projs = c._parse(UNDERDOG_API_RESPONSE)

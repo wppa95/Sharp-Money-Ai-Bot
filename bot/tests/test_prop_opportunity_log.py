@@ -23,6 +23,7 @@ from database import (
     PropLineHistory,
     PropOpportunityLog,
     PropTrackingLog,
+    UnderdogEventTeamRecord,
     UnderdogSnapshotRecord,
     is_trusted_directional_grade_source,
 )
@@ -1257,3 +1258,107 @@ class TestBulkPropOpportunityLog:
             "market": 40,
             "sample": 36,
         }
+
+
+@pytest.mark.parametrize(
+    ("away_team_name", "result_opponent", "expected_match"),
+    [
+        ("New York Knicks", "New York Knicks", True),
+        ("New York Knicks", "Chicago Bulls", False),
+        ("Boston Celtics", "Boston Celtics", False),
+    ],
+)
+async def test_bulk_grader_reconciles_explicit_team_ids_without_prop_line_history(
+    db,
+    away_team_name,
+    result_opponent,
+    expected_match,
+):
+    game_time = datetime(2026, 8, 10, 18, 0)
+    underdog_event_id = "ud-event-team-context"
+    result_event_id = "propline-event-team-context"
+    home_team_id = "team-home-identity"
+    away_team_id = "team-away-identity"
+
+    await db.log_prop_opportunity_bulk(
+        [
+            {
+                "external_id": "ud-context-player",
+                "player_name": "Event Player",
+                "team": home_team_id,
+                "sport": "NBA",
+                "stat_type": "Points",
+                "line_value": 20.5,
+                "recommendation": "OVER",
+                "decision_tier": "A",
+                "confidence": 80,
+                "game_time": game_time,
+                "game_id": underdog_event_id,
+                "provider": "Underdog",
+            },
+            {
+                "external_id": "ud-context-opponent",
+                "player_name": "Opponent Player",
+                "team": away_team_id,
+                "sport": "NBA",
+                "stat_type": "Points",
+                "line_value": 12.5,
+                "recommendation": "OVER",
+                "decision_tier": "A",
+                "confidence": 80,
+                "game_time": game_time,
+                "game_id": underdog_event_id,
+                "provider": "Underdog",
+            },
+        ]
+    )
+
+    snapshot = UnderdogSnapshotRecord(
+        external_id="ud-context-snapshot",
+        player_name="Event Player",
+        team=home_team_id,
+        sport="NBA",
+        stat_type="Points",
+        line_value=20.5,
+        game_id=underdog_event_id,
+    )
+    snapshot.event_teams = (
+        (home_team_id, "Boston Celtics"),
+        (away_team_id, away_team_name),
+    )
+    await db.save_underdog_snapshots_bulk([snapshot])
+    await db.upsert_player_results_bulk(
+        [
+            PlayerGameResult(
+                player_name="Event Player",
+                sport="NBA",
+                stat_type="points",
+                game_date=game_time.strftime("%Y-%m-%d"),
+                opponent=result_opponent,
+                actual_value=25.0,
+                source="propline_player_games",
+                game_id=result_event_id,
+            )
+        ]
+    )
+
+    opportunity = SimpleNamespace(
+        id=9182,
+        player_name="Event Player",
+        team=home_team_id,
+        sport="NBA",
+        stat_type="Points",
+        game_time=game_time,
+        game_id=underdog_event_id,
+        provider="Underdog",
+    )
+    resolved = await db.get_game_results_for_grading_bulk([opportunity])
+
+    if expected_match:
+        assert 9182 in resolved
+        matched, matched_date = resolved[9182]
+        assert matched.game_id == result_event_id
+        assert matched_date == "2026-08-10"
+        assert getattr(matched, "_underdog_composite_match")
+    else:
+        assert resolved == {}

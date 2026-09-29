@@ -17,6 +17,7 @@ API notes:
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Optional
@@ -141,6 +142,141 @@ def _event_label(record: object) -> str:
     return str(value).strip() if _nonempty(value) else ""
 
 
+_TEAM_UUID_RE = re.compile(
+    r"^(?:[0-9a-f]{32}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-"
+    r"[0-9a-f]{4}-[0-9a-f]{12})$",
+    re.IGNORECASE,
+)
+
+
+def _is_team_uuid(value: object) -> bool:
+    return bool(_TEAM_UUID_RE.fullmatch(str(value or "").strip()))
+
+
+def _team_id(value: object) -> str:
+    if not isinstance(value, dict):
+        return ""
+    result = _first_present(value, "id", "team_id", "uuid")
+    return str(result).strip() if _nonempty(result) else ""
+
+
+def _team_label(value: object, *, id_hint: object = "") -> str:
+    if isinstance(value, dict):
+        result = _first_present(
+            value,
+            "name",
+            "display_name",
+            "full_name",
+            "team_name",
+            "short_name",
+            "abbreviation",
+            "alias",
+        )
+        return " ".join(str(result or "").strip().split())
+    label = " ".join(str(value or "").strip().split())
+    if (
+        not label
+        or label == str(id_hint or "").strip()
+        or _is_team_uuid(label)
+    ):
+        return ""
+    return label
+
+
+def _team_reference(
+    value: object,
+    *,
+    id_hint: object = "",
+    name_hint: object = "",
+    names_by_id: Optional[dict[str, set[str]]] = None,
+) -> tuple[str, str]:
+    """Extract an explicit provider team identity and display label."""
+    team_id = _team_id(value) or str(id_hint or "").strip()
+    if not team_id and _is_team_uuid(value):
+        team_id = str(value).strip()
+    label = _team_label(value, id_hint=team_id) or _team_label(
+        name_hint, id_hint=team_id
+    )
+    if not label and team_id and names_by_id:
+        labels = names_by_id.get(team_id, set())
+        if len(labels) == 1:
+            label = next(iter(labels))
+    return team_id, label
+
+
+def _event_team_references(
+    record: object,
+    names_by_id: Optional[dict[str, set[str]]] = None,
+) -> tuple[tuple[str, str], tuple[str, str]]:
+    if not isinstance(record, dict):
+        return ("", ""), ("", "")
+    home_value = (
+        record.get("home_team")
+        or record.get("home")
+        or record.get("home_team_name")
+    )
+    away_value = (
+        record.get("away_team")
+        or record.get("away")
+        or record.get("away_team_name")
+    )
+    home = _team_reference(
+        home_value,
+        id_hint=_first_present(record, "home_team_id", "home_id"),
+        name_hint=_first_present(record, "home_team_name", "home_name"),
+        names_by_id=names_by_id,
+    )
+    away = _team_reference(
+        away_value,
+        id_hint=_first_present(record, "away_team_id", "away_id"),
+        name_hint=_first_present(record, "away_team_name", "away_name"),
+        names_by_id=names_by_id,
+    )
+    return home, away
+
+
+def _build_team_name_index(
+    data: dict,
+    event_lookup: dict[str, dict],
+) -> dict[str, set[str]]:
+    """Collect only explicit team ID/name pairs from the provider payload."""
+    names_by_id: dict[str, set[str]] = {}
+
+    def add(team_id: object, label: object) -> None:
+        key = str(team_id or "").strip()
+        name = _team_label(label, id_hint=key)
+        if key and name:
+            names_by_id.setdefault(key, set()).add(name)
+
+    for record in _records(data.get("teams", [])):
+        if not isinstance(record, dict):
+            continue
+        team_id = _first_present(record, "id", "team_id", "uuid")
+        add(team_id, _team_label(record, id_hint=team_id))
+
+    for player in _records(data.get("players", [])):
+        if not isinstance(player, dict):
+            continue
+        team_value = player.get("team")
+        team_id = (
+            _first_present(player, "team_id", "team_uuid")
+            or _team_id(team_value)
+        )
+        label = _team_label(team_value, id_hint=team_id) or _first_present(
+            player,
+            "team_name",
+            "team_display_name",
+            "team_alias",
+        )
+        add(team_id, label)
+
+    for record in event_lookup.values():
+        for team_id, label in _event_team_references(record):
+            add(team_id, label)
+
+    return names_by_id
+
+
 def _build_event_lookup(data: dict) -> dict[str, dict]:
     """Index explicit provider event records without guessing from teams."""
     lookup: dict[str, dict] = {}
@@ -197,26 +333,35 @@ def _resolve_event(
 
 
 def _opponent_for_player(team, home, away) -> str:
-    """Return the opposing team only when the feed identifies the player team."""
-    def _label(value) -> str:
-        if isinstance(value, dict):
-            value = (
-                value.get("name")
-                or value.get("display_name")
-                or value.get("abbreviation")
-                or value.get("id")
-            )
-        return " ".join(str(value or "").strip().casefold().split())
+    """Return the opposing display label using explicit IDs or exact labels."""
+    player_id = str(team or "").strip()
+    home_id = _team_id(home) or (
+        str(home).strip() if _is_team_uuid(home) else ""
+    )
+    away_id = _team_id(away) or (
+        str(away).strip() if _is_team_uuid(away) else ""
+    )
+    home_label = _team_label(home, id_hint=home_id)
+    away_label = _team_label(away, id_hint=away_id)
 
-    player_team = _label(team)
-    home_team = _label(home)
-    away_team = _label(away)
-    if not player_team:
-        return ""
-    if player_team == home_team and away_team:
-        return str(away).strip() if not isinstance(away, dict) else _label(away)
-    if player_team == away_team and home_team:
-        return str(home).strip() if not isinstance(home, dict) else _label(home)
+    if player_id and home_id and player_id == home_id:
+        return away_label
+    if player_id and away_id and player_id == away_id:
+        return home_label
+
+    player_label = _team_label(team)
+    if (
+        player_label
+        and home_label
+        and player_label.casefold() == home_label.casefold()
+    ):
+        return away_label
+    if (
+        player_label
+        and away_label
+        and player_label.casefold() == away_label.casefold()
+    ):
+        return home_label
     return ""
 
 
@@ -243,6 +388,9 @@ class UnderdogProjection:
     selection: str = ""
     event: str = ""
     opponent: str = ""
+    # Explicit event participant ID/name pairs from Underdog's event payload.
+    # IDs remain separate from labels so downstream identity keys stay stable.
+    event_teams: tuple[tuple[str, str], ...] = ()
 
 
 class UnderdogConnector(BaseConnector):
@@ -350,6 +498,7 @@ class UnderdogConnector(BaseConnector):
              is_moneyline  = proj.is_moneyline,
              is_game_market = proj.is_game_market,
              opponent    = getattr(proj, "opponent", None) or None,
+            event_teams = proj.event_teams,
             )
             # Stash notes for downstream consumers via a convention attr
             object.__setattr__(snaps, "_notes", notes) if False else None
@@ -387,6 +536,7 @@ class UnderdogConnector(BaseConnector):
                     provider_status = old.provider_status,
                      is_moneyline  = old.is_moneyline,
                      is_game_market = old.is_game_market,
+                     event_teams = old.event_teams,
                 ))
 
         self._last_seen = current_ids
@@ -475,6 +625,7 @@ class UnderdogConnector(BaseConnector):
                 appearances[aid] = app
 
         event_lookup = _build_event_lookup(data)
+        team_names_by_id = _build_team_name_index(data, event_lookup)
 
         for line in _records(data.get("over_under_lines", [])):
             try:
@@ -505,6 +656,15 @@ class UnderdogConnector(BaseConnector):
                 )
                 # v1 players carry team_id (UUID string) — no nested team dict
                 team  = p_data.get("team_id", "")
+                home_team, away_team = _event_team_references(
+                    event_data,
+                    names_by_id=team_names_by_id,
+                )
+                event_teams = tuple(
+                    reference
+                    for reference in (home_team, away_team)
+                    if reference[0] or reference[1]
+                )
                 sport = p_data.get("sport_id", "Unknown").upper()
 
                 game_time = _event_time(event_data)
@@ -531,17 +691,13 @@ class UnderdogConnector(BaseConnector):
                     game_time   = game_time,
                     provider_status = provider_status,
                     fetched_at  = datetime.utcnow(),
+                    event       = _event_label(event_data),
                     opponent    = _opponent_for_player(
                         team,
-                        event_data.get("home_team")
-                        or event_data.get("home_team_id")
-                        or event_data.get("home")
-                        or "",
-                        event_data.get("away_team")
-                        or event_data.get("away_team_id")
-                        or event_data.get("away")
-                        or "",
+                        {"id": home_team[0], "name": home_team[1]},
+                        {"id": away_team[0], "name": away_team[1]},
                     ),
+                    event_teams = event_teams,
                 ))
             except (KeyError, TypeError, ValueError) as exc:
                 logger.debug("Underdog parse error: %s", exc)

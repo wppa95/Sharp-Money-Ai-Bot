@@ -5015,6 +5015,9 @@ async def underdog_job(context) -> None:
                 fetched_at=now,
             )
         )
+        _snapshot_records[-1].event_teams = tuple(
+            getattr(_snapshot, "event_teams", ()) or ()
+        )
 
     # Live scans consume the evidence already collected by the independent
     # history job. Load it once for the complete feed rather than opening a

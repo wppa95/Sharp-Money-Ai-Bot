@@ -69,6 +69,9 @@ class MarketSnapshot:
     # Provider-reported event state used by the pregame delivery boundary.
     # Empty means the provider did not expose a state for this observation.
     provider_status: str = ""
+    # Explicit event team ID/display-name pairs, retained for safe result
+    # reconciliation without turning IDs into labels.
+    event_teams: tuple[tuple[str, str], ...] = ()
 
     @property
     def market_key(self) -> tuple[str, str, str, str]:

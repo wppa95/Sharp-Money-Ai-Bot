@@ -125,6 +125,9 @@ def _match_underdog_composite_player_result(
     opportunity: object,
     rows: Iterable[object],
     event_context: Iterable[tuple[object, object]],
+    *,
+    event_teams: Iterable[tuple[object, object]] = (),
+    team_name_aliases: Optional[dict[object, Iterable[object]]] = None,
 ) -> Optional[tuple[object, str]]:
     """Resolve a distinct PropLine event only from a unique game fingerprint.
 
@@ -136,24 +139,99 @@ def _match_underdog_composite_player_result(
     game_time = getattr(opportunity, "game_time", None)
     underdog_event_id = str(getattr(opportunity, "game_id", "") or "").strip()
     player_key = str(getattr(opportunity, "player_name", "") or "").casefold().strip()
-    recorded_own_team = _event_team_key(getattr(opportunity, "team", ""))
     if not game_time or not underdog_event_id or not player_key:
         return None
 
-    teams = {
-        _event_team_key(team)
-        for _, team in event_context
-        if _event_team_key(team)
-    }
-    if len(teams) != 2:
-        return None
-    player_teams = {
-        _event_team_key(team)
-        for player, team in event_context
-        if (
-            str(player or "").casefold().strip() == player_key
-            and _event_team_key(team)
+    aliases_by_team: dict[str, set[str]] = {}
+    teams_by_alias: dict[str, set[str]] = {}
+
+    def add_alias(team_key: str, alias: object) -> None:
+        alias_key = _event_team_key(alias)
+        if not team_key or not alias_key:
+            return
+        aliases_by_team.setdefault(team_key, {team_key}).add(alias_key)
+        teams_by_alias.setdefault(alias_key, set()).add(team_key)
+
+    def add_team_reference(team_id: object, team_name: object) -> str:
+        identity = _event_team_key(team_id) or _event_team_key(team_name)
+        if identity:
+            add_alias(identity, identity)
+            add_alias(identity, team_name)
+        return identity
+
+    for team_id, raw_aliases in (team_name_aliases or {}).items():
+        team_key = _event_team_key(team_id)
+        if not team_key:
+            continue
+        aliases = (raw_aliases,) if isinstance(raw_aliases, str) else raw_aliases
+        for alias in aliases or ():
+            add_alias(team_key, alias)
+
+    event_team_keys: set[str] = set()
+    unresolved_name_only: list[object] = []
+    for reference in event_teams:
+        try:
+            team_id, team_name = reference
+        except (TypeError, ValueError):
+            continue
+        if str(team_id or "").strip():
+            team_key = add_team_reference(team_id, team_name)
+            if team_key:
+                event_team_keys.add(team_key)
+        elif _event_team_key(team_name):
+            unresolved_name_only.append(team_name)
+
+    for team_name in unresolved_name_only:
+        name_key = _event_team_key(team_name)
+        mapped = teams_by_alias.get(name_key, set())
+        if len(mapped) > 1:
+            return None
+        if mapped:
+            team_key = next(iter(mapped))
+            add_alias(team_key, team_name)
+            event_team_keys.add(team_key)
+        else:
+            team_key = add_team_reference("", team_name)
+            if team_key:
+                event_team_keys.add(team_key)
+
+    def resolve_team_identity(value: object) -> Optional[str]:
+        key = _event_team_key(value)
+        if not key:
+            return None
+        mapped = teams_by_alias.get(key, set())
+        if len(mapped) > 1:
+            return None
+        if mapped:
+            return next(iter(mapped))
+        add_alias(key, key)
+        return key
+
+    teams = set(event_team_keys)
+    context_rows = list(event_context)
+    context_identities: list[tuple[str, Optional[str]]] = []
+    for player, team in context_rows:
+        team_identity = resolve_team_identity(team)
+        if team_identity:
+            teams.add(team_identity)
+        context_identities.append(
+            (str(player or "").casefold().strip(), team_identity)
         )
+    if len(teams) != 2 or any(
+        str(team or "").strip() and identity is None
+        for (_, team), (_, identity) in zip(context_rows, context_identities)
+    ):
+        return None
+
+    recorded_team_value = getattr(opportunity, "team", "")
+    recorded_own_team = resolve_team_identity(recorded_team_value)
+    if recorded_team_value and not recorded_own_team:
+        return None
+
+    player_teams = {
+        identity
+        for player, identity in context_identities
+        if player == player_key and identity
     }
     if len(player_teams) > 1:
         return None
@@ -190,7 +268,13 @@ def _match_underdog_composite_player_result(
         game_date = str(getattr(row, "game_date", "") or "").strip()
         if game_date not in dates:
             continue
-        if _event_team_key(getattr(row, "opponent", "")) != expected_opponent:
+        opponent_key = _event_team_key(getattr(row, "opponent", ""))
+        matching_teams = {
+            team_key
+            for team_key in teams
+            if opponent_key in aliases_by_team.get(team_key, {team_key})
+        }
+        if matching_teams != {expected_opponent}:
             continue
         try:
             actual_value = float(getattr(row, "actual_value", None))
@@ -201,7 +285,7 @@ def _match_underdog_composite_player_result(
         fingerprint = (
             game_date,
             actual_value,
-            _event_team_key(getattr(row, "opponent", "")),
+            expected_opponent,
         )
         by_event.setdefault(result_event_id, []).append((row, fingerprint))
 
@@ -1118,6 +1202,37 @@ class UnderdogSnapshotRecord(Base):
     bet_reason         = Column(Text,      nullable=True)    # human-readable explanation
     bet_evidence_json  = Column(Text,      nullable=True)    # compact JSON evidence blob
     fetched_at  = Column(DateTime,    default=datetime.utcnow, nullable=False)
+
+
+class UnderdogEventTeamRecord(Base):
+    """Explicit Underdog event participant IDs and their provider labels.
+
+    This is supporting identity metadata only; it never establishes a result or
+    settlement by itself.
+    """
+
+    __tablename__ = "underdog_event_teams"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    sport = Column(String(32), nullable=False)
+    game_id = Column(String(128), nullable=False)
+    team_id = Column(String(128), nullable=False, default="")
+    team_name = Column(String(256), nullable=False, default="")
+    first_seen = Column(DateTime, nullable=False, default=datetime.utcnow)
+    last_seen = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "sport",
+            "game_id",
+            "team_id",
+            "team_name",
+            name="uq_underdog_event_team_identity",
+        ),
+        Index("ix_underdog_event_teams_sport_game", "sport", "game_id"),
+        Index("ix_underdog_event_teams_sport_team", "sport", "team_id"),
+    )
+
 
 class PropLineHistory(Base):
     """
@@ -6832,6 +6947,74 @@ class Database:
                             # Lightweight test doubles and older adapters keep
                             # the original ORM contract.
                             s.add_all(records)
+                        event_team_values: dict[
+                            tuple[str, str, str, str], dict[str, object]
+                        ] = {}
+                        for record in records:
+                            sport = str(
+                                getattr(record, "sport", "") or ""
+                            ).strip()
+                            game_id = str(
+                                getattr(record, "game_id", "") or ""
+                            ).strip()
+                            if not sport or not game_id:
+                                continue
+                            seen_at = (
+                                getattr(record, "fetched_at", None)
+                                or datetime.utcnow()
+                            )
+                            for reference in (
+                                getattr(record, "event_teams", ()) or ()
+                            ):
+                                try:
+                                    raw_team_id, raw_team_name = reference
+                                except (TypeError, ValueError):
+                                    continue
+                                team_id = str(raw_team_id or "").strip()
+                                team_name = " ".join(
+                                    str(raw_team_name or "").strip().split()
+                                )
+                                if not team_id and not team_name:
+                                    continue
+                                key = (sport, game_id, team_id, team_name)
+                                current = event_team_values.get(key)
+                                if current is None:
+                                    event_team_values[key] = {
+                                        "sport": sport,
+                                        "game_id": game_id,
+                                        "team_id": team_id,
+                                        "team_name": team_name,
+                                        "first_seen": seen_at,
+                                        "last_seen": seen_at,
+                                    }
+                                elif seen_at > current["last_seen"]:
+                                    current["last_seen"] = seen_at
+                        if event_team_values:
+                            if hasattr(s, "execute"):
+                                from sqlalchemy.dialects.sqlite import (
+                                    insert as sqlite_insert,
+                                )
+
+                                insert_stmt = sqlite_insert(
+                                    UnderdogEventTeamRecord
+                                ).values(list(event_team_values.values()))
+                                insert_stmt = insert_stmt.on_conflict_do_update(
+                                    index_elements=[
+                                        UnderdogEventTeamRecord.sport,
+                                        UnderdogEventTeamRecord.game_id,
+                                        UnderdogEventTeamRecord.team_id,
+                                        UnderdogEventTeamRecord.team_name,
+                                    ],
+                                    set_={
+                                        "last_seen": insert_stmt.excluded.last_seen,
+                                    },
+                                )
+                                await s.execute(insert_stmt)
+                            else:
+                                s.add_all(
+                                    UnderdogEventTeamRecord(**value)
+                                    for value in event_team_values.values()
+                                )
                         stage = "transaction_begin"
                         # Flush separately so failures while acquiring the
                         # transaction/connection are distinguishable from a
@@ -11169,6 +11352,11 @@ class Database:
         event_team_context: dict[
             tuple[str, str], list[tuple[str, str]]
         ] = {}
+        event_team_participants: dict[
+            tuple[str, str], list[tuple[str, str]]
+        ] = {}
+        team_ids_by_sport: dict[str, set[str]] = {}
+        team_name_aliases_by_sport: dict[str, dict[str, set[str]]] = {}
         async with self.session() as s:
             player_list = sorted(player_names)
             for offset in range(0, len(player_list), 350):
@@ -11218,6 +11406,98 @@ class Database:
                         event_team_context.setdefault(key, []).append(
                             (player, team_name)
                         )
+                        team_ids_by_sport.setdefault(key[0], set()).add(team_name)
+
+            # Older event snapshots may not have PropLineHistory rows yet.
+            # The indexed opportunity ledger retains the exact Underdog event
+            # and player-team context without scanning append-only snapshots.
+            event_list = sorted(underdog_event_ids)
+            for offset in range(0, len(event_list), 350):
+                event_chunk = event_list[offset : offset + 350]
+                if not event_chunk or not underdog_sports:
+                    continue
+                result = await s.execute(
+                    select(
+                        PropOpportunityLog.sport,
+                        PropOpportunityLog.game_id,
+                        PropOpportunityLog.player_name,
+                        PropOpportunityLog.team,
+                    ).where(
+                        func.lower(func.trim(PropOpportunityLog.provider))
+                        == "underdog",
+                        PropOpportunityLog.product == PLAYER_PROPS_PRODUCT,
+                        PropOpportunityLog.sport.in_(underdog_sports),
+                        PropOpportunityLog.game_id.in_(event_chunk),
+                    )
+                )
+                for sport_key, event_id, player_name, team in result.all():
+                    key = (
+                        str(sport_key or "").upper().strip(),
+                        str(event_id or "").strip(),
+                    )
+                    player = str(player_name or "").strip()
+                    team_name = str(team or "").strip()
+                    if team_name:
+                        event_team_context.setdefault(key, []).append(
+                            (player, team_name)
+                        )
+                        team_ids_by_sport.setdefault(key[0], set()).add(team_name)
+
+            for offset in range(0, len(event_list), 350):
+                event_chunk = event_list[offset : offset + 350]
+                if not event_chunk or not underdog_sports:
+                    continue
+                result = await s.execute(
+                    select(
+                        UnderdogEventTeamRecord.sport,
+                        UnderdogEventTeamRecord.game_id,
+                        UnderdogEventTeamRecord.team_id,
+                        UnderdogEventTeamRecord.team_name,
+                    ).where(
+                        UnderdogEventTeamRecord.sport.in_(underdog_sports),
+                        UnderdogEventTeamRecord.game_id.in_(event_chunk),
+                    )
+                )
+                for sport_key, event_id, team_id, team_name in result.all():
+                    key = (
+                        str(sport_key or "").upper().strip(),
+                        str(event_id or "").strip(),
+                    )
+                    raw_id = str(team_id or "").strip()
+                    raw_name = str(team_name or "").strip()
+                    if raw_id or raw_name:
+                        event_team_participants.setdefault(key, []).append(
+                            (raw_id, raw_name)
+                        )
+                    if raw_id:
+                        team_ids_by_sport.setdefault(key[0], set()).add(raw_id)
+
+            for sport_key, raw_team_ids in team_ids_by_sport.items():
+                team_id_list = sorted(raw_team_ids)
+                for offset in range(0, len(team_id_list), 350):
+                    team_chunk = team_id_list[offset : offset + 350]
+                    if not team_chunk:
+                        continue
+                    result = await s.execute(
+                        select(
+                            UnderdogEventTeamRecord.team_id,
+                            UnderdogEventTeamRecord.team_name,
+                        )
+                        .where(
+                            UnderdogEventTeamRecord.sport == sport_key,
+                            UnderdogEventTeamRecord.team_id.in_(team_chunk),
+                            UnderdogEventTeamRecord.team_name != "",
+                        )
+                        .distinct()
+                    )
+                    aliases = team_name_aliases_by_sport.setdefault(
+                        sport_key, {}
+                    )
+                    for team_id, team_name in result.all():
+                        raw_id = str(team_id or "").strip()
+                        raw_name = str(team_name or "").strip()
+                        if raw_id and raw_name:
+                            aliases.setdefault(raw_id, set()).add(raw_name)
 
             event_list = sorted(event_ids)
             for offset in range(0, len(event_list), 350):
@@ -11312,6 +11592,12 @@ class Database:
                     opp,
                     dated_candidates,
                     event_team_context.get((sport, game_id), ()),
+                    event_teams=event_team_participants.get(
+                        (sport, game_id), ()
+                    ),
+                    team_name_aliases=team_name_aliases_by_sport.get(
+                        sport, {}
+                    ),
                 )
                 if composite_match is not None:
                     resolved[opp_id] = composite_match
