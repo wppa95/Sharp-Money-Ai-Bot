@@ -820,18 +820,42 @@ async def post_init(application: Application) -> None:
         grader_callback = None
 
         async def _opportunity_grader_tick(context):
-            await _grade_opportunities_job(context)
-            queue = getattr(context, "job_queue", None)
-            if queue is None:
-                application_ref = getattr(context, "application", None)
-                queue = getattr(application_ref, "job_queue", None)
-            if queue is not None and grader_callback is not None:
-                queue.run_once(
-                    grader_callback,
-                    when=config.OPPORTUNITY_GRADER_INTERVAL,
-                    name="opportunity_grader",
-                    job_kwargs=_SCAN_JOB_KWARGS,
+            try:
+                await _grade_opportunities_job(context)
+            finally:
+                # Auto-sent slip legs have their own durable outcomes, separate
+                # from opportunity grading. Refresh them on every grader pass
+                # so results arriving after a match ends do not wait for a
+                # user to run /slipstats.
+                bot_data = getattr(context, "bot_data", None)
+                db = bot_data.get("db") if hasattr(bot_data, "get") else None
+                grade_slip_legs = getattr(
+                    db, "grade_auto_slip_notification_legs", None
                 )
+                if callable(grade_slip_legs):
+                    try:
+                        graded_legs = await grade_slip_legs()
+                        if graded_legs:
+                            logger.info(
+                                "auto_slip_grader: graded legs=%d",
+                                graded_legs,
+                            )
+                    except Exception:
+                        logger.exception(
+                            "auto_slip_grader: scheduled settlement refresh failed"
+                        )
+
+                queue = getattr(context, "job_queue", None)
+                if queue is None:
+                    application_ref = getattr(context, "application", None)
+                    queue = getattr(application_ref, "job_queue", None)
+                if queue is not None and grader_callback is not None:
+                    queue.run_once(
+                        grader_callback,
+                        when=config.OPPORTUNITY_GRADER_INTERVAL,
+                        name="opportunity_grader",
+                        job_kwargs=_SCAN_JOB_KWARGS,
+                    )
 
         grader_callback = _coordinated_job(
             "opportunity_grader",

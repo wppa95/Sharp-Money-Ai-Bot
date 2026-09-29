@@ -100,6 +100,11 @@ def test_monitoring_and_grading_have_distinct_cycle_owners():
     assert "async def _underdog_monitor_cycle" in source
     assert "await underdog_job(context)" in source
     assert "async def _opportunity_grader_tick" in source
+    grader_tick = source.split(
+        "async def _opportunity_grader_tick(context):", 1
+    )[1].split("\n        grader_callback =", 1)[0]
+    assert "grade_auto_slip_notification_legs" in grader_tick
+    assert "finally:" in grader_tick
     assert "async def _propline_scan_tick" not in source
     assert re.search(
         r'_coordinated_job\(\s*"underdog_monitor",\s*_underdog_monitor_cycle',
