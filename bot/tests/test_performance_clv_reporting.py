@@ -28,33 +28,45 @@ async def _opportunity(
     sport: str = "MLB",
     game_id: str = "",
     game_time: datetime | None = None,
+    provider: str = "Underdog",
+    player_name: str = "CLV Player",
+    stat_type: str = "hits",
+    line_value: float = 0.5,
 ):
     await db.log_prop_opportunity(
         external_id=external_id,
-        player_name="CLV Player",
+        player_name=player_name,
         team="TST",
         sport=sport,
-        stat_type="hits",
-        line_value=0.5,
+        stat_type=stat_type,
+        line_value=line_value,
         recommendation=recommendation,
         decision_tier="S",
         confidence=90,
         game_time=game_time or datetime.utcnow() - timedelta(hours=2),
         game_id=game_id,
-        provider="Underdog",
+        provider=provider,
         bet_quality_score=90,
     )
 
 
-async def _fetch_opportunity(db, external_id: str):
+async def _fetch_opportunity(
+    db,
+    external_id: str,
+    *,
+    provider: str = "Underdog",
+    stat_type: str = "hits",
+):
     from sqlalchemy import select
     from database import PropOpportunityLog
 
+    if provider.strip().casefold() == "prizepicks":
+        external_id = f"PrizePicks::{external_id}"
     async with db.session() as session:
         result = await session.execute(
             select(PropOpportunityLog).where(
                 PropOpportunityLog.external_id == external_id,
-                PropOpportunityLog.stat_type == "hits",
+                PropOpportunityLog.stat_type == stat_type,
             )
         )
         return result.scalar_one()
@@ -304,3 +316,107 @@ async def test_directional_summary_cross_checks_exact_auto_graded_tracking_lines
     assert mlb["resolved"] == 1
     assert mlb["tracked_line_verified"] == 1
     assert mlb["unverified"] == 2
+
+
+@pytest.mark.asyncio
+async def test_prizepicks_source_less_grades_use_exact_propline_results(db):
+    from database import PlayerGameResult, PropOpportunityLog
+
+    game_time = datetime.utcnow() - timedelta(days=2)
+    shared = {
+        "sport": "WNBA",
+        "game_time": game_time,
+        "provider": "PrizePicks",
+        "player_name": "PP Player",
+        "stat_type": "rebounds",
+    }
+    await _opportunity(
+        db,
+        "pp-propline-valid",
+        "UNDER",
+        game_id="event-pp-valid",
+        line_value=19.5,
+        **shared,
+    )
+    await _opportunity(
+        db,
+        "pp-propline-wrong-event",
+        "OVER",
+        game_id="event-pp-wrong",
+        line_value=8.5,
+        **shared,
+    )
+    await _opportunity(
+        db,
+        "pp-propline-self-graded",
+        "OVER",
+        game_id="event-pp-self",
+        line_value=8.5,
+        **shared,
+    )
+
+    async def store_source_less_grade(external_id: str, actual: float) -> int:
+        opportunity = await _fetch_opportunity(
+            db,
+            external_id,
+            provider="PrizePicks",
+            stat_type="rebounds",
+        )
+        async with db.session() as session:
+            saved = await session.get(PropOpportunityLog, opportunity.id)
+            saved.result = "HIT"
+            saved.actual_value = actual
+            saved.grade_result_source = None
+            saved.graded_at = datetime.utcnow()
+            await session.commit()
+        return opportunity.id
+
+    await store_source_less_grade("pp-propline-valid", 10.0)
+    await store_source_less_grade("pp-propline-wrong-event", 10.0)
+    self_graded = await _fetch_opportunity(
+        db,
+        "pp-propline-self-graded",
+        provider="PrizePicks",
+        stat_type="rebounds",
+    )
+    await db.grade_opportunity(
+        self_graded.id,
+        result="HIT",
+        actual_value=10.0,
+        grade_result_source=None,
+    )
+
+    async with db.session() as session:
+        session.add_all([
+            PlayerGameResult(
+                player_name="PP Player",
+                sport="WNBA",
+                stat_type="rebounds",
+                game_date=game_time.strftime("%Y-%m-%d"),
+                opponent="OPP",
+                actual_value=10.0,
+                source="propline_player_games",
+                game_id="event-pp-valid",
+            ),
+            PlayerGameResult(
+                player_name="PP Player",
+                sport="WNBA",
+                stat_type="rebounds",
+                game_date=game_time.strftime("%Y-%m-%d"),
+                opponent="OPP",
+                actual_value=10.0,
+                source="propline_player_games",
+                game_id="different-event",
+            ),
+        ])
+        await session.commit()
+
+    summary = await db.get_directional_performance_summary()
+    prizepicks = summary["by_provider"]["PrizePicks"]
+
+    assert prizepicks["directional"] == 3
+    assert prizepicks["hit"] == 1
+    assert prizepicks["resolved"] == 1
+    assert prizepicks["unverified"] == 2
+    assert prizepicks["tracked_line_verified"] == 0
+    assert prizepicks["propline_result_verified"] == 1

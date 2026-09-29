@@ -924,6 +924,7 @@ async def test_grade_shows_all_tracked_lines_separately_from_directional_picks()
                 "resolved": 1,
                 "hit": 1,
                 "tracked_line_verified": 1,
+                "propline_result_verified": 1,
             }
         },
         "by_provider": {},
@@ -955,6 +956,8 @@ async def test_grade_shows_all_tracked_lines_separately_from_directional_picks()
     assert "Stored directional picks: <b>2</b>" in message
     assert "Cross-checked against exact tracked lines: <b>1</b>" in message
     assert "1 tracked-line matches" in message
+    assert "Corroborated by exact PropLine result rows: <b>1</b>" in message
+    assert "1 exact PropLine result matches" in message
     assert "not a recommended pick" in message
 
 

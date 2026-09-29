@@ -4351,6 +4351,10 @@ async def _cmd_grade_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         int(row.get("tracked_line_verified", 0) or 0)
         for row in by_sport.values()
     )
+    propline_result_verified_count = sum(
+        int(row.get("propline_result_verified", 0) or 0)
+        for row in by_sport.values()
+    )
     unverified_count = sum(
         int(row.get("unverified", 0) or 0) for row in by_sport.values()
     )
@@ -4383,12 +4387,14 @@ async def _cmd_grade_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         f"Unverified: <b>{unverified_count}</b> (excluded from hit rate)",
         f"  Cross-checked against exact tracked lines: "
         f"<b>{tracked_line_verified_count}</b>",
-        "<i>Verified picks include exact source-ID, line, event, actual-value, "
-        "and direction matches to source-verified automatic tracking grades. "
-        "Neutral tracking results are mapped through OVER/UNDER; unmatched "
-        "source-less grades remain unverified. Tracked-line and pick totals "
-        "are separate populations and may overlap. Pushes count in the "
-        "denominator.</i>",
+        f"  Corroborated by exact PropLine result rows: "
+        f"<b>{propline_result_verified_count}</b>",
+        "<i>Source-less grades are corroborated only by exact auto-grade "
+        "tracking matches or PropLine results matching event, player, sport, "
+        "stat, actual value, and direction. Bot-generated grades are not "
+        "evidence. Neutral tracking results are mapped through OVER/UNDER. "
+        "Tracked-line and pick totals are separate populations and may "
+        "overlap. Pushes count in the denominator.</i>",
     ]
     if by_provider:
         lines += ["", "─ <b>By Provider</b> " + "─" * 15]
@@ -4408,6 +4414,14 @@ async def _cmd_grade_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
                 if provider_linked
                 else ""
             )
+            provider_propline = int(
+                row.get("propline_result_verified", 0) or 0
+            )
+            provider_propline_note = (
+                f" · {provider_propline} exact PropLine result matches"
+                if provider_propline
+                else ""
+            )
             lines.append(
                 f"  {_html.escape(str(provider))}: "
                 f"{provider_hit}H / "
@@ -4416,7 +4430,7 @@ async def _cmd_grade_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
                 f"{int(row.get('pending', 0) or 0)} pending · "
                 f"{int(row.get('unverified', 0) or 0)} unverified · "
                 f"{provider_rate} (n={provider_denom})"
-                f"{provider_linked_note}"
+                f"{provider_linked_note}{provider_propline_note}"
             )
     if by_sport:
         lines += ["", "─ <b>By Sport</b> " + "─" * 18]
@@ -4433,6 +4447,14 @@ async def _cmd_grade_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
                 if sport_linked
                 else ""
             )
+            sport_propline = int(
+                row.get("propline_result_verified", 0) or 0
+            )
+            sport_propline_note = (
+                f" · {sport_propline} exact PropLine result matches"
+                if sport_propline
+                else ""
+            )
             lines.append(
                 f"  {_html.escape(str(sport))}: "
                 f"{int(row.get('directional', 0) or 0)} picks · "
@@ -4442,7 +4464,7 @@ async def _cmd_grade_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
                 f"{int(row.get('pending', 0) or 0)} pending · "
                 f"{int(row.get('unverified', 0) or 0)} unverified · "
                 f"{rate} (n={graded})"
-                f"{sport_linked_note}"
+                f"{sport_linked_note}{sport_propline_note}"
             )
 
 

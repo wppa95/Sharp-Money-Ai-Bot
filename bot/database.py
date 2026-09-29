@@ -3224,6 +3224,32 @@ class Database:
                 )
                 tracking_rows = list(tracking_result.scalars().all())
 
+            prizepicks_game_ids = sorted({
+                str(opportunity.game_id or "").strip()
+                for opportunity in legacy_opportunities
+                if str(opportunity.provider or "").strip().casefold()
+                == "prizepicks"
+                and str(opportunity.product or PLAYER_PROPS_PRODUCT)
+                .strip()
+                .casefold()
+                == PLAYER_PROPS_PRODUCT.casefold()
+                and str(opportunity.game_id or "").strip()
+            })
+            propline_result_rows = []
+            for start in range(0, len(prizepicks_game_ids), 400):
+                game_id_batch = prizepicks_game_ids[start:start + 400]
+                propline_result = await s.execute(
+                    select(PlayerGameResult).where(
+                        PlayerGameResult.game_id.in_(game_id_batch),
+                        func.lower(
+                            func.trim(
+                                func.coalesce(PlayerGameResult.source, "")
+                            )
+                        ).in_(tuple(_PLAYER_RESULT_SOURCE_PRIORITY)),
+                    )
+                )
+                propline_result_rows.extend(propline_result.scalars().all())
+
         by_sport: dict[str, dict] = {}
         by_provider: dict[str, dict] = {}
         by_sport_direction: dict[str, dict[str, dict]] = {}
@@ -3242,6 +3268,7 @@ class Database:
                 "push": 0,
                 "void": 0,
                 "tracked_line_verified": 0,
+                "propline_result_verified": 0,
                 "raw": {},
             }
 
@@ -3295,7 +3322,7 @@ class Database:
                 (tracking_row, tracked_line_suffix)
             )
 
-        tracked_line_verified: dict[tuple, int] = {}
+        tracked_line_verified_ids: set[int] = set()
         for opportunity in legacy_opportunities:
             if not _is_supported_tracking_sport(opportunity.sport):
                 continue
@@ -3367,18 +3394,111 @@ class Database:
 
             # The tracking identity is unique. If corrupted/duplicate rows
             # make the crosswalk ambiguous, keep the opportunity unverified.
-            if expected_matches != 1:
+            if expected_matches == 1:
+                tracked_line_verified_ids.add(int(opportunity.id))
+
+        # PrizePicks' authoritative results arrive through PropLine. The
+        # provider-owned projection ID is not necessarily the same ID written
+        # into PlayerGameResult, so corroborate only by exact event/player/
+        # sport/stat identity plus matching actual and direction. Self-generated
+        # graded_prop rows are excluded by the allowlisted PropLine sources.
+        propline_results_by_identity: dict[tuple, list[object]] = {}
+        for result_row in propline_result_rows:
+            source = str(result_row.source or "").strip().casefold()
+            if source not in _PLAYER_RESULT_SOURCE_PRIORITY:
+                continue
+            game_id = str(result_row.game_id or "").strip()
+            if not game_id:
+                continue
+            identity = (
+                game_id,
+                str(result_row.player_name or "").strip().casefold(),
+                str(result_row.sport or "").strip().upper(),
+                str(result_row.stat_type or "").strip().casefold(),
+            )
+            propline_results_by_identity.setdefault(identity, []).append(
+                result_row
+            )
+
+        propline_result_verified_ids: set[int] = set()
+        for opportunity in legacy_opportunities:
+            if (
+                str(opportunity.provider or "").strip().casefold()
+                != "prizepicks"
+                or str(opportunity.product or PLAYER_PROPS_PRODUCT)
+                .strip()
+                .casefold()
+                != PLAYER_PROPS_PRODUCT.casefold()
+                or not str(opportunity.game_id or "").strip()
+                or opportunity.actual_value is None
+            ):
+                continue
+            recommendation = str(
+                opportunity.recommendation or ""
+            ).strip().upper()
+            outcome = str(opportunity.result or "").strip().upper()
+            identity = (
+                str(opportunity.game_id).strip(),
+                str(opportunity.player_name or "").strip().casefold(),
+                str(opportunity.sport or "").strip().upper(),
+                str(opportunity.stat_type or "").strip().casefold(),
+            )
+            matching_results = []
+            for result_row in propline_results_by_identity.get(identity, ()):
+                if not _same_number(
+                    result_row.actual_value, opportunity.actual_value
+                ):
+                    continue
+                actual_value = float(result_row.actual_value)
+                line_value = float(opportunity.line_value)
+                neutral_result = (
+                    "PUSH"
+                    if abs(actual_value - line_value) < 0.01
+                    else "HIT"
+                    if actual_value > line_value
+                    else "MISS"
+                )
+                directional_result = neutral_result
+                if (
+                    recommendation == "UNDER"
+                    and neutral_result in {"HIT", "MISS"}
+                ):
+                    directional_result = (
+                        "MISS" if neutral_result == "HIT" else "HIT"
+                    )
+                if directional_result == outcome:
+                    matching_results.append(result_row)
+            if len(matching_results) == 1:
+                propline_result_verified_ids.add(int(opportunity.id))
+
+        tracked_line_verified: dict[tuple, int] = {}
+        propline_result_verified: dict[tuple, int] = {}
+        corroborated_counts: dict[tuple, int] = {}
+        for opportunity in legacy_opportunities:
+            opportunity_id = int(opportunity.id)
+            if (
+                opportunity_id not in tracked_line_verified_ids
+                and opportunity_id not in propline_result_verified_ids
+            ):
                 continue
             group_key = (
-                provider_key,
+                str(opportunity.provider or "Underdog").strip().casefold(),
                 str(opportunity.sport or "UNKNOWN").strip().upper(),
-                recommendation,
-                outcome,
+                str(opportunity.recommendation or "").strip().upper(),
+                str(opportunity.result or "").strip().upper(),
                 opportunity.grade_result_source,
             )
-            tracked_line_verified[group_key] = (
-                tracked_line_verified.get(group_key, 0) + 1
+            corroborated_counts[group_key] = (
+                corroborated_counts.get(group_key, 0) + 1
             )
+            if opportunity_id in tracked_line_verified_ids:
+                tracked_line_verified[group_key] = (
+                    tracked_line_verified.get(group_key, 0) + 1
+                )
+            if opportunity_id in propline_result_verified_ids:
+                propline_result_verified[group_key] = (
+                    propline_result_verified.get(group_key, 0) + 1
+                )
 
         def _add_outcome(
             target: dict,
@@ -3389,6 +3509,8 @@ class Database:
             grade_result_source: str,
             count: int,
             tracked_line_verified_count: int = 0,
+            propline_result_verified_count: int = 0,
+            corroborated_count: int = 0,
         ) -> None:
             row = target.setdefault(key, _new_performance_row())
             row["directional"] += count
@@ -3401,11 +3523,18 @@ class Database:
                 provider, outcome, grade_result_source
             ):
                 linked_count = (
-                    min(count, max(0, int(tracked_line_verified_count or 0)))
+                    min(count, max(0, int(corroborated_count or 0)))
                     if outcome in _DIRECTIONAL_GRADE_RESULTS
                     else 0
                 )
-                row["tracked_line_verified"] += linked_count
+                row["tracked_line_verified"] += min(
+                    linked_count,
+                    max(0, int(tracked_line_verified_count or 0)),
+                )
+                row["propline_result_verified"] += min(
+                    linked_count,
+                    max(0, int(propline_result_verified_count or 0)),
+                )
                 row["unverified"] += count - linked_count
                 if linked_count:
                     row["resolved"] += linked_count
@@ -3445,16 +3574,16 @@ class Database:
             rec_key = str(recommendation or "").upper()
             outcome_key = str(outcome or "PENDING").upper()
             count = int(count or 0)
-            linked_count = tracked_line_verified.get(
-                (
-                    provider_key.casefold(),
-                    sport_key.strip().upper(),
-                    rec_key,
-                    outcome_key,
-                    grade_result_source,
-                ),
-                0,
+            group_key = (
+                provider_key.casefold(),
+                sport_key.strip().upper(),
+                rec_key,
+                outcome_key,
+                grade_result_source,
             )
+            tracked_count = tracked_line_verified.get(group_key, 0)
+            propline_count = propline_result_verified.get(group_key, 0)
+            corroborated_count = corroborated_counts.get(group_key, 0)
             _add_outcome(
                 by_sport,
                 sport_key,
@@ -3463,7 +3592,9 @@ class Database:
                 outcome_key,
                 str(grade_result_source or ""),
                 count,
-                linked_count,
+                tracked_count,
+                propline_count,
+                corroborated_count,
             )
             _add_outcome(
                 by_provider,
@@ -3473,7 +3604,9 @@ class Database:
                 outcome_key,
                 str(grade_result_source or ""),
                 count,
-                linked_count,
+                tracked_count,
+                propline_count,
+                corroborated_count,
             )
             _add_outcome(
                 by_sport_direction.setdefault(sport_key, {}),
@@ -3483,7 +3616,9 @@ class Database:
                 outcome_key,
                 str(grade_result_source or ""),
                 count,
-                linked_count,
+                tracked_count,
+                propline_count,
+                corroborated_count,
             )
 
         # One opportunity can have several snapshots/seeds as a line moves.

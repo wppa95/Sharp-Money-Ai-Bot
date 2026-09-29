@@ -91,7 +91,7 @@
 - [Workflow manager stale-path failure](workflow-manager-stale-path.md) — managed workflow operations can fail before launch when the workspace index references a deleted secondary-skill path.
 - [Telegram alert presentation](telegram-alert-presentation.md) — user-facing prop alerts use plain quality/market labels and one deduplicated history section.
 - [Command reporting boundaries](command-reporting-boundaries.md) — reports separate populations; current picks require fresh future rows and persisted engine output, never synthetic display defaults.
-- [V4 evidence populations](v4-evidence-populations.md) — only completed player games qualify PLAYs or fill named hit-rate windows; provider observations remain monitoring context.
+- [V4 evidence populations](v4-evidence-populations.md) — completed player results support PLAYs; exact PropLine event matches may corroborate source-less PrizePicks grades without changing provenance.
 - [Restart session isolation](restart-session-isolation.md) — reset runtime cursors, checkpoints, telemetry, and child tasks on restart; preserve SQLite evidence and delivery history.
 - [Telegram reconciliation identity](telegram-reconciliation-identity.md) — Underdog audits need source identity and delivery path; player/stat/line cannot deterministically join sends to picks.
 - [Managed SQLite CANTOPEN contention](managed-sqlite-cantopen.md) — Absolute path, valid permissions, and isolated inserts can succeed while live concurrent bot scans still fail to open SQLite.
