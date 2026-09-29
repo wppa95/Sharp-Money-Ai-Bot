@@ -6993,14 +6993,6 @@ class Database:
         if not prepared:
             return 0
 
-        insert_stmt = sqlite_insert(PlayerGameResult).values(list(prepared.values()))
-        incoming_source = func.lower(
-            func.trim(func.coalesce(insert_stmt.excluded.source, ""))
-        )
-        current_source = func.lower(
-            func.trim(func.coalesce(PlayerGameResult.source, ""))
-        )
-
         def _source_priority_expression(source_expression):
             return case(
                 (source_expression == "propline_event_results", 30),
@@ -7009,54 +7001,68 @@ class Database:
                 else_=0,
             )
 
-        incoming_priority = _source_priority_expression(incoming_source)
-        current_priority = _source_priority_expression(current_source)
-        incoming_is_at_least_as_trusted = incoming_priority >= current_priority
-
-        stmt = insert_stmt.on_conflict_do_update(
-            index_elements=[
-                "player_name",
-                "sport",
-                "stat_type",
-                "game_date",
-                "game_id",
-            ],
-            set_={
-                "actual_value": case(
-                    (
-                        incoming_is_at_least_as_trusted,
-                        insert_stmt.excluded.actual_value,
-                    ),
-                    else_=PlayerGameResult.actual_value,
-                ),
-                # Preserve an already-known opponent when a later provider
-                # refresh omits it, but only update it with the chosen result
-                # source's value.
-                "opponent": case(
-                    (
-                        incoming_is_at_least_as_trusted,
-                        func.coalesce(
-                            insert_stmt.excluded.opponent,
-                            PlayerGameResult.opponent,
-                        ),
-                    ),
-                    else_=PlayerGameResult.opponent,
-                ),
-                "source": case(
-                    (
-                        incoming_is_at_least_as_trusted,
-                        insert_stmt.excluded.source,
-                    ),
-                    else_=PlayerGameResult.source,
-                ),
-                "fetched_at": case(
-                    (incoming_is_at_least_as_trusted, fetched_at),
-                    else_=PlayerGameResult.fetched_at,
-                ),
-            },
-        )
+        prepared_rows = list(prepared.values())
         async with self.session() as s:
-            await s.execute(stmt)
+            # Nine result columns per row; 100 rows stays below conservative
+            # SQLite builds' 999-variable limit for multi-values statements.
+            for offset in range(0, len(prepared_rows), 100):
+                insert_stmt = sqlite_insert(PlayerGameResult).values(
+                    prepared_rows[offset : offset + 100]
+                )
+                incoming_source = func.lower(
+                    func.trim(func.coalesce(insert_stmt.excluded.source, ""))
+                )
+                current_source = func.lower(
+                    func.trim(func.coalesce(PlayerGameResult.source, ""))
+                )
+                incoming_priority = _source_priority_expression(incoming_source)
+                current_priority = _source_priority_expression(current_source)
+                incoming_is_at_least_as_trusted = (
+                    incoming_priority >= current_priority
+                )
+                stmt = insert_stmt.on_conflict_do_update(
+                    index_elements=[
+                        "player_name",
+                        "sport",
+                        "stat_type",
+                        "game_date",
+                        "game_id",
+                    ],
+                    set_={
+                        "actual_value": case(
+                            (
+                                incoming_is_at_least_as_trusted,
+                                insert_stmt.excluded.actual_value,
+                            ),
+                            else_=PlayerGameResult.actual_value,
+                        ),
+                        # Preserve an already-known opponent when a later provider
+                        # refresh omits it, but only update it with the chosen result
+                        # source's value.
+                        "opponent": case(
+                            (
+                                incoming_is_at_least_as_trusted,
+                                func.coalesce(
+                                    insert_stmt.excluded.opponent,
+                                    PlayerGameResult.opponent,
+                                ),
+                            ),
+                            else_=PlayerGameResult.opponent,
+                        ),
+                        "source": case(
+                            (
+                                incoming_is_at_least_as_trusted,
+                                insert_stmt.excluded.source,
+                            ),
+                            else_=PlayerGameResult.source,
+                        ),
+                        "fetched_at": case(
+                            (incoming_is_at_least_as_trusted, fetched_at),
+                            else_=PlayerGameResult.fetched_at,
+                        ),
+                    },
+                )
+                await s.execute(stmt)
             await s.commit()
         return len(prepared)
 
@@ -7103,21 +7109,27 @@ class Database:
         sports = {key[1] for key in keys}
         stats = {key[2] for key in keys}
         async with self.session() as s:
-            result = await s.execute(
-                select(PlayerGameResult).where(
-                    PlayerGameResult.player_name.in_(players),
-                    PlayerGameResult.sport.in_(sports),
-                    PlayerGameResult.stat_type.in_(stats),
+            # Keep each expanded IN query below SQLite builds that still use
+            # the 999-variable limit. A full grader page may contain 5,000
+            # distinct player identities.
+            player_list = sorted(players)
+            for offset in range(0, len(player_list), 300):
+                player_chunk = player_list[offset : offset + 300]
+                result = await s.execute(
+                    select(PlayerGameResult).where(
+                        PlayerGameResult.player_name.in_(player_chunk),
+                        PlayerGameResult.sport.in_(sports),
+                        PlayerGameResult.stat_type.in_(stats),
+                    )
                 )
-            )
-            for record in result.scalars().all():
-                key = (
-                    record.player_name,
-                    record.sport,
-                    (record.stat_type or "").lower().strip(),
-                )
-                if key in results_by_key:
-                    results_by_key[key].append(record)
+                for record in result.scalars().all():
+                    key = (
+                        record.player_name,
+                        record.sport,
+                        (record.stat_type or "").lower().strip(),
+                    )
+                    if key in results_by_key:
+                        results_by_key[key].append(record)
 
         for records in results_by_key.values():
             records.sort(
@@ -9469,12 +9481,19 @@ class Database:
         if not ids:
             return 0
         async with self.session() as s:
-            rows_result = await s.execute(
-                select(PropOpportunityLog).where(PropOpportunityLog.id.in_(ids))
-            )
-            rows_by_id = {
-                int(row.id): row for row in rows_result.scalars().all()
-            }
+            rows_by_id = {}
+            for offset in range(0, len(ids), 350):
+                rows_result = await s.execute(
+                    select(PropOpportunityLog).where(
+                        PropOpportunityLog.id.in_(ids[offset : offset + 350])
+                    )
+                )
+                rows_by_id.update(
+                    {
+                        int(row.id): row
+                        for row in rows_result.scalars().all()
+                    }
+                )
             evidence_rows = []
             update_params = []
             for item in updates:
@@ -9540,19 +9559,20 @@ class Database:
                 )
 
             if evidence_rows:
-                await s.execute(
-                    _sqlite_insert(PlayerGameResult)
-                    .values(evidence_rows)
-                    .on_conflict_do_nothing(
-                        index_elements=[
-                            "player_name",
-                            "sport",
-                            "stat_type",
-                            "game_date",
-                            "game_id",
-                        ]
+                for offset in range(0, len(evidence_rows), 100):
+                    await s.execute(
+                        _sqlite_insert(PlayerGameResult)
+                        .values(evidence_rows[offset : offset + 100])
+                        .on_conflict_do_nothing(
+                            index_elements=[
+                                "player_name",
+                                "sport",
+                                "stat_type",
+                                "game_date",
+                                "game_id",
+                            ]
+                        )
                     )
-                )
 
             if update_params:
                 stmt = (

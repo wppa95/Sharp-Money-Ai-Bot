@@ -820,6 +820,7 @@ async def post_init(application: Application) -> None:
         grader_callback = None
 
         async def _opportunity_grader_tick(context):
+            grader_started_at = time.monotonic()
             try:
                 await _grade_opportunities_job(context)
             finally:
@@ -852,7 +853,11 @@ async def post_init(application: Application) -> None:
                 if queue is not None and grader_callback is not None:
                     queue.run_once(
                         grader_callback,
-                        when=config.OPPORTUNITY_GRADER_INTERVAL,
+                        when=max(
+                            1.0,
+                            config.OPPORTUNITY_GRADER_INTERVAL
+                            - (time.monotonic() - grader_started_at),
+                        ),
                         name="opportunity_grader",
                         job_kwargs=_SCAN_JOB_KWARGS,
                     )
@@ -1053,24 +1058,23 @@ async def post_shutdown(application: Application) -> None:
 
 # ── Heartbeat job ─────────────────────────────────────────────────────────────
 
-# Read a substantial historical page in one bulk pass. The old 250-row
-# request (and the database's 500-row safety cap) left large backlogs growing
-# faster than the grader could drain them. 2,000 keeps the database work bulk
-# while leaving headroom for live scans and history collection.
-_GRADE_BATCH_SIZE = 2000
+# The database selectors cap each population at 5,000 rows. Consume that full
+# page for directional opportunities and neutral tracking; DB reads/inserts
+# are chunked below so SQLite bind limits do not silently shrink the workload.
+_GRADE_BATCH_SIZE = 5000
 # A bulk database page can contain many historical rows for the same target.
 # Keep the fallback provider work bounded separately so a large page does not
 # turn into thousands of remote requests; rows with stored evidence still
 # grade in the same bulk pass.
 _GRADE_PROVIDER_FETCH_BATCH_SIZE = 50
-_GRADE_PROPLINE_FETCH_BATCH_SIZE = 25
+_GRADE_PROPLINE_FETCH_BATCH_SIZE = 50
 _GRADE_FETCH_CONCURRENCY = 12
-_GRADE_FETCH_TIMEOUT_SECONDS = 20
+_GRADE_FETCH_TIMEOUT_SECONDS = 45
 # Monitoring and grading have independent owners. Keep each grading pass
-# bounded so a slow settlement provider cannot block a live scan or history
-# collection while the 30-minute cadence drains the durable backlog.
-_GRADE_CYCLE_BUDGET_SECONDS = 50
-_GRADE_CYCLE_HEADROOM_SECONDS = 10
+# bounded below half of its ten-minute interval so it can use substantially
+# more of the shared result quota without delaying its next scheduled pass.
+_GRADE_CYCLE_BUDGET_SECONDS = 300
+_GRADE_CYCLE_HEADROOM_SECONDS = 15
 
 
 async def _underdog_monitor_cycle(context) -> None:

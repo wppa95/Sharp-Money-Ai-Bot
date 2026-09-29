@@ -279,7 +279,7 @@ async def test_grader_fetches_concurrently_with_a_bounded_batch():
     assert health.runs == 1
     assert (
         propline_provider.fetch_resolved_results.await_count
-        == main._GRADE_PROPLINE_FETCH_BATCH_SIZE
+        == min(main._GRADE_PROPLINE_FETCH_BATCH_SIZE, len(opportunities))
     )
 
 
