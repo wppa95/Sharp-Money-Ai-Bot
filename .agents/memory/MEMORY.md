@@ -81,7 +81,7 @@
 - [Provider observation ordering](provider-observation-ordering.md) — persist raw provider observations before scoring; refresh metadata in place so failures cannot erase monitoring evidence.
 - [Pregame delivery boundary](pregame-safety-boundary.md) — actionable Telegram delivery fails closed on unknown event timing; historical alert reports remain state-independent.
 - [Delivery dedup claims](delivery-dedup-claims.md) — pre-delivery identity claims prevent concurrent duplicates but must be released whenever no Telegram alert was delivered.
-- [Football active scope](football-active-scope.md) — exclude gridiron, rugby, and Australian-rules football upstream; preserve soccer and historical rows.
+- [Football active scope](football-active-scope.md) — restrict actionable delivery to NFL/CFB; never use delivery filters to discard provider history.
 - [Scheduler ownership](scheduler-ownership.md) — FPR owns the only scheduled full-pool rotation; Stable Refresh remains unscheduled compatibility code.
 - [Heavy job exclusivity](heavy-job-exclusivity.md) — cadence-critical feed/FPR jobs use in-process handoff plus the SQLite writer gate, not one scheduler-wide lock.
 - [FPR cursor fairness](fpr-cursor-fairness.md) — stable identity order is the rotation; new/moving props get bounded prompt capacity without consuming cursor coverage.
@@ -104,7 +104,7 @@
 - [Cadence runtime overlap](cadence-runtime-overlap.md) — live full-pool Underdog scans can exceed 2 minutes; interval triggers then skip while the shared slot remains held.
 - [Live monitoring database boundary](live-monitoring-db-boundary.md) — compare live feeds in memory; reserve SQLite for evidence, history, grading, and tracking.
 - [Full-feed snapshot batching](full-feed-snapshot-batching.md) — large live-feed snapshot writes must use bounded transactions or SQLite WAL/lock contention can stall independent evidence jobs.
-- [PropLine read-only capability boundary](propline-readonly-capabilities.md) — final stats grade only exact event matches; live/football data remain outside shared history.
+- [PropLine read-only capability boundary](propline-readonly-capabilities.md) — final stats from every supported sport enter shared history; grading still requires exact event identity.
 - [Player history persistence boundary](player-history-persistence.md) — fetch cadence may expire, but completed results remain a durable write obligation and must drain in bounded batches or report failure.
 - [Telegram command catalog](telegram-command-catalog.md) — command metadata is durable in SQLite and drives the menu/help surface while callbacks remain code-owned.
 - [Non-MLB funnel populations](non-mlb-funnel.md) — separate observation, normalization, evaluation, direction, and delivery populations; neutral FPR evaluations still need telemetry.

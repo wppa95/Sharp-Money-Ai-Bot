@@ -309,6 +309,8 @@ async def test_auto_slip_does_not_grade_untrusted_or_wrong_event_rows():
         ("TENNIS", "aces"),
         ("NBA", "points"),
         ("MLB", "hits"),
+        ("NFL", "passing yards"),
+        ("CFB", "passing yards"),
         ("CS", "kills"),
     ],
 )

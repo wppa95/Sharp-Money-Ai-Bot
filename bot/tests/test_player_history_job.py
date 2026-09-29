@@ -448,14 +448,14 @@ async def test_player_history_collector_does_not_schedule_propline_quota_calls(c
         ("MMA", True),
         ("MLB", True),
         ("BASEBALL", True),
-        ("NFL", False),
-        ("NCAAF", False),
-        ("CFB", False),
+        ("NFL", True),
+        ("NCAAF", True),
+        ("CFB", True),
         ("CFL", False),
-        ("FCS", False),
+        ("FCS", True),
     ],
 )
-def test_propline_history_scope_excludes_only_mlb_and_football(sport, expected):
+def test_propline_history_scope_uses_supported_sport_universe(sport, expected):
     assert _uses_propline_history(sport) is expected
 
 
@@ -539,18 +539,24 @@ def test_player_games_map_cs2_market_to_documented_maps_1_2_field():
     ]
 
 
-def test_player_games_never_persist_football_history():
+@pytest.mark.parametrize(
+    ("sport", "official_sport"),
+    [("NFL", "football_nfl"), ("CFB", "football_ncaaf")],
+)
+def test_player_games_persist_final_football_rows_to_shared_history(
+    sport, official_sport
+):
     target = PropLineReadOnlyTarget(
         family="player_games",
-        official_sport="football_nfl",
-        canonical_sport="NFL",
+        official_sport=official_sport,
+        canonical_sport=sport,
         player_name="Football Player",
         market="passing_yards",
     )
     result = SimpleNamespace(
         payload=[
             {
-                "game_id": "nfl-final",
+                "game_id": f"{sport.lower()}-final",
                 "status": "Final",
                 "game_date": "2026-09-20",
                 "actual_value": 250,
@@ -558,13 +564,23 @@ def test_player_games_never_persist_football_history():
         ]
     )
 
-    assert (
-        _filter_completed_propline_game_payload(
-            result.payload, sport="NFL"
-        )
-        is None
-    )
-    assert _completed_propline_game_rows(target, result) == []
+    persisted_payload = _filter_completed_propline_game_payload(result.payload)
+    rows = _completed_propline_game_rows(target, result)
+
+    assert persisted_payload == result.payload
+    assert [
+        (row.player_name, row.sport, row.stat_type, row.game_id, row.actual_value)
+        for row in rows
+    ] == [
+        (
+            "Football Player",
+            sport,
+            "passing yards",
+            f"{sport.lower()}-final",
+            250.0,
+        ),
+    ]
+    assert rows[0].source == "propline_player_games"
 
 
 @pytest.mark.asyncio

@@ -1228,11 +1228,7 @@ async def _grade_opportunities_job(context) -> None:
         # This prevents optional-provider warnings and requests for rows the
         # database can already grade.
         _stored_grade_results = {}
-        _bulk_result_loader = getattr(
-            db, "get_player_results_bulk_for_grading", None
-        )
-        if not callable(_bulk_result_loader):
-            _bulk_result_loader = getattr(db, "get_player_results_bulk", None)
+        _bulk_result_loader = getattr(db, "get_player_results_bulk", None)
         if callable(_bulk_result_loader):
             _bulk_result = _bulk_result_loader(
                 [

@@ -11,7 +11,7 @@ from dataclasses import asdict, is_dataclass, replace
 from types import SimpleNamespace
 from typing import Any
 
-from engine.sport_policy import canonical_sport_key, is_football_related_sport
+from engine.sport_policy import canonical_sport_key
 
 logger = logging.getLogger(__name__)
 
@@ -114,9 +114,9 @@ _PLAYER_HISTORY_PROPLINE_TARGETS_PER_CYCLE = max(
 
 
 def _uses_propline_history(sport: str) -> bool:
-    """Keep PropLine history calls outside the football-family sport scope."""
+    """Use PropLine history for every sport in the supported player universe."""
     canonical = canonical_sport_key(sport)
-    return not is_football_related_sport(canonical)
+    return canonical in _SUPPORTED_HISTORY_SPORTS
 
 
 def _history_sport_order(sport: str) -> tuple[int, str]:
@@ -186,12 +186,8 @@ def _propline_game_records(payload: Any) -> list[Any]:
     return []
 
 
-def _filter_completed_propline_game_payload(
-    payload: Any, *, sport: str = ""
-) -> Any:
+def _filter_completed_propline_game_payload(payload: Any) -> Any:
     """Keep only explicitly final player-game rows in persisted raw payloads."""
-    if sport and is_football_related_sport(sport):
-        return None
     if isinstance(payload, dict):
         for key in ("games", "data", "results", "items"):
             if key not in payload:
@@ -216,15 +212,8 @@ def _filter_completed_propline_game_payload(
 def _completed_propline_game_rows(
     target: Any,
     result: Any,
-    *,
-    grading_only: bool = False,
 ) -> list[Any]:
-    """Convert final, identified player-game stats into persistence rows."""
-    if (
-        is_football_related_sport(target.canonical_sport)
-        and not grading_only
-    ):
-        return []
+    """Convert final, identified player-game stats into shared history rows."""
     from providers.player_stats import RawGameResult
     from providers.propline import (
         _normalize_stat,
@@ -1107,9 +1096,6 @@ async def _persist_propline_player_history_rows(db, target, result) -> int:
     """Persist only explicitly settled entries from an already-fetched rotation result."""
     if (
         str(getattr(target, "family", "") or "") != "player_history"
-        or is_football_related_sport(
-            str(getattr(target, "canonical_sport", "") or "")
-        )
         or not bool(getattr(result, "succeeded", False))
         or not bool(getattr(result, "complete", False))
         or bool(getattr(result, "redacted", False))
@@ -1291,21 +1277,14 @@ async def propline_read_only_rotation_job(context) -> None:
             events_by_sport=events_by_sport,
         )
 
-        # Keep football-family data outside general evidence/history, but
-        # allow its final player-game stats through the isolated grading path.
+        # Keep every discovered sport in the shared read-only rotation. Event
+        # stats still need explicit final status before persistence.
         targets = [
             target
             for target in targets
-            if (
-                is_football_related_sport(target.canonical_sport)
-                and target.family == "player_games"
-            )
-            or (
-                not is_football_related_sport(target.canonical_sport)
-                and not (
-                    target.family == "event_stats"
-                    and not _is_explicit_propline_final(target.event_status)
-                )
+            if not (
+                target.family == "event_stats"
+                and not _is_explicit_propline_final(target.event_status)
             )
         ]
         fresh_reader = getattr(
@@ -1427,33 +1406,11 @@ async def propline_read_only_rotation_job(context) -> None:
             }
 
         async def persist(target, result):
-            if is_football_related_sport(target.canonical_sport):
-                if (
-                    target.family != "player_games"
-                    or not bool(getattr(result, "succeeded", False))
-                    or not bool(getattr(result, "complete", False))
-                    or bool(getattr(result, "redacted", False))
-                ):
-                    return False
-                rows = _completed_propline_game_rows(
-                    target, result, grading_only=True
-                )
-                if rows:
-                    writer = getattr(
-                        db, "upsert_propline_grading_results_bulk", None
-                    )
-                    if not callable(writer):
-                        raise RuntimeError(
-                            "grading-only PropLine result writer is unavailable"
-                        )
-                    await writer(rows)
-                return True
             evidence_writer = getattr(db, "upsert_propline_evidence_batch", None)
             completed_payload = None
             if target.family == "player_games":
                 completed_payload = _filter_completed_propline_game_payload(
-                    getattr(result, "payload", None),
-                    sport=target.canonical_sport,
+                    getattr(result, "payload", None)
                 )
             if asyncio.iscoroutinefunction(evidence_writer):
                 if target.family != "player_games" or completed_payload is not None:

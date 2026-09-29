@@ -667,35 +667,43 @@ class TestGetGameResultForGrading:
         assert matches[902][0].actual_value == 24.0
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("sport", "stat_type"),
+        [
+            ("TENNIS", "aces"),
+            ("NFL", "passing yards"),
+            ("CFB", "passing yards"),
+        ],
+    )
     async def test_bulk_underdog_resolver_requires_exact_event_for_player_game_stats(
-        self, db: Database
+        self, db: Database, sport: str, stat_type: str
     ) -> None:
-        await db.upsert_player_result(
-            PlayerGameResult(
+        await db.upsert_player_results_bulk(
+            [PlayerGameResult(
                 player_name="Exact Match Player",
-                sport="TENNIS",
-                stat_type="aces",
+                sport=sport,
+                stat_type=stat_type,
                 game_date="2026-08-31",
                 actual_value=7.0,
                 source="propline_player_games",
-                game_id="propline-event-id",
-            )
+                game_id=f"propline-event-id-{sport}",
+            )]
         )
         opportunities = [
             SimpleNamespace(
                 id=903,
                 player_name="Exact Match Player",
-                sport="TENNIS",
-                stat_type="aces",
+                sport=sport,
+                stat_type=stat_type,
                 game_time=datetime(2026, 8, 31, 18, 0),
-                game_id="propline-event-id",
+                game_id=f"propline-event-id-{sport}",
                 provider="Underdog",
             ),
             SimpleNamespace(
                 id=904,
                 player_name="Exact Match Player",
-                sport="TENNIS",
-                stat_type="aces",
+                sport=sport,
+                stat_type=stat_type,
                 game_time=datetime(2026, 8, 31, 18, 0),
                 game_id="different-event-id",
                 provider="Underdog",
@@ -703,8 +711,8 @@ class TestGetGameResultForGrading:
             SimpleNamespace(
                 id=905,
                 player_name="Exact Match Player",
-                sport="TENNIS",
-                stat_type="aces",
+                sport=sport,
+                stat_type=stat_type,
                 game_time=datetime(2026, 8, 31, 18, 0),
                 game_id="",
                 provider="Underdog",
