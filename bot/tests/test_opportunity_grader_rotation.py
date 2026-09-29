@@ -20,6 +20,8 @@ import main
 class _Health:
     def __init__(self, cursor: int = 0):
         self.cursor = cursor
+        self.propline_event_lookup_cursor = 0
+        self.propline_identity_lookup_cursor = 0
         self.started = 0
         self.runs = 0
         self.failures = []
@@ -29,6 +31,18 @@ class _Health:
 
     def set_opportunity_grader_cursor(self, cursor):
         self.cursor = cursor
+
+    def get_propline_event_lookup_cursor(self):
+        return self.propline_event_lookup_cursor
+
+    def set_propline_event_lookup_cursor(self, cursor):
+        self.propline_event_lookup_cursor = cursor
+
+    def get_propline_identity_lookup_cursor(self):
+        return self.propline_identity_lookup_cursor
+
+    def set_propline_identity_lookup_cursor(self, cursor):
+        self.propline_identity_lookup_cursor = cursor
 
     def record_job_started(self, name):
         self.started += 1
@@ -351,6 +365,64 @@ async def test_grader_uses_explicit_propline_settlement_before_writing_grade():
         }]
     )
     stats_provider.fetch_results.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_grader_rotates_propline_lookups_across_older_pending_targets():
+    opportunities = []
+    for opp_id in range(1, 121):
+        row = _opp(
+            opp_id,
+            f"Player {opp_id}",
+            "Points",
+            provider="Underdog",
+        )
+        row.game_id = f"event-{opp_id}"
+        opportunities.append(row)
+
+    db = MagicMock()
+    db.get_pending_opportunities = AsyncMock(return_value=opportunities)
+    db.get_pending_tracked_props = AsyncMock(return_value=[])
+    db.get_player_results_bulk = AsyncMock(return_value={})
+    db.upsert_player_results_bulk = AsyncMock()
+    db.get_game_results_for_grading_bulk = AsyncMock(return_value={})
+    db.get_game_result_for_grading = AsyncMock(return_value=None)
+    db.grade_opportunities_bulk = AsyncMock()
+    health = _Health()
+    stats_provider = MagicMock()
+    stats_provider.fetch_results = AsyncMock(return_value=[])
+    propline_provider = SimpleNamespace(
+        fetch_resolved_event_results=AsyncMock(return_value=[]),
+        fetch_resolved_results=AsyncMock(return_value=[]),
+    )
+
+    with (
+        patch.object(main, "get_health_tracker", return_value=health),
+        patch(
+            "providers.player_stats.PlayerStatsProvider",
+            return_value=stats_provider,
+        ),
+        patch(
+            "providers.player_history.get_player_history_provider",
+            return_value=propline_provider,
+        ),
+    ):
+        await main._grade_opportunities_job(_context(db))
+        await main._grade_opportunities_job(_context(db))
+
+    event_calls = propline_provider.fetch_resolved_event_results.await_args_list
+    first_event_ids = [call.args[0] for call in event_calls[:45]]
+    second_event_ids = [call.args[0] for call in event_calls[45:90]]
+    assert first_event_ids == [f"event-{i}" for i in range(1, 46)]
+    assert second_event_ids == [f"event-{i}" for i in range(46, 91)]
+
+    identity_calls = propline_provider.fetch_resolved_results.await_args_list
+    assert [call.args[0] for call in identity_calls[:5]] == [
+        f"Player {i}" for i in range(1, 6)
+    ]
+    assert [call.args[0] for call in identity_calls[5:10]] == [
+        f"Player {i}" for i in range(6, 11)
+    ]
 
 
 @pytest.mark.asyncio

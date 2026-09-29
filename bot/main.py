@@ -1070,6 +1070,38 @@ _GRADE_PROVIDER_FETCH_BATCH_SIZE = 50
 _GRADE_PROPLINE_FETCH_BATCH_SIZE = 50
 _GRADE_FETCH_CONCURRENCY = 12
 _GRADE_FETCH_TIMEOUT_SECONDS = 45
+
+
+def _rotating_grader_targets(targets, cursor: int, limit: int):
+    """Return a bounded circular window and its last target ID.
+
+    The database grading cursor covers the whole page of saved rows, while
+    remote result lookups are intentionally much smaller. Keep their progress
+    separate so a large page cannot advance past targets that were never
+    queried.
+    """
+    _ordered = sorted(
+        targets,
+        key=lambda target: int(getattr(target, "id", 0) or 0),
+    )
+    _limit = max(0, int(limit))
+    if not _ordered or _limit == 0:
+        return [], max(0, int(cursor or 0))
+
+    _cursor = max(0, int(cursor or 0))
+    _after = [
+        target
+        for target in _ordered
+        if int(getattr(target, "id", 0) or 0) > _cursor
+    ]
+    _before = [
+        target
+        for target in _ordered
+        if int(getattr(target, "id", 0) or 0) <= _cursor
+    ]
+    _selected = (_after + _before)[:_limit]
+    _next_cursor = int(getattr(_selected[-1], "id", 0) or 0)
+    return _selected, _next_cursor
 # Monitoring and grading have independent owners. Keep each grading pass
 # bounded below half of its ten-minute interval so it can use substantially
 # more of the shared result quota without delaying its next scheduled pass.
@@ -1545,9 +1577,24 @@ async def _grade_opportunities_job(context) -> None:
                 if callable(_propline_event_fetcher)
                 else 0
             )
-            _propline_event_targets = list(
-                _propline_event_by_key.values()
-            )[:_event_limit]
+            _event_cursor_reader = getattr(
+                _ht_start,
+                "get_propline_event_lookup_cursor",
+                None,
+            )
+            _event_lookup_cursor = (
+                _event_cursor_reader()
+                if callable(_event_cursor_reader)
+                else 0
+            )
+            (
+                _propline_event_targets,
+                _next_event_lookup_cursor,
+            ) = _rotating_grader_targets(
+                list(_propline_event_by_key.values()),
+                _event_lookup_cursor,
+                _event_limit,
+            )
             _propline_loop = asyncio.get_running_loop()
             _propline_deadline = _propline_loop.time() + max(
                 1,
@@ -1694,6 +1741,13 @@ async def _grade_opportunities_job(context) -> None:
                 _propline_fetched_rows += await _persist_propline_rows(
                     _event_rows
                 )
+                _event_cursor_writer = getattr(
+                    _ht_start,
+                    "set_propline_event_lookup_cursor",
+                    None,
+                )
+                if _propline_event_targets and callable(_event_cursor_writer):
+                    _event_cursor_writer(_next_event_lookup_cursor)
 
                 _fallback_budget = max(
                     0,
@@ -1751,9 +1805,24 @@ async def _grade_opportunities_job(context) -> None:
                     )
                     _identity_targets_by_key.setdefault(_identity_key, _gopp)
 
-                _propline_identity_targets = list(
-                    _identity_targets_by_key.values()
-                )[:_fallback_budget]
+                _identity_cursor_reader = getattr(
+                    _ht_start,
+                    "get_propline_identity_lookup_cursor",
+                    None,
+                )
+                _identity_lookup_cursor = (
+                    _identity_cursor_reader()
+                    if callable(_identity_cursor_reader)
+                    else 0
+                )
+                (
+                    _propline_identity_targets,
+                    _next_identity_lookup_cursor,
+                ) = _rotating_grader_targets(
+                    list(_identity_targets_by_key.values()),
+                    _identity_lookup_cursor,
+                    _fallback_budget,
+                )
                 _identity_tasks = [
                     asyncio.create_task(
                         _fetch_propline_identity_results(_gopp)
@@ -1766,6 +1835,16 @@ async def _grade_opportunities_job(context) -> None:
                 _propline_fetched_rows += await _persist_propline_rows(
                     _identity_rows
                 )
+                _identity_cursor_writer = getattr(
+                    _ht_start,
+                    "set_propline_identity_lookup_cursor",
+                    None,
+                )
+                if (
+                    _propline_identity_targets
+                    and callable(_identity_cursor_writer)
+                ):
+                    _identity_cursor_writer(_next_identity_lookup_cursor)
                 if (
                     _propline_event_targets
                     or _propline_identity_targets

@@ -228,6 +228,8 @@ class HealthTracker:
         self._path  = path
         self._lock  = threading.Lock()
         self._state: dict = {}
+        self._propline_event_lookup_cursor = 0
+        self._propline_identity_lookup_cursor = 0
         self._load()
 
     # ── Persistence ───────────────────────────────────────────────────────────
@@ -298,6 +300,10 @@ class HealthTracker:
         """
         now_iso   = _now_iso()
         now_ts    = _now_ts()
+        # Provider lookup rotation is disposable runtime state. Durable
+        # PropLine observations remain in SQLite and are reloaded normally.
+        self._propline_event_lookup_cursor = 0
+        self._propline_identity_lookup_cursor = 0
 
         with self._lock:
             # ── Infer startup reason from previous session ─────────────────
@@ -1045,6 +1051,26 @@ class HealthTracker:
         with self._lock:
             self._state["opportunity_grader_cursor"] = max(0, int(cursor))
             self._save()
+
+    def get_propline_event_lookup_cursor(self) -> int:
+        """Return this-session's PropLine event lookup position."""
+        with self._lock:
+            return max(0, int(self._propline_event_lookup_cursor))
+
+    def set_propline_event_lookup_cursor(self, cursor: int) -> None:
+        """Advance the runtime-only event lookup position."""
+        with self._lock:
+            self._propline_event_lookup_cursor = max(0, int(cursor))
+
+    def get_propline_identity_lookup_cursor(self) -> int:
+        """Return this-session's PropLine player/stat lookup position."""
+        with self._lock:
+            return max(0, int(self._propline_identity_lookup_cursor))
+
+    def set_propline_identity_lookup_cursor(self, cursor: int) -> None:
+        """Advance the runtime-only player/stat lookup position."""
+        with self._lock:
+            self._propline_identity_lookup_cursor = max(0, int(cursor))
 
     def get_tracking_grader_cursor(self) -> int:
         """Return the last neutral-tracking id visited by the rotating grader."""
