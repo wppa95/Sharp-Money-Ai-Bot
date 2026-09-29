@@ -9,6 +9,12 @@ The history collector must treat a provider-empty response as an explicit covera
 
 **How to apply:** Keep the database authoritative, persist every returned row in bounded batches, and leave unresolved opportunities pending when exact settlement evidence is unavailable. Composite settlement may use only complete, same-game component rows already stored in the database.
 
+Historical evidence audits must separate evidence presence from sample sufficiency. For sports without an explicit five-result gate, any source-backed usable player-history result counts as evidence; fewer than five is low sample, not no evidence. Apply five-result requirements only where an explicit sport policy requires them.
+
+**Why:** The user clarified that not every sport needs five samples when some usable evidence exists.
+
+**How to apply:** Report zero-evidence and low-sample cases separately. Verify source provenance and player/stat identity, and treat whether evidence was available at alert time as a separate question.
+
 Generic Underdog `BASKETBALL` targets require a WNBA-first ESPN route with an NBA fallback, then the returned rows must retain the original `BASKETBALL` identity for database joins.
 
 **Why:** The active-book key is not itself an ESPN league key; routing it directly as NBA can silently produce no history for the active WNBA slate.

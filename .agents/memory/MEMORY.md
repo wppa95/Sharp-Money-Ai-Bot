@@ -125,7 +125,7 @@
 - [PropLine complete-feed ledger](propline-complete-feed-ledger.md) — fetch all active non-football sports, retain immutable normalized observations, and withhold evaluation on partial feeds.
 - [PropLine catalog audit boundary](propline-catalog-audit.md) — catalog drift is separate operational evidence; retain unknown identities and resolve them only when a later complete audit maps them.
 - [Opportunity identity and FPR delivery](opportunity-event-identity.md) — preserve source IDs; cross-ID grading requires one exact player/stat/date/team/opponent match.
-- [History coverage boundaries](history-coverage-boundaries.md) — batch full-book provider work; report empty sport coverage separately from errors and deadlines.
+- [History coverage boundaries](history-coverage-boundaries.md) — distinguish no history from low sample; don't impose five results universally; report empty coverage separately from errors.
 - [Provider-aware prop ledger](provider-aware-prop-ledger.md) — every supported feed keeps source identity across observation, history, tracking, grading, and reports; sportsbook rows never enter the Underdog alert universe.
 - [Adaptive learning policy](adaptive-learning-policy.md) — provider-aware weights are explicit, audited, bounded ranking adjustments and never qualification or delivery gates.
 - [Optional score reporting](optional-score-reporting.md) — diagnostic ranking output must tolerate missing scores without aborting the monitoring cycle.
