@@ -8,13 +8,13 @@ import pytest
 import hashlib
 
 
-def _slip(size: int, line: float = 18.5):
+def _slip(size: int, line: float = 18.5, sport: str = "NBA"):
     return SimpleNamespace(
         legs=[
             SimpleNamespace(
                 player_name=f"Player {index}",
                 stat_type="Points",
-                sport="NBA",
+                sport=sport,
                 team=f"Team {index}",
                 game_time=datetime(2026, 9, 28, 19, 0 + index),
                 game_description="",
@@ -313,16 +313,23 @@ async def test_auto_slips_send_once_and_reoffer_changed_combinations(monkeypatch
     monkeypatch.setattr(commands, "_db", db)
     monkeypatch.setenv("ALLOWED_USER_IDS", "777")
 
-    slips = {2: _slip(2), 3: _slip(3)}
+    slips_by_sport = {
+        "CS": _slip(2, sport="CS"),
+        "TENNIS": _slip(2, sport="TENNIS"),
+    }
 
     async def fake_cmd_slip(_update, context):
-        context._slip_build_capture.update(slips=slips, candidate_count=3)
+        context._slip_build_capture.update(
+            slips_by_sport=slips_by_sport,
+            candidate_count=4,
+            candidate_counts_by_sport={"CS": 2, "TENNIS": 2},
+        )
 
     monkeypatch.setattr(commands, "cmd_slip", fake_cmd_slip)
     monkeypatch.setattr(
         commands,
         "_render_slip_section",
-        lambda size, _slip, label="": [f"{size}-leg section"],
+        lambda size, _slip, label="": [f"{label} {size}-leg section"],
     )
     bot = SimpleNamespace(send_message=AsyncMock())
     context = SimpleNamespace(application=SimpleNamespace(bot=bot))
@@ -332,17 +339,19 @@ async def test_auto_slips_send_once_and_reoffer_changed_combinations(monkeypatch
         await commands.auto_slip_notifications_job(context)
         assert bot.send_message.await_count == 1
         first_message = bot.send_message.await_args.kwargs["text"]
-        assert "2-leg section" in first_message
-        assert "3-leg section" not in first_message
-        assert "Today's qualifying two-pick" in first_message
+        assert "CS 2-leg section" in first_message
+        assert "TENNIS 2-leg section" in first_message
+        assert "Today's qualifying two-pick slips by sport" in first_message
         assert "Research only" not in first_message
 
-        slips[2] = _slip(2, line=19.5)
+        slips_by_sport["TENNIS"] = _slip(
+            2, line=19.5, sport="TENNIS"
+        )
         await commands.auto_slip_notifications_job(context)
         assert bot.send_message.await_count == 2
         changed_message = bot.send_message.await_args.kwargs["text"]
-        assert "2-leg section" in changed_message
-        assert "3-leg section" not in changed_message
+        assert "TENNIS 2-leg section" in changed_message
+        assert "CS 2-leg section" not in changed_message
         assert "Research only" not in changed_message
     finally:
         await db.close()
@@ -357,10 +366,14 @@ async def test_failed_telegram_send_releases_slip_claim_for_retry(monkeypatch):
     await db.init()
     monkeypatch.setattr(commands, "_db", db)
     monkeypatch.setenv("ALLOWED_USER_IDS", "777")
-    slips = {2: _slip(2)}
+    slips_by_sport = {"NBA": _slip(2)}
 
     async def fake_cmd_slip(_update, context):
-        context._slip_build_capture.update(slips=slips, candidate_count=2)
+        context._slip_build_capture.update(
+            slips_by_sport=slips_by_sport,
+            candidate_count=2,
+            candidate_counts_by_sport={"NBA": 2},
+        )
 
     monkeypatch.setattr(commands, "cmd_slip", fake_cmd_slip)
     monkeypatch.setattr(
@@ -380,13 +393,30 @@ async def test_failed_telegram_send_releases_slip_claim_for_retry(monkeypatch):
         await commands.auto_slip_notifications_job(context)
         assert bot.send_message.await_count == 2
         signature = hashlib.sha256(
-            f"777:{commands._auto_slip_signature(2, slips[2])}".encode("utf-8")
+            f"777:{commands._auto_slip_signature(2, slips_by_sport['NBA'])}".encode(
+                "utf-8"
+            )
         ).hexdigest()
         assert await db.claim_auto_slip_notification(
             signature, 2
         ) is False
     finally:
         await db.close()
+
+
+def test_auto_slips_are_built_separately_for_each_sport():
+    from commands import _build_auto_slips_by_sport
+
+    candidates = _slip(2, sport="CS").legs + _slip(
+        2, sport="TENNIS"
+    ).legs
+    slips, counts = _build_auto_slips_by_sport(candidates)
+
+    assert counts == {"CS": 2, "TENNIS": 2}
+    assert set(slips) == {"CS", "TENNIS"}
+    for sport, slip in slips.items():
+        assert len(slip.legs) == 2
+        assert {leg.sport for leg in slip.legs} == {sport}
 
 
 def test_auto_slip_signature_ignores_leg_order_but_tracks_line_changes():

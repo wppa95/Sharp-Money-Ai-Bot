@@ -3333,6 +3333,28 @@ def _order_slip_candidates_by_sport(
             return ordered
 
 
+def _build_auto_slips_by_sport(
+    candidates: list[PropPickAdapter],
+) -> tuple[dict[str, Any], dict[str, int]]:
+    """Build one same-sport two-leg slip for every sport with a valid pair."""
+    from engine.slip_builder import build_all_slips
+
+    grouped: dict[str, list[PropPickAdapter]] = {}
+    for candidate in candidates:
+        sport = str(getattr(candidate, "sport", "") or "").strip().upper()
+        if sport:
+            grouped.setdefault(sport, []).append(candidate)
+
+    slips: dict[str, Any] = {}
+    for sport, sport_candidates in sorted(grouped.items()):
+        built = build_all_slips(sport_candidates, max_size=2)
+        slip = built.get(2)
+        if slip is not None:
+            slips[sport] = slip
+
+    return slips, {sport: len(rows) for sport, rows in sorted(grouped.items())}
+
+
 async def cmd_slip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """/slip — Build correlation-aware prop slips (2–6 legs) from live market props.
 
@@ -3600,15 +3622,19 @@ async def cmd_slip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     _candidates = _order_slip_candidates_by_sport(_eligible_slip_entries)
 
     _slip_build_capture = getattr(context, "_slip_build_capture", None)
-    slips = build_all_slips(
-        _candidates,
-        max_size=2 if isinstance(_slip_build_capture, dict) else 6,
-    )
-
     if isinstance(_slip_build_capture, dict):
-        _slip_build_capture["slips"] = slips
+        auto_slips, candidate_counts = _build_auto_slips_by_sport(_candidates)
+        _slip_build_capture["slips_by_sport"] = auto_slips
+        _slip_build_capture["candidate_counts_by_sport"] = candidate_counts
         _slip_build_capture["candidate_count"] = len(_candidates)
+        logger.info(
+            "cmd_slip: auto-slip candidates by sport=%s; two-leg slips=%s",
+            candidate_counts,
+            sorted(auto_slips),
+        )
         return
+
+    slips = build_all_slips(_candidates, max_size=6)
 
     if not slips:
         await update.message.reply_text(
@@ -3727,8 +3753,13 @@ async def auto_slip_notifications_job(context: ContextTypes.DEFAULT_TYPE) -> Non
         )
         fake_context = SimpleNamespace(args=[], _slip_build_capture=capture)
         await cmd_slip(fake_update, fake_context)
-        slips = capture.get("slips") or {}
-        if not slips:
+        slips_by_sport = capture.get("slips_by_sport") or {}
+        if not slips_by_sport:
+            logger.info(
+                "auto_slip_notifications: no same-sport two-leg slips; "
+                "eligible candidates by sport=%s",
+                capture.get("candidate_counts_by_sport", {}),
+            )
             return
     except Exception:
         logger.exception("auto_slip_notifications: slip build failed")
@@ -3742,10 +3773,8 @@ async def auto_slip_notifications_job(context: ContextTypes.DEFAULT_TYPE) -> Non
     for chat_id in recipients:
         claimed: list[tuple[str, int, object]] = []
         try:
-            for size in (2,):
-                slip = slips.get(size)
-                if slip is None:
-                    continue
+            for sport, slip in sorted(slips_by_sport.items()):
+                size = 2
                 combination_signature = _auto_slip_signature(size, slip)
                 leg_payload = [
                     {
@@ -3805,13 +3834,17 @@ async def auto_slip_notifications_job(context: ContextTypes.DEFAULT_TYPE) -> Non
             continue
 
         lines = [
-            "🔔 <b>Today's qualifying two-pick player-prop slip</b>",
+            "🔔 <b>Today's qualifying two-pick slips by sport</b>",
             "",
-            "<i>Each leg passed the current direction/history checks.</i>",
+            "<i>Each same-sport pair passed the current direction/history checks.</i>",
             "",
         ]
         for _, size, slip in claimed:
-            lines.extend(_render_slip_section(size, slip))
+            sport = str(
+                getattr(slip.legs[0], "sport", "") if getattr(slip, "legs", None)
+                else ""
+            ).strip().upper()
+            lines.extend(_render_slip_section(size, slip, label=sport))
             lines.append("")
         try:
             await bot.send_message(
