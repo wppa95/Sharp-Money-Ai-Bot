@@ -3333,6 +3333,31 @@ def _order_slip_candidates_by_sport(
             return ordered
 
 
+def _auto_slip_event_in_window(
+    game_time: Optional[datetime],
+    game_status: Optional[str],
+    *,
+    now: datetime,
+) -> bool:
+    """Require automatic-slip events to have a known start within the alert horizon."""
+    if game_time is None:
+        return False
+
+    from engine.timing import is_game_alertable
+
+    eligible, _reason = is_game_alertable(
+        game_time,
+        min_minutes=0,
+        max_minutes=int(config.ALERT_WINDOW_MAX_MINUTES),
+        urgent_edge=0.0,
+        edge=0.0,
+        game_status=game_status,
+        require_known=True,
+        now=now,
+    )
+    return eligible
+
+
 def _build_auto_slips_by_sport(
     candidates: list[PropPickAdapter],
 ) -> tuple[dict[str, Any], dict[str, int]]:
@@ -3492,6 +3517,30 @@ async def cmd_slip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     # PropLine is internal evidence for Underdog, not a separate Telegram
     # provider. Only Underdog-owned rows enter the slip display.
     provider_props = [("Underdog", p) for p in ud_props]
+    _auto_slip_window_excluded = 0
+    if isinstance(_slip_build_capture, dict):
+        _max_slip_lead_minutes = int(config.ALERT_WINDOW_MAX_MINUTES)
+        _within_window = []
+        for _provider, _plh in provider_props:
+            if _auto_slip_event_in_window(
+                getattr(_plh, "game_time", None),
+                getattr(_plh, "provider_status", None),
+                now=now,
+            ):
+                _within_window.append((_provider, _plh))
+            else:
+                _auto_slip_window_excluded += 1
+        provider_props = _within_window
+        if _auto_slip_window_excluded:
+            logger.info(
+                "cmd_slip: auto-slip timing window excluded %d props "
+                "(requires known start within %d minutes)",
+                _auto_slip_window_excluded,
+                _max_slip_lead_minutes,
+            )
+        if not provider_props and _auto_slip_window_excluded:
+            if _capture_empty_auto_slip("outside_auto_slip_timing_window"):
+                return
     if not provider_props:
         if _capture_empty_auto_slip("no_current_fresh_upcoming_props"):
             return
@@ -3841,6 +3890,10 @@ async def auto_slip_notifications_job(context: ContextTypes.DEFAULT_TYPE) -> Non
                 )
                 if claimed_now:
                     claimed.append((claim_signature, size, slip))
+                    # Deliver no more than one fresh two-leg slip per sport
+                    # scan. Already-sent signatures are skipped above, so
+                    # other sports remain eligible on later cycles.
+                    break
                 else:
                     backfill = getattr(
                         _db, "backfill_auto_slip_notification_legs", None
@@ -3873,9 +3926,10 @@ async def auto_slip_notifications_job(context: ContextTypes.DEFAULT_TYPE) -> Non
             continue
 
         lines = [
-            "🔔 <b>Today's qualifying two-pick slips by sport</b>",
+            "🔔 <b>Today's qualifying two-pick slip</b>",
             "",
-            "<i>Each same-sport pair passed the current direction/history checks.</i>",
+            "<i>This same-sport pair passed the current direction/history checks. "
+            "Other eligible sports can be sent on later scans.</i>",
             "",
         ]
         for _, size, slip in claimed:

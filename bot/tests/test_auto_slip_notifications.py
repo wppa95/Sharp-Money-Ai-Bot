@@ -336,25 +336,61 @@ async def test_auto_slips_send_once_and_reoffer_changed_combinations(monkeypatch
 
     try:
         await commands.auto_slip_notifications_job(context)
-        await commands.auto_slip_notifications_job(context)
-        assert bot.send_message.await_count == 1
         first_message = bot.send_message.await_args.kwargs["text"]
+        assert bot.send_message.await_count == 1
         assert "CS 2-leg section" in first_message
-        assert "TENNIS 2-leg section" in first_message
-        assert "Today's qualifying two-pick slips by sport" in first_message
-        assert "Research only" not in first_message
+        assert "TENNIS 2-leg section" not in first_message
+        assert "Today's qualifying two-pick slip" in first_message
+
+        await commands.auto_slip_notifications_job(context)
+        assert bot.send_message.await_count == 2
+        second_message = bot.send_message.await_args.kwargs["text"]
+        assert "CS 2-leg section" not in second_message
+        assert "TENNIS 2-leg section" in second_message
+
+        await commands.auto_slip_notifications_job(context)
+        assert bot.send_message.await_count == 2
 
         slips_by_sport["TENNIS"] = _slip(
             2, line=19.5, sport="TENNIS"
         )
         await commands.auto_slip_notifications_job(context)
-        assert bot.send_message.await_count == 2
+        assert bot.send_message.await_count == 3
         changed_message = bot.send_message.await_args.kwargs["text"]
         assert "TENNIS 2-leg section" in changed_message
         assert "CS 2-leg section" not in changed_message
-        assert "Research only" not in changed_message
     finally:
         await db.close()
+
+
+def test_automatic_slips_require_a_known_start_within_two_hours(monkeypatch):
+    from datetime import datetime, timedelta, timezone
+    import commands
+
+    now = datetime(2026, 9, 29, 12, 0)
+    monkeypatch.setattr(commands.config, "ALERT_WINDOW_MAX_MINUTES", 120)
+
+    assert commands._auto_slip_event_in_window(
+        now + timedelta(minutes=119), "scheduled", now=now
+    )
+    assert not commands._auto_slip_event_in_window(
+        now + timedelta(hours=12), "scheduled", now=now
+    )
+    assert not commands._auto_slip_event_in_window(
+        now - timedelta(minutes=1), "scheduled", now=now
+    )
+    assert not commands._auto_slip_event_in_window(
+        None, "scheduled", now=now
+    )
+    # Aware provider instants are normalized to UTC before comparing.
+    assert commands._auto_slip_event_in_window(
+        datetime(
+            2026, 9, 29, 8, 0,
+            tzinfo=timezone(timedelta(hours=-5)),
+        ),
+        "scheduled",
+        now=now,
+    )
 
 
 @pytest.mark.asyncio
