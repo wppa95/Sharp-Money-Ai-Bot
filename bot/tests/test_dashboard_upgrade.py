@@ -160,6 +160,43 @@ class TestDashboardReportToTelegram:
         assert text.count("UNAVAILABLE") >= 5
         assert "Delivered: <code>0</code>" not in text
 
+    def test_fpr_sidecar_fills_tracking_and_sport_sections_when_rollups_fail(self):
+        class _Tracker:
+            @staticmethod
+            def get_fpr_stats():
+                return {
+                    "pool_size": 7656,
+                    "fpr_rescored": 7656,
+                    "rotation_complete": True,
+                    "fpr_by_sport": {"MLB": 514, "NHL": 694},
+                }
+
+        from engine import health
+
+        original = health.get_health_tracker
+        health.get_health_tracker = lambda: _Tracker()
+        try:
+            report = _report(unavailable={"tracking", "sport"})
+            DashboardEngine._load_fpr_fallback(report)
+        finally:
+            health.get_health_tracker = original
+
+        text = report.to_telegram()
+        assert "By current sport <i>(last FPR rotation)</i>" in text
+        assert "MLB: FPR rescored <code>514</code>" in text
+        assert "Last FPR pool: <code>7,656</code>" in text
+        assert "FPR rescored: <code>7,656</code>" in text
+        assert "By Sport" in text and "last FPR rotation coverage" in text
+        assert "UNAVAILABLE" not in text
+
+    def test_uptime_age_is_labeled_as_start_time(self):
+        report = _report(
+            system_panel=SystemPanel(uptime_str="1h 4m ago"),
+        )
+        text = report.to_telegram()
+        assert "Started:   <code>1h 4m ago</code>" in text
+        assert "Uptime:    <code>1h 4m ago</code>" not in text
+
 
 class TestDashboardEngineGatherSystemIntelligence:
     """Test that DashboardEngine.gather() calls system and intelligence panel methods."""

@@ -184,6 +184,11 @@ class DashboardReport:
     tracking_by_provider: dict = field(default_factory=dict)
     tracking_by_sport: dict = field(default_factory=dict)
     provider_pipeline: dict = field(default_factory=dict)
+    # Lightweight sidecar values used when large SQLite rollups time out.
+    fpr_by_sport: dict[str, int] = field(default_factory=dict, repr=False)
+    fpr_pool_size: Optional[int] = field(default=None, repr=False)
+    fpr_rescored: Optional[int] = field(default=None, repr=False)
+    fpr_rotation_complete: bool = field(default=False, repr=False)
     # A failed read must remain distinguishable from a real empty population.
     # Keys are report sections such as tracking, totals, ev, clv, or sport.
     unavailable: set[str] = field(default_factory=set, repr=False)
@@ -263,7 +268,19 @@ class DashboardReport:
             "",
         ]
 
-        if tracking_unavailable:
+        if tracking_unavailable and self.fpr_by_sport:
+            scan_label = (
+                "last FPR rotation"
+                if self.fpr_rotation_complete
+                else "last FPR batch"
+            )
+            parts.append(f"  By current sport <i>({scan_label})</i>:")
+            for sport, rescored in sorted(self.fpr_by_sport.items()):
+                parts.append(
+                    f"    {sport}: FPR rescored <code>{rescored:,}</code>"
+                )
+            parts.append("")
+        elif tracking_unavailable:
             parts.append("  By current sport: <i>UNAVAILABLE</i>")
             parts.append("")
         elif self.tracking_by_sport:
@@ -312,29 +329,56 @@ class DashboardReport:
         pipeline_values = self.provider_pipeline.get("Underdog")
         if not isinstance(pipeline_values, dict):
             pipeline_values = {}
-        observed = pipeline_values.get(
-            "observed",
-            self._normalized_activity("Underdog", self.total_ud_alerts),
-        )
-        active = pipeline_values.get(
-            "active",
-            self.active_tracked_props,
-        )
-        parts += [
-            "📡 <b>Provider Pipeline</b>",
-            (
+        if tracking_unavailable and self.fpr_pool_size is not None:
+            pipeline_line = (
+                "  <b>Underdog</b>  "
+                f"Last FPR pool: <code>{self.fpr_pool_size:,}</code>"
+            )
+            if self.fpr_rescored is not None:
+                pipeline_line += (
+                    f" · FPR rescored: <code>{self.fpr_rescored:,}</code>"
+                )
+        else:
+            observed = pipeline_values.get(
+                "observed",
+                self._normalized_activity("Underdog", self.total_ud_alerts),
+            )
+            active = pipeline_values.get(
+                "active",
+                self.active_tracked_props,
+            )
+            pipeline_line = (
                 "  <b>Underdog</b>  "
                 f"Observed: <code>{_count(observed)}</code> · "
                 f"Active: <code>{_count(active)}</code>"
-            ),
-            "",
-        ]
+            )
+        parts += ["📡 <b>Provider Pipeline</b>", pipeline_line, ""]
 
         # ── By sport ──────────────────────────────────────────────────────────
         # All-time cumulative alert distribution across EV + Underdog + PrizePicks.
         # Differs from Today count — shows historical model performance by sport.
         if "sport" in self.unavailable:
-            parts += ["🏆 <b>By Sport</b>", "  <i>UNAVAILABLE.</i>", ""]
+            if self.fpr_by_sport:
+                scan_label = (
+                    "last FPR rotation"
+                    if self.fpr_rotation_complete
+                    else "last FPR batch"
+                )
+                parts += [
+                    f"🏆 <b>By Sport</b>  <i>({scan_label} coverage)</i>"
+                ]
+                for sport, rescored in sorted(
+                    self.fpr_by_sport.items(),
+                    key=lambda item: item[1],
+                    reverse=True,
+                ):
+                    parts.append(
+                        f"  {sport:<10} FPR rescored "
+                        f"<code>{rescored:>5,}</code>"
+                    )
+                parts.append("")
+            else:
+                parts += ["🏆 <b>By Sport</b>", "  <i>UNAVAILABLE.</i>", ""]
         active_sports = [s for s in self.by_sport if s.total >= 1]
         if "sport" not in self.unavailable and active_sports:
             parts.append("🏆 <b>By Sport</b>  <i>(All-time)</i>")
@@ -384,7 +428,10 @@ class DashboardReport:
         sp = self.system_panel
         if sp is not None:
             parts += ["", "🖥️ <b>System Status</b>"]
-            parts.append(f"  Uptime:    <code>{sp.uptime_str}</code>")
+            if sp.uptime_str.strip().lower().endswith(" ago"):
+                parts.append(f"  Started:   <code>{sp.uptime_str}</code>")
+            else:
+                parts.append(f"  Uptime:    <code>{sp.uptime_str}</code>")
             if sp.last_restart:
                 parts.append(f"  Restarted: <code>{sp.last_restart}</code>")
             if sp.crash_count:
@@ -446,6 +493,7 @@ class DashboardEngine:
         zero / None for that metric so the rest of the dashboard still renders.
         """
         report = DashboardReport()
+        cls._load_fpr_fallback(report)
 
         # Keep report reads on one async path.  SQLite WAL permits readers
         # during writes, but launching eleven independent sessions at once
@@ -469,6 +517,10 @@ class DashboardEngine:
             provider_rows.append(rows)
         if not isinstance(tracking, dict):
             report.unavailable.add("tracking")
+            logger.warning(
+                "dashboard tracking summary unavailable; using FPR sidecar "
+                "fallback where available"
+            )
         try:
             if isinstance(tracking, dict):
                 report.tracked_observations = int(
@@ -598,6 +650,7 @@ class DashboardEngine:
             )
             if result is _DASHBOARD_UNAVAILABLE:
                 report.unavailable.add(section)
+                logger.warning("dashboard section unavailable section=%s", section)
         cls._compute_best_worst(report)
         result = await _bounded_dashboard_read(
             cls._gather_provider_pipeline(db, report),
@@ -607,6 +660,46 @@ class DashboardEngine:
             report.unavailable.add("pipeline")
 
         return report
+
+    @staticmethod
+    def _load_fpr_fallback(report: DashboardReport) -> None:
+        """Copy lightweight current-scan metrics from the health sidecar."""
+        try:
+            from engine.health import get_health_tracker
+
+            tracker = get_health_tracker()
+            if tracker is None:
+                return
+            stats = tracker.get_fpr_stats()
+            if not isinstance(stats, dict):
+                return
+
+            sport_counts = stats.get("fpr_by_sport", {})
+            if isinstance(sport_counts, dict):
+                for sport, count in sport_counts.items():
+                    try:
+                        normalized_sport = str(sport or "").strip().upper()
+                        normalized_count = max(0, int(count or 0))
+                    except (TypeError, ValueError):
+                        continue
+                    if normalized_sport and normalized_count:
+                        report.fpr_by_sport[normalized_sport] = normalized_count
+
+            for key, attribute in (
+                ("pool_size", "fpr_pool_size"),
+                ("fpr_rescored", "fpr_rescored"),
+            ):
+                try:
+                    value = stats.get(key)
+                    if value is not None:
+                        setattr(report, attribute, max(0, int(value)))
+                except (TypeError, ValueError):
+                    continue
+            report.fpr_rotation_complete = bool(
+                stats.get("rotation_complete", False)
+            )
+        except Exception:
+            logger.debug("dashboard could not read FPR sidecar fallback", exc_info=True)
 
     # ── Query helpers ──────────────────────────────────────────────────────────
 
@@ -871,6 +964,7 @@ class DashboardEngine:
 
             r.by_sport = sorted(sport_map.values(), key=lambda s: s.total, reverse=True)
         except Exception:
+            logger.exception("dashboard sport breakdown query failed")
             r.unavailable.add("sport")
 
     @staticmethod
