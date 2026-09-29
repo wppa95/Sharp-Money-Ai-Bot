@@ -1288,34 +1288,63 @@ async def _grade_opportunities_job(context) -> None:
 
         def _is_gradeable_underdog_result(opp, row) -> bool:
             source = getattr(row, "source", "")
+            source_key = str(source or "").strip().casefold()
             event_id = str(getattr(opp, "game_id", "") or "").strip()
             result_event_id = str(getattr(row, "game_id", "") or "").strip()
-            if not is_gradeable_player_result_for_event(
+            if is_gradeable_player_result_for_event(
                 "Underdog", source, event_id, result_event_id
             ):
-                return False
-            if str(source or "").strip().casefold() == "propline_player_games":
-                return True
-            if not is_official_underdog_settlement_source(source):
-                return False
-            if event_id:
-                return result_event_id == event_id
+                if source_key == "propline_player_games":
+                    return True
+                if not is_official_underdog_settlement_source(source):
+                    return False
+                if event_id:
+                    return result_event_id == event_id
 
-            row_date = str(getattr(row, "game_date", "") or "")
-            game_time = getattr(opp, "game_time", None)
-            if game_time:
-                valid_dates = {
-                    game_time.strftime("%Y-%m-%d"),
-                    (game_time - timedelta(days=1)).strftime("%Y-%m-%d"),
-                }
-            else:
-                detected_at = getattr(opp, "detected_at", None)
-                valid_dates = (
-                    {detected_at.strftime("%Y-%m-%d")}
-                    if detected_at
-                    else set()
+                row_date = str(getattr(row, "game_date", "") or "")
+                game_time = getattr(opp, "game_time", None)
+                if game_time:
+                    valid_dates = {
+                        game_time.strftime("%Y-%m-%d"),
+                        (game_time - timedelta(days=1)).strftime("%Y-%m-%d"),
+                    }
+                else:
+                    detected_at = getattr(opp, "detected_at", None)
+                    valid_dates = (
+                        {detected_at.strftime("%Y-%m-%d")}
+                        if detected_at
+                        else set()
+                    )
+                return bool(row_date and row_date in valid_dates)
+
+            # The bulk resolver may attach this marker only after proving a
+            # unique player/stat/date/team/opponent match against the stored
+            # Underdog event. Never accept an unmarked cross-provider ID here.
+            composite_match = getattr(row, "_underdog_composite_match", None)
+            opportunity_id = getattr(opp, "id", None)
+            row_date = str(getattr(row, "game_date", "") or "").strip()
+            expected_composite_match = (
+                int(opportunity_id),
+                event_id,
+                result_event_id,
+                row_date,
+            ) if opportunity_id is not None else None
+            if isinstance(composite_match, (set, frozenset, list)):
+                composite_match_valid = (
+                    expected_composite_match in composite_match
                 )
-            return bool(row_date and row_date in valid_dates)
+            else:
+                composite_match_valid = (
+                    composite_match == expected_composite_match
+                )
+            if (
+                source_key == "propline_player_games"
+                and event_id
+                and result_event_id
+                and composite_match_valid
+            ):
+                return True
+            return False
 
         def _has_stored_grade_result(opp) -> bool:
             _key = (
@@ -1383,8 +1412,8 @@ async def _grade_opportunities_job(context) -> None:
             )
 
         # ── Fetch general player stats only for non-Underdog opportunities ──
-        # Underdog grading accepts explicit PropLine settlements and completed
-        # PropLine player-game stats only with an exact saved event identity.
+        # Underdog grading prefers exact event IDs. The bulk resolver may also
+        # attach a validated unique player/stat/date/team/opponent match.
         _grade_stat_prov = None
         try:
             from providers.player_stats import PlayerStatsProvider as _GradeStatProvider
@@ -1991,21 +2020,20 @@ async def _grade_opportunities_job(context) -> None:
                     if result_row is not None:
                         _matched_game_date = _candidate_game_date
                         break
-            if (
-                result_row is not None
-                and (
-                    not is_gradeable_player_result_for_event(
+            _result_is_gradeable = False
+            if result_row is not None:
+                if _is_underdog_opportunity(opp):
+                    _result_is_gradeable = _is_gradeable_underdog_result(
+                        opp, result_row
+                    )
+                else:
+                    _result_is_gradeable = is_gradeable_player_result_for_event(
                         getattr(opp, "provider", None) or "Underdog",
                         getattr(result_row, "source", ""),
                         getattr(opp, "game_id", ""),
                         getattr(result_row, "game_id", ""),
                     )
-                    or (
-                        _is_underdog_opportunity(opp)
-                        and not _is_gradeable_underdog_result(opp, result_row)
-                    )
-                )
-            ):
+            if result_row is not None and not _result_is_gradeable:
                 # Defense in depth for compatibility resolvers or stale
                 # PlayerGameResult rows written by a generic stats provider.
                 result_row = None

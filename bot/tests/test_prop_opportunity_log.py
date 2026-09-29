@@ -20,6 +20,7 @@ import pytest
 from database import (
     Database,
     PlayerGameResult,
+    PropLineHistory,
     PropOpportunityLog,
     PropTrackingLog,
     UnderdogSnapshotRecord,
@@ -723,6 +724,206 @@ class TestGetGameResultForGrading:
 
         assert set(matches) == {903}
         assert matches[903][0].source == "propline_player_games"
+
+    @pytest.mark.asyncio
+    async def test_bulk_underdog_resolver_accepts_unique_composite_event_match(
+        self, db: Database
+    ) -> None:
+        opportunity = SimpleNamespace(
+            id=906,
+            player_name="A. Guard",
+            team="Boston Celtics",
+            sport="NBA",
+            stat_type="Points",
+            game_time=datetime(2026, 9, 1, 0, 30),
+            game_id="underdog-event-906",
+            provider="Underdog",
+        )
+        second_opportunity = SimpleNamespace(**vars(opportunity))
+        second_opportunity.id = 909
+        async with db.session() as session:
+            session.add_all([
+                PropLineHistory(
+                    provider="Underdog",
+                    product="Player Props",
+                    sport="NBA",
+                    player_name="A. Guard",
+                    team="Boston Celtics",
+                    stat_type="points",
+                    line_value=20.5,
+                    external_id="ud-906-own",
+                    game_id="underdog-event-906",
+                ),
+                PropLineHistory(
+                    provider="Underdog",
+                    product="Player Props",
+                    sport="NBA",
+                    player_name="Other Guard",
+                    team="New York Knicks",
+                    stat_type="points",
+                    line_value=20.5,
+                    external_id="ud-906-opponent",
+                    game_id="underdog-event-906",
+                ),
+            ])
+            await session.commit()
+        await db.upsert_player_result(PlayerGameResult(
+            player_name="A. Guard",
+            sport="NBA",
+            stat_type="points",
+            game_date="2026-08-31",
+            actual_value=24.0,
+            opponent="New York Knicks",
+            source="propline_player_games",
+            game_id="propline-event-906",
+        ))
+
+        matches = await db.get_game_results_for_grading_bulk(
+            [opportunity, second_opportunity]
+        )
+
+        result_row, matched_date = matches[906]
+        second_result_row, _ = matches[909]
+        assert result_row.source == "propline_player_games"
+        assert result_row.game_id == "propline-event-906"
+        assert matched_date == "2026-08-31"
+        assert second_result_row is result_row
+        assert result_row._underdog_composite_match == {
+            (
+                906,
+                "underdog-event-906",
+                "propline-event-906",
+                "2026-08-31",
+            ),
+            (
+                909,
+                "underdog-event-906",
+                "propline-event-906",
+                "2026-08-31",
+            ),
+        }
+
+    @pytest.mark.asyncio
+    async def test_bulk_underdog_composite_match_rejects_wrong_opponent(
+        self, db: Database
+    ) -> None:
+        opportunity = SimpleNamespace(
+            id=907,
+            player_name="A. Guard",
+            team="Boston Celtics",
+            sport="NBA",
+            stat_type="Points",
+            game_time=datetime(2026, 8, 31, 18, 0),
+            game_id="underdog-event-907",
+            provider="Underdog",
+        )
+        async with db.session() as session:
+            session.add_all([
+                PropLineHistory(
+                    provider="Underdog",
+                    product="Player Props",
+                    sport="NBA",
+                    player_name="A. Guard",
+                    team="Boston Celtics",
+                    stat_type="points",
+                    line_value=20.5,
+                    external_id="ud-907-own",
+                    game_id="underdog-event-907",
+                ),
+                PropLineHistory(
+                    provider="Underdog",
+                    product="Player Props",
+                    sport="NBA",
+                    player_name="Other Guard",
+                    team="New York Knicks",
+                    stat_type="points",
+                    line_value=20.5,
+                    external_id="ud-907-opponent",
+                    game_id="underdog-event-907",
+                ),
+            ])
+            await session.commit()
+        await db.upsert_player_result(PlayerGameResult(
+            player_name="A. Guard",
+            sport="NBA",
+            stat_type="points",
+            game_date="2026-08-31",
+            actual_value=24.0,
+            opponent="Brooklyn Nets",
+            source="propline_player_games",
+            game_id="propline-event-907",
+        ))
+
+        matches = await db.get_game_results_for_grading_bulk([opportunity])
+
+        assert 907 not in matches
+
+    @pytest.mark.asyncio
+    async def test_bulk_underdog_composite_match_rejects_ambiguous_events(
+        self, db: Database
+    ) -> None:
+        opportunity = SimpleNamespace(
+            id=908,
+            player_name="A. Guard",
+            team="Boston Celtics",
+            sport="NBA",
+            stat_type="Points",
+            game_time=datetime(2026, 8, 31, 18, 0),
+            game_id="underdog-event-908",
+            provider="Underdog",
+        )
+        async with db.session() as session:
+            session.add_all([
+                PropLineHistory(
+                    provider="Underdog",
+                    product="Player Props",
+                    sport="NBA",
+                    player_name="A. Guard",
+                    team="Boston Celtics",
+                    stat_type="points",
+                    line_value=20.5,
+                    external_id="ud-908-own",
+                    game_id="underdog-event-908",
+                ),
+                PropLineHistory(
+                    provider="Underdog",
+                    product="Player Props",
+                    sport="NBA",
+                    player_name="Other Guard",
+                    team="New York Knicks",
+                    stat_type="points",
+                    line_value=20.5,
+                    external_id="ud-908-opponent",
+                    game_id="underdog-event-908",
+                ),
+            ])
+            await session.commit()
+        await db.upsert_player_results_bulk([
+            PlayerGameResult(
+                player_name="A. Guard",
+                sport="NBA",
+                stat_type="points",
+                game_date="2026-08-31",
+                actual_value=24.0,
+                opponent="New York Knicks",
+                source="propline_player_games",
+                game_id="propline-event-908-a",
+            ),
+            PlayerGameResult(
+                player_name="A. Guard",
+                sport="NBA",
+                stat_type="points",
+                game_date="2026-08-31",
+                actual_value=23.0,
+                opponent="New York Knicks",
+                source="propline_player_games",
+                game_id="propline-event-908-b",
+            ),
+        ])
+
+        matches = await db.get_game_results_for_grading_bulk([opportunity])
+
+        assert 908 not in matches
 
 
 class TestGetTrackingSummary:

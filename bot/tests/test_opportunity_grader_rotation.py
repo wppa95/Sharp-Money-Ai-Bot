@@ -564,7 +564,7 @@ async def test_grader_deduplicates_player_history_fallback_across_events():
 
 
 @pytest.mark.asyncio
-async def test_grader_does_not_use_player_stats_for_underdog_settlement():
+async def test_grader_rejects_unmarked_cross_id_player_game_result():
     row = _opp(
         33,
         "Third Party Player",
@@ -579,8 +579,8 @@ async def test_grader_does_not_use_player_stats_for_underdog_settlement():
         stat_type="points",
         game_date="2026-09-05",
         actual_value=30.0,
-        source="espn_gamelog",
-        game_id="underdog-event-33",
+        source="propline_player_games",
+        game_id="propline-event-id-33",
     )
 
     db = MagicMock()
@@ -624,6 +624,77 @@ async def test_grader_does_not_use_player_stats_for_underdog_settlement():
     )
     db.grade_opportunities_bulk.assert_not_awaited()
     assert health.runs == 1
+
+
+@pytest.mark.asyncio
+async def test_grader_accepts_only_bulk_validated_composite_event_match():
+    row = _opp(
+        39,
+        "Composite Match Player",
+        "Points",
+        provider="Underdog",
+    )
+    row.team = "Boston Celtics"
+    row.game_time = datetime(2026, 9, 5, 18, 0)
+    row.game_id = "underdog-event-39"
+    result = SimpleNamespace(
+        player_name="Composite Match Player",
+        sport="NBA",
+        stat_type="points",
+        game_date="2026-09-05",
+        actual_value=30.0,
+        source="propline_player_games",
+        game_id="propline-event-39",
+        _underdog_composite_match={
+            (
+                39,
+                "underdog-event-39",
+                "propline-event-39",
+                "2026-09-05",
+            )
+        },
+    )
+
+    db = MagicMock()
+    db.get_pending_opportunities = AsyncMock(return_value=[row])
+    db.get_player_results_bulk = AsyncMock(return_value={})
+    db.upsert_player_results_bulk = AsyncMock()
+    db.get_game_results_for_grading_bulk = AsyncMock(
+        return_value={39: (result, "2026-09-05")}
+    )
+    db.grade_opportunities_bulk = AsyncMock()
+    health = _Health()
+    stats_provider = MagicMock()
+    stats_provider.fetch_results = AsyncMock(return_value=[])
+    propline_provider = SimpleNamespace(
+        fetch_resolved_event_results=AsyncMock(return_value=[]),
+        fetch_resolved_results=AsyncMock(return_value=[]),
+    )
+
+    with (
+        patch.object(main, "get_health_tracker", return_value=health),
+        patch(
+            "providers.player_stats.PlayerStatsProvider",
+            return_value=stats_provider,
+        ),
+        patch(
+            "providers.player_history.get_player_history_provider",
+            return_value=propline_provider,
+        ),
+    ):
+        await main._grade_opportunities_job(_context(db))
+
+    db.grade_opportunities_bulk.assert_awaited_once_with(
+        [
+            {
+                "id": 39,
+                "result": "HIT",
+                "actual_value": 30.0,
+                "error_type": None,
+                "grade_result_source": "propline_player_games",
+            }
+        ]
+    )
 
 
 @pytest.mark.asyncio

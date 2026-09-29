@@ -10,8 +10,10 @@ import functools
 import hashlib
 import json
 import logging
+import math
 import os
 import time
+import unicodedata
 import weakref
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
@@ -107,6 +109,138 @@ def is_gradeable_player_result_for_event(
         actual = str(result_game_id or "").strip()
         return bool(expected and actual and expected == actual)
     return is_gradeable_player_result_source(provider, source)
+
+
+def _event_team_key(value: object) -> str:
+    """Normalize punctuation, case, and accents without guessing aliases."""
+    decomposed = unicodedata.normalize("NFKD", str(value or "")).casefold()
+    return "".join(
+        character
+        for character in decomposed
+        if character.isalnum() and not unicodedata.combining(character)
+    )
+
+
+def _match_underdog_composite_player_result(
+    opportunity: object,
+    rows: Iterable[object],
+    event_context: Iterable[tuple[object, object]],
+) -> Optional[tuple[object, str]]:
+    """Resolve a distinct PropLine event only from a unique game fingerprint.
+
+    The player, sport, stat, game date, Underdog team, and PropLine opponent
+    must all agree. The Underdog event must expose exactly two teams and only
+    one completed PropLine event may fit. Ambiguous or incomplete evidence is
+    deliberately left unresolved.
+    """
+    game_time = getattr(opportunity, "game_time", None)
+    underdog_event_id = str(getattr(opportunity, "game_id", "") or "").strip()
+    player_key = str(getattr(opportunity, "player_name", "") or "").casefold().strip()
+    recorded_own_team = _event_team_key(getattr(opportunity, "team", ""))
+    if not game_time or not underdog_event_id or not player_key:
+        return None
+
+    teams = {
+        _event_team_key(team)
+        for _, team in event_context
+        if _event_team_key(team)
+    }
+    if len(teams) != 2:
+        return None
+    player_teams = {
+        _event_team_key(team)
+        for player, team in event_context
+        if (
+            str(player or "").casefold().strip() == player_key
+            and _event_team_key(team)
+        )
+    }
+    if len(player_teams) > 1:
+        return None
+    if player_teams:
+        own_team = next(iter(player_teams))
+        if recorded_own_team and recorded_own_team != own_team:
+            return None
+    else:
+        own_team = recorded_own_team
+    if not own_team or own_team not in teams:
+        return None
+    expected_opponent = next(iter(teams - {own_team}))
+
+    sport_key = str(getattr(opportunity, "sport", "") or "").upper().strip()
+    stat_key = str(getattr(opportunity, "stat_type", "") or "").casefold().strip()
+    dates = {
+        game_time.strftime("%Y-%m-%d"),
+        (game_time - timedelta(days=1)).strftime("%Y-%m-%d"),
+    }
+    by_event: dict[str, list[tuple[object, tuple[str, float, str]]]] = {}
+    for row in rows:
+        source = str(getattr(row, "source", "") or "").casefold().strip()
+        if source not in _UNDERDOG_FINAL_PLAYER_GAME_RESULT_SOURCES:
+            continue
+        if str(getattr(row, "player_name", "") or "").casefold().strip() != player_key:
+            continue
+        if str(getattr(row, "sport", "") or "").upper().strip() != sport_key:
+            continue
+        if str(getattr(row, "stat_type", "") or "").casefold().strip() != stat_key:
+            continue
+        result_event_id = str(getattr(row, "game_id", "") or "").strip()
+        if not result_event_id or result_event_id == underdog_event_id:
+            continue
+        game_date = str(getattr(row, "game_date", "") or "").strip()
+        if game_date not in dates:
+            continue
+        if _event_team_key(getattr(row, "opponent", "")) != expected_opponent:
+            continue
+        try:
+            actual_value = float(getattr(row, "actual_value", None))
+        except (TypeError, ValueError):
+            continue
+        if not math.isfinite(actual_value):
+            continue
+        fingerprint = (
+            game_date,
+            actual_value,
+            _event_team_key(getattr(row, "opponent", "")),
+        )
+        by_event.setdefault(result_event_id, []).append((row, fingerprint))
+
+    if len(by_event) != 1:
+        return None
+    result_event_id, matches = next(iter(by_event.items()))
+    if len({fingerprint for _, fingerprint in matches}) != 1:
+        return None
+    selected = max(
+        (row for row, _ in matches),
+        key=lambda row: int(getattr(row, "id", 0) or 0),
+    )
+    matched_date = str(getattr(selected, "game_date", "") or "").strip()
+    opportunity_id = getattr(opportunity, "id", None)
+    if opportunity_id is not None:
+        # A transient marker lets the grader's final safety check distinguish
+        # this validated cross-ID match from an unvalidated date-only result.
+        match_identity = (
+            int(opportunity_id),
+            underdog_event_id,
+            result_event_id,
+            matched_date,
+        )
+        existing_markers = getattr(
+            selected, "_underdog_composite_match", None
+        )
+        if isinstance(existing_markers, tuple) and len(existing_markers) == 4:
+            markers = {existing_markers}
+        elif isinstance(existing_markers, (set, frozenset, list)):
+            markers = set(existing_markers)
+        else:
+            markers = set()
+        markers.add(match_identity)
+        setattr(
+            selected,
+            "_underdog_composite_match",
+            markers,
+        )
+    return selected, matched_date
 
 
 def _player_result_source_priority(source: object) -> int:
@@ -10588,11 +10722,10 @@ class Database:
         grader uses this method for large pages so settlement does not acquire
         a SQLite session and issue a query for every opportunity.
 
-        Matching stays strict: a dated opportunity requires that date (or the
-        provider-local previous date already allowed by the grader), while an
-        undated opportunity requires its event identity. Underdog accepts
-        explicit PropLine settlements or final PropLine player-game stats with
-        the exact saved event ID; player-game stats are never date-only fallback.
+        Underdog normally requires its exact saved event ID. When PropLine uses
+        a different ID namespace, completed player-game stats may reconcile
+        only through a unique player/stat/date/team/opponent fingerprint.
+        Undated or ambiguous opportunities remain unresolved.
         """
         if not opportunities:
             return {}
@@ -10678,8 +10811,18 @@ class Database:
             for info in metadata.values()
             if info[1][4]
         }
+        underdog_event_pairs = {
+            (info[1][1], info[1][4])
+            for info in metadata.values()
+            if info[1][4] and info[1][5] in {"", "underdog"}
+        }
+        underdog_event_ids = {event_id for _, event_id in underdog_event_pairs}
+        underdog_sports = {sport for sport, _ in underdog_event_pairs}
 
         rows: list[PlayerGameResult] = []
+        event_team_context: dict[
+            tuple[str, str], list[tuple[str, str]]
+        ] = {}
         async with self.session() as s:
             player_list = sorted(player_names)
             for offset in range(0, len(player_list), 350):
@@ -10699,6 +10842,36 @@ class Database:
                     ).order_by(PlayerGameResult.id.desc())
                 )
                 rows.extend(result.scalars().all())
+
+            event_list = sorted(underdog_event_ids)
+            for offset in range(0, len(event_list), 350):
+                event_chunk = event_list[offset : offset + 350]
+                if not event_chunk or not underdog_sports:
+                    continue
+                result = await s.execute(
+                    select(
+                        PropLineHistory.sport,
+                        PropLineHistory.game_id,
+                        PropLineHistory.player_name,
+                        PropLineHistory.team,
+                    ).where(
+                        PropLineHistory.provider == "Underdog",
+                        PropLineHistory.product == PLAYER_PROPS_PRODUCT,
+                        PropLineHistory.sport.in_(underdog_sports),
+                        PropLineHistory.game_id.in_(event_chunk),
+                    )
+                )
+                for sport_key, event_id, player_name, team in result.all():
+                    key = (
+                        str(sport_key or "").upper().strip(),
+                        str(event_id or "").strip(),
+                    )
+                    player = str(player_name or "").strip()
+                    team_name = str(team or "").strip()
+                    if team_name:
+                        event_team_context.setdefault(key, []).append(
+                            (player, team_name)
+                        )
 
             event_list = sorted(event_ids)
             for offset in range(0, len(event_list), 350):
@@ -10780,6 +10953,23 @@ class Database:
                     break
             if opp_id in resolved:
                 continue
+
+            if is_underdog and game_id and candidate_dates:
+                dated_candidates = [
+                    row
+                    for candidate_date in candidate_dates
+                    for row in by_date.get(
+                        (player_key, sport, stat, candidate_date), []
+                    )
+                ]
+                composite_match = _match_underdog_composite_player_result(
+                    opp,
+                    dated_candidates,
+                    event_team_context.get((sport, game_id), ()),
+                )
+                if composite_match is not None:
+                    resolved[opp_id] = composite_match
+                    continue
 
             components = composite_components.get(stat)
             if not components or not provider or is_underdog:

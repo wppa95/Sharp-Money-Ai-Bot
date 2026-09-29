@@ -7,7 +7,13 @@ Underdog opportunity writes must derive event identity from the snapshot's suppo
 
 **Why:** Older rows showed blank game IDs even though retained Underdog snapshots had the event identity. This weakened event-specific settlement reconciliation and made reports imply that evidence was missing.
 
-**How to apply:** Keep event identity separate from team/provider labels. Use exact event/date reconciliation for settlement; historical player/stat rows can explain evidence coverage but must never be used as a guessed settlement.
+**How to apply:** Keep event identity separate from team/provider labels. Prefer exact saved event IDs and never let a blank observation erase one.
+
+For Underdog/PropLine cross-ID grading, accept only a trusted completed player-game result with exact player/sport/stat, scheduled game date (or the existing prior-day adjustment), a two-team Underdog event, and matching player-team/opponent context. Require one unique PropLine event, preserve both original IDs and result source, and leave incomplete or ambiguous matches pending; never match on player/date alone.
+
+**Why:** Underdog and PropLine use different event-ID namespaces, but date/player/stat alone can select the wrong game when players have multiple events or schedules shift.
+
+**How to apply:** Resolve cross-ID matches in bulk from stored event teams and final player-game results. Attach a per-opportunity validation marker only after every identity check succeeds; the grader must reject unmarked cross-ID rows.
 
 Directional opportunity rows used by Telegram must be persisted before send under the same provider source ID passed to the durable delivery-state check and alert-sent update. Keep `:line=<threshold>` identities confined to the tracking ledger unless lookup and send-bookkeeping paths consistently use that identity.
 

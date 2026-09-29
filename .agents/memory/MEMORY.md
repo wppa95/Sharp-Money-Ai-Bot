@@ -124,7 +124,7 @@
 - [Independent sport delivery](independent-sport-delivery-quotas.md) — attempt every pick passing existing gates; order within sports and never impose global or per-sport caps.
 - [PropLine complete-feed ledger](propline-complete-feed-ledger.md) — fetch all active non-football sports, retain immutable normalized observations, and withhold evaluation on partial feeds.
 - [PropLine catalog audit boundary](propline-catalog-audit.md) — catalog drift is separate operational evidence; retain unknown identities and resolve them only when a later complete audit maps them.
-- [Opportunity identity and FPR delivery](opportunity-event-identity.md) — keep source IDs stable and persist the directional opportunity before Telegram under the exact ID checked at delivery.
+- [Opportunity identity and FPR delivery](opportunity-event-identity.md) — preserve source IDs; cross-ID grading requires one exact player/stat/date/team/opponent match.
 - [History coverage boundaries](history-coverage-boundaries.md) — batch full-book provider work; report empty sport coverage separately from errors and deadlines.
 - [Provider-aware prop ledger](provider-aware-prop-ledger.md) — every supported feed keeps source identity across observation, history, tracking, grading, and reports; sportsbook rows never enter the Underdog alert universe.
 - [Adaptive learning policy](adaptive-learning-policy.md) — provider-aware weights are explicit, audited, bounded ranking adjustments and never qualification or delivery gates.
