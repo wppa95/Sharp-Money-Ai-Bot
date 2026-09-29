@@ -295,13 +295,13 @@ async def test_grader_uses_explicit_propline_settlement_before_writing_grade():
         stat_type="points",
         game_date="2026-09-05",
         actual_value=8.0,
-        source="propline_history",
+        source="propline_event_results",
         game_id="propline-event-31",
     )
     settlement = SimpleNamespace(
         actual_value=8.0,
         game_date="2026-09-05",
-        source="propline_history",
+        source="propline_event_results",
         game_id="propline-event-31",
     )
 
@@ -347,7 +347,7 @@ async def test_grader_uses_explicit_propline_settlement_before_writing_grade():
             "result": "MISS",
             "actual_value": 8.0,
             "error_type": "Market",
-            "grade_result_source": "propline_history",
+            "grade_result_source": "propline_event_results",
         }]
     )
     stats_provider.fetch_results.assert_not_awaited()
