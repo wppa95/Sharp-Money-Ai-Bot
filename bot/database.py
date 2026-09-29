@@ -2267,15 +2267,20 @@ class Database:
         limit: Optional[int] = 10,
         since_hours: int = 24,
         sports: Optional[Iterable[str]] = None,
+        include_all_sports: bool = False,
     ) -> "list[PropLineHistory]":
         """Return the most-recent Underdog prop snapshot for each (player, stat) within the window.
 
-        Non-removed props only, ordered by fetched_at DESC so freshest data appears first.
+        Non-removed props from the freshest bounded source window, ordered by
+        nearest event time so today's games appear before later slates.
         Used as the primary data source for /picks and /slip. When ``sports`` is
         provided, the allowlist is applied before overfetch and balancing so
-        inactive high-volume sports cannot crowd out the live slate.
+        inactive high-volume sports cannot crowd out the live slate. Rows are
+        prioritized by nearest event time so tomorrow's slate cannot displace
+        today's upcoming games. ``include_all_sports`` returns each sport's
+        bounded balanced slice without a final global truncation.
         """
-        from datetime import timedelta
+        from datetime import datetime, timedelta, timezone
         cutoff = datetime.utcnow() - timedelta(hours=since_hours)
         normalized_sports = {
             str(sport).strip().upper()
@@ -2321,18 +2326,28 @@ class Database:
             if row.removed is not True
             and (row.game_time is None or row.game_time > now)
         ]
-        rows.sort(
-            key=lambda row: (
+
+        def _game_time_order(row: PropLineHistory) -> tuple:
+            game_time = row.game_time
+            if game_time is not None and game_time.tzinfo is not None:
+                game_time = game_time.astimezone(timezone.utc).replace(tzinfo=None)
+            return (
+                game_time is None,
+                game_time or datetime.max,
                 0 if row.bet_recommendation in ("OVER", "UNDER") else 1,
                 -(row.id or 0),
             )
+
+        rows.sort(
+            key=_game_time_order
         )
 
         # ── Sport-balanced selection ───────────────────────────────────────────
         # A flat [:limit] on fetched_at DESC lets high-volume sports (MLB, DOTA)
         # dominate the entire pool.  Instead, distribute slots evenly: take the
         # top ceil(limit / n_sports) rows per sport, then fill to limit.
-        # Within each sport, fetched_at DESC order is preserved from the query.
+        # Candidate order is nearest upcoming event first, with direction as a
+        # tie-breaker so the same-day slate survives sport balancing.
         from math import ceil
         from collections import defaultdict as _dd
         _buckets: dict = _dd(list)
@@ -2354,13 +2369,14 @@ class Database:
                 _balanced.append(_row)
                 _selected_ids.add(_row.id)
 
+        selected_rows = _balanced if include_all_sports else _balanced[:limit]
         logger.info(
-            "UD picks query: raw=%d  sports=%d  per_sport_cap=%d  balanced=%d  returning=%d",
+            "UD picks query: raw=%d  sports=%d  per_sport_cap=%d  balanced=%d  returning=%d  all_sports=%s",
             len(raw_rows), _n_sports, _per_sport, len(_balanced),
-            min(len(_balanced), limit),
+            len(selected_rows), include_all_sports,
         )
 
-        return _balanced[:limit]
+        return selected_rows
 
     async def get_current_actionable_opportunities(
         self,

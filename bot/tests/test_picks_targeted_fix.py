@@ -291,6 +291,50 @@ async def test_underdog_picks_query_preserves_distinct_source_ids(db):
 
 
 @pytest.mark.asyncio
+async def test_slip_pool_prioritizes_nearest_games_and_keeps_every_sport(db):
+    now = datetime.utcnow()
+    async with db.session() as session:
+        rows = []
+        for sport in ("CS", "TENNIS"):
+            for index, hours_ahead in enumerate((0.5, 1.0, 20.0, 21.0)):
+                rows.append(
+                    PropLineHistory(
+                        provider="Underdog",
+                        sport=sport,
+                        player_name=f"{sport} Player {index}",
+                        team=f"{sport} Team {index}",
+                        stat_type="Points",
+                        line_value=10.5,
+                        game_time=now + timedelta(hours=hours_ahead),
+                        provider_status="scheduled",
+                        external_id=f"{sport.lower()}-{index}",
+                        game_id=f"{sport.lower()}-game-{index}",
+                        fetched_at=now,
+                    )
+                )
+        session.add_all(rows)
+        await session.commit()
+
+    selected = await db.get_top_ud_props_for_picks(
+        limit=4,
+        since_hours=4,
+        sports=["CS", "TENNIS"],
+        include_all_sports=True,
+    )
+
+    assert len(selected) == 6
+    assert {row.sport for row in selected} == {"CS", "TENNIS"}
+    for sport in ("CS", "TENNIS"):
+        sport_rows = [row for row in selected if row.sport == sport]
+        assert len(sport_rows) == 3
+        assert {row.player_name for row in sport_rows} == {
+            f"{sport} Player 0",
+            f"{sport} Player 1",
+            f"{sport} Player 2",
+        }
+
+
+@pytest.mark.asyncio
 async def test_picks_requests_bounded_provider_populations(monkeypatch):
     class BoundedDB:
         def __init__(self):

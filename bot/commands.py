@@ -3373,6 +3373,26 @@ async def cmd_slip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text(f"{EMOJI['warn']} Database not ready.")
         return
 
+    _slip_build_capture = getattr(context, "_slip_build_capture", None)
+    _slip_query_row_count = 0
+
+    def _capture_empty_auto_slip(reason: str) -> bool:
+        if not isinstance(_slip_build_capture, dict):
+            return False
+        _slip_build_capture.update(
+            slips_by_sport={},
+            candidate_counts_by_sport={},
+            candidate_count=0,
+            query_row_count=_slip_query_row_count,
+            no_slip_reason=reason,
+        )
+        logger.info(
+            "cmd_slip: auto-slip skipped before selection: %s (query_rows=%d)",
+            reason,
+            _slip_query_row_count,
+        )
+        return True
+
     args = context.args or []
 
     # ── Journal subcommand dispatcher ────────────────────────────────────────
@@ -3407,14 +3427,24 @@ async def cmd_slip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     today = reporting_now().strftime("%b %d, %Y")
 
     # ── 1. Fetch provider-owned props (same pool as /picks) ──────────────────
+    _slip_sport_count = len(
+        {
+            str(sport).strip().upper()
+            for sport in config.active_sports
+            if str(sport).strip()
+        }
+    )
+    _slip_fetch_limit = max(60, _slip_sport_count * 20)
     ud_props = await _report_read(
         _db.get_top_ud_props_for_picks(
-            limit=30,
+            limit=_slip_fetch_limit,
             since_hours=6,
             sports=config.active_sports,
+            include_all_sports=True,
         ),
         fallback=[],
     )
+    _slip_query_row_count = len(ud_props or [])
     try:
         _alerted_opps = await _report_read(
             _db.get_current_actionable_opportunities(limit=500),
@@ -3463,6 +3493,8 @@ async def cmd_slip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     # provider. Only Underdog-owned rows enter the slip display.
     provider_props = [("Underdog", p) for p in ud_props]
     if not provider_props:
+        if _capture_empty_auto_slip("no_current_fresh_upcoming_props"):
+            return
         await update.message.reply_text(
             "🎯 <b>Sharp Money Prop Slip</b>\n\n"
             "No eligible player props for today's games right now.\n\n"
@@ -3539,6 +3571,8 @@ async def cmd_slip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     provider_props = _current_provider_props
     _candidates = _current_candidates
     if not provider_props:
+        if _capture_empty_auto_slip("no_rows_after_current_validation"):
+            return
         await update.message.reply_text(
             "🎯 <b>Sharp Money Prop Slip</b>\n\n"
             "No eligible player props for today's games right now.\n\n"
@@ -3621,12 +3655,15 @@ async def cmd_slip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         )
     _candidates = _order_slip_candidates_by_sport(_eligible_slip_entries)
 
-    _slip_build_capture = getattr(context, "_slip_build_capture", None)
     if isinstance(_slip_build_capture, dict):
         auto_slips, candidate_counts = _build_auto_slips_by_sport(_candidates)
         _slip_build_capture["slips_by_sport"] = auto_slips
         _slip_build_capture["candidate_counts_by_sport"] = candidate_counts
         _slip_build_capture["candidate_count"] = len(_candidates)
+        _slip_build_capture["query_row_count"] = _slip_query_row_count
+        _slip_build_capture["no_slip_reason"] = (
+            None if auto_slips else "no_sport_has_two_independent_eligible_picks"
+        )
         logger.info(
             "cmd_slip: auto-slip candidates by sport=%s; two-leg slips=%s",
             candidate_counts,
@@ -3757,8 +3794,10 @@ async def auto_slip_notifications_job(context: ContextTypes.DEFAULT_TYPE) -> Non
         if not slips_by_sport:
             logger.info(
                 "auto_slip_notifications: no same-sport two-leg slips; "
-                "eligible candidates by sport=%s",
+                "query_rows=%d eligible candidates by sport=%s reason=%s",
+                capture.get("query_row_count", 0),
                 capture.get("candidate_counts_by_sport", {}),
+                capture.get("no_slip_reason", "no_sport_has_two_independent_eligible_picks"),
             )
             return
     except Exception:
