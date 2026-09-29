@@ -303,6 +303,137 @@ async def test_auto_slip_does_not_grade_untrusted_or_wrong_event_rows():
         await db.close()
 
 
+@pytest.mark.parametrize(
+    ("sport", "stat_type"),
+    [
+        ("TENNIS", "aces"),
+        ("NBA", "points"),
+        ("MLB", "hits"),
+        ("CS", "kills"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_auto_slip_grades_final_player_game_stats_for_exact_event(
+    sport: str, stat_type: str
+):
+    from database import Database, PlayerGameResult
+
+    db = Database("sqlite+aiosqlite:///:memory:")
+    await db.init()
+    legs = [
+        {
+            "provider": "Underdog",
+            "external_id": f"{sport}-over",
+            "game_id": f"{sport}-event-over",
+            "player_name": f"{sport} Over Player",
+            "sport": sport,
+            "stat_type": stat_type,
+            "line_value": 10.5,
+            "direction": "OVER",
+            "game_time": datetime(2026, 9, 28, 19, 0),
+        },
+        {
+            "provider": "Underdog",
+            "external_id": f"{sport}-under",
+            "game_id": f"{sport}-event-under",
+            "player_name": f"{sport} Under Player",
+            "sport": sport,
+            "stat_type": stat_type,
+            "line_value": 8.5,
+            "direction": "UNDER",
+            "game_time": datetime(2026, 9, 28, 19, 0),
+        },
+    ]
+    try:
+        assert await db.claim_auto_slip_notification(
+            f"{sport}-notification",
+            2,
+            combination_signature=f"{sport}-combination",
+            legs=legs,
+        )
+        assert await db.mark_auto_slip_notification_sent(f"{sport}-notification")
+        async with db.session() as session:
+            session.add_all(
+                [
+                    PlayerGameResult(
+                        player_name=f"{sport} Over Player",
+                        sport=sport,
+                        stat_type=stat_type,
+                        game_date="2026-09-28",
+                        actual_value=12.0,
+                        source="propline_player_games",
+                        game_id=f"{sport}-event-over",
+                    ),
+                    PlayerGameResult(
+                        player_name=f"{sport} Under Player",
+                        sport=sport,
+                        stat_type=stat_type,
+                        game_date="2026-09-28",
+                        actual_value=7.0,
+                        source="propline_player_games",
+                        game_id=f"{sport}-event-under",
+                    ),
+                ]
+            )
+            await session.commit()
+
+        assert await db.grade_auto_slip_notification_legs() == 2
+        history = await db.get_auto_slip_notification_history(limit=1)
+        assert [leg["result"] for leg in history[0]["legs"]] == ["HIT", "HIT"]
+        assert all(
+            leg["grade_result_source"] == "propline_player_games"
+            for leg in history[0]["legs"]
+        )
+    finally:
+        await db.close()
+
+
+@pytest.mark.asyncio
+async def test_auto_slip_player_game_stats_require_saved_event_identity():
+    from database import Database, PlayerGameResult
+
+    db = Database("sqlite+aiosqlite:///:memory:")
+    await db.init()
+    legs = [
+        {
+            "provider": "Underdog",
+            "external_id": "no-event-id-prop",
+            "game_id": "",
+            "player_name": "No Event ID Player",
+            "sport": "TENNIS",
+            "stat_type": "aces",
+            "line_value": 10.5,
+            "direction": "OVER",
+            "game_time": datetime(2026, 9, 28, 19, 0),
+        }
+    ]
+    try:
+        assert await db.claim_auto_slip_notification(
+            "no-event-id-notification",
+            2,
+            combination_signature="no-event-id-combination",
+            legs=legs,
+        )
+        assert await db.mark_auto_slip_notification_sent("no-event-id-notification")
+        await db.upsert_player_result(
+            PlayerGameResult(
+                player_name="No Event ID Player",
+                sport="TENNIS",
+                stat_type="aces",
+                game_date="2026-09-28",
+                actual_value=12.0,
+                source="propline_player_games",
+                game_id="completed-event",
+            )
+        )
+
+        assert await db.grade_auto_slip_notification_legs() == 0
+        history = await db.get_auto_slip_notification_history(limit=1)
+        assert history[0]["legs"][0]["result"] == "PENDING"
+    finally:
+        await db.close()
+
+
 @pytest.mark.asyncio
 async def test_auto_slips_send_once_and_reoffer_changed_combinations(monkeypatch):
     from database import Database

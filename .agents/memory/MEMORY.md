@@ -1,6 +1,6 @@
 - [CLV formula direction](clv-formula.md) — CLV% uses (fp_close/fp_bet - 1), NOT (fp_bet/fp_close - 1); higher fp_close = market tightened after your bet = positive CLV.
 - [Player prop picks/slip framework](picks-slip-framework.md) — /picks and /slip use PropPickAdapter wrapping PropLineHistory+PlayerPropMarketComparison; no PP edge data required; PropPickAdapter implements the slip optimizer interface.
-- [Auto-sent slip outcomes](auto-slip-outcomes.md) — official PropLine results only; combo status is a summary, not an actual payout record.
+- [Auto-sent slip outcomes](auto-slip-outcomes.md) — settlements or exact-identity final player-game stats grade saved legs; combos are not payout records.
 - [Async test event loop pattern](async-test-loop.md) — Python 3.11 aiosqlite tests must use module-level asyncio.new_event_loop(); never asyncio.get_event_loop() across test files.
 - [Provider and connector architecture](connector-architecture.md) — Underdog owns live pick'em evaluation; PropLine supplies supplemental observations while historical sportsbook identities remain read-only.
 - [Alert source priority](source-priority.md) — Underdog live evaluation → PropLine observations and evidence; retired sportsbook work is out of scope.
@@ -87,7 +87,7 @@
 - [FPR cursor fairness](fpr-cursor-fairness.md) — stable identity order is the rotation; new/moving props get bounded prompt capacity without consuming cursor coverage.
 - [Async SQLite test fixtures](async-sqlite-test-fixtures.md) — module-scoped in-memory DB fixtures can lose tables across pytest event loops; use function-scoped fixtures for isolation.
 - [PropLine pagination safety](propline-pagination.md) — shared request budgeting, loop-safe pagination, complete-snapshot retention, and immutable-field event rediscovery protect the authorized feed.
-- [PropLine results boundary](propline-results-resolution.md) — official event results expose explicit resolutions; missing resolution is unresolved and terminal lines never become settlements.
+- [PropLine results boundary](propline-results-resolution.md) — final stats grade directional lines only with exact event identity; settlement and void rules remain separate.
 - [Workflow manager stale-path failure](workflow-manager-stale-path.md) — managed workflow operations can fail before launch when the workspace index references a deleted secondary-skill path.
 - [Telegram alert presentation](telegram-alert-presentation.md) — user-facing prop alerts use plain quality/market labels and one deduplicated history section.
 - [Command reporting boundaries](command-reporting-boundaries.md) — reports separate populations; current picks require fresh future rows and persisted engine output, never synthetic display defaults.
@@ -104,7 +104,7 @@
 - [Cadence runtime overlap](cadence-runtime-overlap.md) — live full-pool Underdog scans can exceed 2 minutes; interval triggers then skip while the shared slot remains held.
 - [Live monitoring database boundary](live-monitoring-db-boundary.md) — compare live feeds in memory; reserve SQLite for evidence, history, grading, and tracking.
 - [Full-feed snapshot batching](full-feed-snapshot-batching.md) — large live-feed snapshot writes must use bounded transactions or SQLite WAL/lock contention can stall independent evidence jobs.
-- [PropLine read-only capability boundary](propline-readonly-capabilities.md) — raw game context is supplemental only after final status; live/football data cannot enter persisted evidence or alerts.
+- [PropLine read-only capability boundary](propline-readonly-capabilities.md) — final stats grade only exact event matches; live/football data remain outside shared history.
 - [Player history persistence boundary](player-history-persistence.md) — fetch cadence may expire, but completed results remain a durable write obligation and must drain in bounded batches or report failure.
 - [Telegram command catalog](telegram-command-catalog.md) — command metadata is durable in SQLite and drives the menu/help surface while callbacks remain code-owned.
 - [Non-MLB funnel populations](non-mlb-funnel.md) — separate observation, normalization, evaluation, direction, and delivery populations; neutral FPR evaluations still need telemetry.
@@ -116,7 +116,7 @@
 - [PropLine analytics API bridge](propline-api-bridge.md) — external bundle routes must stay behind a persistent Python facade worker so PropLine pacing/cache/source safety remain centralized.
 - [Generated API schema exports](generated-api-schema-exports.md) — Orval can name path and query parameter outputs identically; keep the package index explicit to avoid isolatedModules collisions.
 - [PropLine history pacing](propline-history-pacing.md) — scheduled history must use the fast resolved-history endpoint; raw games/event stats belong on slower supplemental paths.
-- [PropLine completed-evidence coverage](propline-coverage-evidence.md) — only explicit settlements are usable; unresolved complete payloads are unavailable and coverage is audited by sport and market.
+- [PropLine completed-evidence coverage](propline-coverage-evidence.md) — exact final player stats grade directional lines; event/history settlement routes still require explicit outcomes.
 - [CLV bulk writes](clv-bulk-writes.md) — bounded CLV batches and no full-history sort before LIMIT keep scheduled CLV work from appearing stuck.
 - [Funnel timing](funnel-timing.md) — report scan age/cadence from observed timestamps, never from the requested report window.
 - [Monitoring cycle budget](cycle-budget-funnel-resilience.md) — optional enrichment must have a hard shared budget so stalled history calls cannot block cycle completion or /funnel.
@@ -149,6 +149,6 @@
 - [Cold-start removal](cold-start-removal.md) — Underdog restarts restore durable state but use the same eligibility and delivery rules as every monitoring cycle.
 - [Live post-scan boundaries](underdog-postscan-performance.md) — live full-feed bookkeeping must use bounded writes and explicit current-cycle history slices; never expand identity predicates across append-only rows.
 - [Evidence-only delivery ranking](evidence-only-delivery-ranking.md) — order picks by settled directional hit-rate evidence and sample support; never use confidence or quality labels.
-- [Underdog grading source](underdog-grading-source.md) — official Underdog settlements are required for native grading; never infer outcomes from projected lines or line removals.
+- [Underdog grading source](underdog-grading-source.md) — explicit settlements or exact-match final stats can grade directional results; only settlements establish voids.
 - [Completed-game source boundaries](completed-game-source-boundaries.md) — verify provider fields and confirmed status; current TT/badminton docs establish match/set results, not detailed player stats.
 - [Validated Replit config edits](replit-config-editing.md) — update `.replit` through validated full-file replacement; direct edits are rejected.

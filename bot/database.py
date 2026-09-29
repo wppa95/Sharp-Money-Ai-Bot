@@ -48,6 +48,18 @@ _PLAYER_PROP_PROVIDERS = ("Underdog", "PrizePicks", "DraftKings", "FanDuel")
 _UNDERDOG_SETTLEMENT_RESULT_SOURCES = frozenset(
     {"propline_event_results", "propline_history"}
 )
+_UNDERDOG_FINAL_PLAYER_GAME_RESULT_SOURCES = frozenset(
+    {"propline_player_games"}
+)
+_UNDERDOG_GRADE_RESULT_SOURCES = (
+    _UNDERDOG_SETTLEMENT_RESULT_SOURCES
+    | _UNDERDOG_FINAL_PLAYER_GAME_RESULT_SOURCES
+)
+_PLAYER_RESULT_SOURCE_PRIORITY = {
+    "propline_event_results": 30,
+    "propline_history": 20,
+    "propline_player_games": 10,
+}
 _UNDERDOG_VOID_RESULT_SOURCES = frozenset({"propline_event_results_void"})
 _DIRECTIONAL_GRADE_RESULTS = frozenset({"HIT", "MISS", "PUSH"})
 _VOID_GRADE_RESULTS = frozenset({
@@ -71,12 +83,36 @@ def is_official_underdog_settlement_source(source: object) -> bool:
 
 
 def is_gradeable_player_result_source(provider: object, source: object) -> bool:
-    """Reject self-generated and unproven rows before they can grade a pick."""
+    """Check source trust; event-scoped callers must also validate identity."""
     source_key = str(source or "").strip().casefold()
     provider_key = str(provider or "").strip().casefold()
     if not provider_key or provider_key == "underdog":
-        return source_key in _UNDERDOG_SETTLEMENT_RESULT_SOURCES
+        return source_key in _UNDERDOG_GRADE_RESULT_SOURCES
     return source_key not in _UNTRUSTED_PLAYER_RESULT_SOURCES
+
+
+def is_gradeable_player_result_for_event(
+    provider: object,
+    source: object,
+    expected_game_id: object,
+    result_game_id: object,
+) -> bool:
+    """Require an exact event ID for completed PropLine player-game stats."""
+    source_key = str(source or "").strip().casefold()
+    if source_key in _UNDERDOG_FINAL_PLAYER_GAME_RESULT_SOURCES:
+        provider_key = str(provider or "").strip().casefold()
+        if provider_key not in {"", "underdog"}:
+            return False
+        expected = str(expected_game_id or "").strip()
+        actual = str(result_game_id or "").strip()
+        return bool(expected and actual and expected == actual)
+    return is_gradeable_player_result_source(provider, source)
+
+
+def _player_result_source_priority(source: object) -> int:
+    return _PLAYER_RESULT_SOURCE_PRIORITY.get(
+        str(source or "").strip().casefold(), 0
+    )
 
 
 def is_trusted_directional_grade_source(
@@ -102,7 +138,9 @@ def is_trusted_directional_grade_source(
                 source_key in _UNDERDOG_SETTLEMENT_RESULT_SOURCES
                 or source_key in _UNDERDOG_VOID_RESULT_SOURCES
             )
-        return source_key in _UNDERDOG_SETTLEMENT_RESULT_SOURCES
+        if outcome not in _DIRECTIONAL_GRADE_RESULTS:
+            return source_key in _UNDERDOG_SETTLEMENT_RESULT_SOURCES
+        return source_key in _UNDERDOG_GRADE_RESULT_SOURCES
     return is_gradeable_player_result_source(provider, source)
 
 
@@ -118,7 +156,7 @@ def _trusted_directional_grade_filter():
         or_(
             and_(
                 underdog_provider,
-                source_key.in_(tuple(_UNDERDOG_SETTLEMENT_RESULT_SOURCES)),
+                source_key.in_(tuple(_UNDERDOG_GRADE_RESULT_SOURCES)),
             ),
             and_(
                 ~underdog_provider,
@@ -137,20 +175,37 @@ def _trusted_terminal_grade_filter():
     )
     result_key = func.upper(func.trim(func.coalesce(PropOpportunityLog.result, "")))
     underdog_provider = or_(provider_key == "", provider_key == "underdog")
-    underdog_settlement = and_(
-        result_key.in_(tuple(_TERMINAL_GRADE_RESULTS - _VOID_GRADE_RESULTS)),
+    underdog_directional = and_(
+        result_key.in_(tuple(_DIRECTIONAL_GRADE_RESULTS)),
+        source_key.in_(tuple(_UNDERDOG_GRADE_RESULT_SOURCES)),
+    )
+    underdog_other_settlement = and_(
+        result_key.in_(
+            tuple(
+                _TERMINAL_GRADE_RESULTS
+                - _VOID_GRADE_RESULTS
+                - _DIRECTIONAL_GRADE_RESULTS
+            )
+        ),
         source_key.in_(tuple(_UNDERDOG_SETTLEMENT_RESULT_SOURCES)),
     )
     underdog_void = and_(
         result_key.in_(tuple(_VOID_GRADE_RESULTS)),
         source_key.in_(
-            tuple(_UNDERDOG_SETTLEMENT_RESULT_SOURCES | _UNDERDOG_VOID_RESULT_SOURCES)
+            tuple(_UNDERDOG_GRADE_RESULT_SOURCES | _UNDERDOG_VOID_RESULT_SOURCES)
         ),
     )
     return and_(
         result_key.in_(tuple(_TERMINAL_GRADE_RESULTS)),
         or_(
-            and_(underdog_provider, or_(underdog_settlement, underdog_void)),
+            and_(
+                underdog_provider,
+                or_(
+                    underdog_directional,
+                    underdog_other_settlement,
+                    underdog_void,
+                ),
+            ),
             and_(
                 ~underdog_provider,
                 source_key != "",
@@ -1127,6 +1182,53 @@ class PlayerGameResult(Base):
             "player_name", "sport", "stat_type", "game_date", "game_id",
             name="uq_player_game_result",
         ),
+    )
+
+
+class PropLineGradingResult(Base):
+    """Final PropLine stats isolated from shared history and alert evidence."""
+
+    __tablename__ = "propline_grading_results"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    player_name = Column(String(128), nullable=False, index=True)
+    sport = Column(String(32), nullable=False, index=True)
+    stat_type = Column(String(64), nullable=False)
+    game_date = Column(String(16), nullable=False)
+    opponent = Column(String(128), nullable=True)
+    actual_value = Column(Float, nullable=False)
+    source = Column(
+        String(64), nullable=False, default="propline_player_games"
+    )
+    game_id = Column(String(128), nullable=False, index=True)
+    fetched_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "player_name",
+            "sport",
+            "stat_type",
+            "game_date",
+            "game_id",
+            name="uq_propline_grading_result",
+        ),
+    )
+
+
+def _as_player_game_result(row: object) -> PlayerGameResult:
+    """Adapt isolated final-grade rows to the existing grading interface."""
+    if isinstance(row, PlayerGameResult):
+        return row
+    return PlayerGameResult(
+        player_name=getattr(row, "player_name", ""),
+        sport=getattr(row, "sport", ""),
+        stat_type=getattr(row, "stat_type", ""),
+        game_date=getattr(row, "game_date", ""),
+        opponent=getattr(row, "opponent", None),
+        actual_value=getattr(row, "actual_value", 0.0),
+        source=getattr(row, "source", "propline_player_games"),
+        game_id=getattr(row, "game_id", ""),
+        fetched_at=getattr(row, "fetched_at", None),
     )
 
 
@@ -6859,7 +6961,7 @@ class Database:
         game_date    = raw.game_date
         actual_value = raw.actual_value
         opponent     = raw.opponent
-        source       = raw.source
+        source       = str(getattr(raw, "source", "api") or "api")
         game_id      = str(getattr(raw, "game_id", "") or "")
 
         async with self.session() as s:
@@ -6885,10 +6987,14 @@ class Database:
                     game_id      = game_id,
                 ))
             else:
-                record.actual_value = actual_value
-                if opponent:
-                    record.opponent = opponent
-                record.fetched_at = datetime.utcnow()
+                if _player_result_source_priority(source) >= (
+                    _player_result_source_priority(record.source)
+                ):
+                    record.actual_value = actual_value
+                    if opponent:
+                        record.opponent = opponent
+                    record.source = source
+                    record.fetched_at = datetime.utcnow()
             await s.commit()
 
     @_retry_sqlite_write
@@ -6904,6 +7010,7 @@ class Database:
             return 0
 
         from engine.identity import display_player_name
+        from sqlalchemy import case
         from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
         prepared: dict[tuple[str, str, str, str, str], dict] = {}
@@ -6934,6 +7041,25 @@ class Database:
             return 0
 
         insert_stmt = sqlite_insert(PlayerGameResult).values(list(prepared.values()))
+        incoming_source = func.lower(
+            func.trim(func.coalesce(insert_stmt.excluded.source, ""))
+        )
+        current_source = func.lower(
+            func.trim(func.coalesce(PlayerGameResult.source, ""))
+        )
+
+        def _source_priority_expression(source_expression):
+            return case(
+                (source_expression == "propline_event_results", 30),
+                (source_expression == "propline_history", 20),
+                (source_expression == "propline_player_games", 10),
+                else_=0,
+            )
+
+        incoming_priority = _source_priority_expression(incoming_source)
+        current_priority = _source_priority_expression(current_source)
+        incoming_is_at_least_as_trusted = incoming_priority >= current_priority
+
         stmt = insert_stmt.on_conflict_do_update(
             index_elements=[
                 "player_name",
@@ -6943,13 +7069,104 @@ class Database:
                 "game_id",
             ],
             set_={
-                "actual_value": insert_stmt.excluded.actual_value,
+                "actual_value": case(
+                    (
+                        incoming_is_at_least_as_trusted,
+                        insert_stmt.excluded.actual_value,
+                    ),
+                    else_=PlayerGameResult.actual_value,
+                ),
                 # Preserve an already-known opponent when a later provider
-                # refresh omits it.
+                # refresh omits it, but only update it with the chosen result
+                # source's value.
+                "opponent": case(
+                    (
+                        incoming_is_at_least_as_trusted,
+                        func.coalesce(
+                            insert_stmt.excluded.opponent,
+                            PlayerGameResult.opponent,
+                        ),
+                    ),
+                    else_=PlayerGameResult.opponent,
+                ),
+                "source": case(
+                    (
+                        incoming_is_at_least_as_trusted,
+                        insert_stmt.excluded.source,
+                    ),
+                    else_=PlayerGameResult.source,
+                ),
+                "fetched_at": case(
+                    (incoming_is_at_least_as_trusted, fetched_at),
+                    else_=PlayerGameResult.fetched_at,
+                ),
+            },
+        )
+        async with self.session() as s:
+            await s.execute(stmt)
+            await s.commit()
+        return len(prepared)
+
+    async def upsert_propline_grading_results_bulk(
+        self, records: "list[object]"
+    ) -> int:
+        """Persist explicitly final PropLine stats outside shared player history."""
+        if not records:
+            return 0
+
+        from engine.identity import display_player_name
+        from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+
+        fetched_at = datetime.utcnow()
+        prepared: dict[tuple[str, str, str, str, str], dict] = {}
+        for raw in records:
+            player_name = display_player_name(getattr(raw, "player_name", None))
+            sport = str(getattr(raw, "sport", "") or "").strip().upper()
+            stat_type = str(getattr(raw, "stat_type", "") or "").lower().strip()
+            game_date = str(getattr(raw, "game_date", "") or "").strip()
+            game_id = str(getattr(raw, "game_id", "") or "").strip()
+            actual_value = getattr(raw, "actual_value", None)
+            if (
+                not player_name
+                or not sport
+                or not stat_type
+                or not game_date
+                or not game_id
+                or actual_value is None
+            ):
+                continue
+            key = (player_name, sport, stat_type, game_date, game_id)
+            prepared[key] = {
+                "player_name": player_name,
+                "sport": sport,
+                "stat_type": stat_type,
+                "game_date": game_date,
+                "opponent": getattr(raw, "opponent", None),
+                "actual_value": float(actual_value),
+                "source": "propline_player_games",
+                "game_id": game_id,
+                "fetched_at": fetched_at,
+            }
+        if not prepared:
+            return 0
+
+        insert_stmt = sqlite_insert(PropLineGradingResult).values(
+            list(prepared.values())
+        )
+        stmt = insert_stmt.on_conflict_do_update(
+            index_elements=[
+                "player_name",
+                "sport",
+                "stat_type",
+                "game_date",
+                "game_id",
+            ],
+            set_={
                 "opponent": func.coalesce(
                     insert_stmt.excluded.opponent,
-                    PlayerGameResult.opponent,
+                    PropLineGradingResult.opponent,
                 ),
+                "actual_value": insert_stmt.excluded.actual_value,
                 "fetched_at": fetched_at,
             },
         )
@@ -7023,6 +7240,92 @@ class Database:
                 reverse=True,
             )
             del records[max(1, int(limit)):]
+        return results_by_key
+
+    async def get_player_results_bulk_for_grading(
+        self,
+        props: "list[tuple[str, str, str]]",
+        limit: int = 30,
+    ) -> "dict[tuple[str, str, str], list[PlayerGameResult]]":
+        """Load ordinary history plus isolated final rows only for grading."""
+        keys = list(dict.fromkeys(
+            (str(player), str(sport), str(stat).lower().strip())
+            for player, sport, stat in props
+            if player and sport and stat
+        ))
+        results_by_key = {key: [] for key in keys}
+        if not keys:
+            return results_by_key
+
+        players = {key[0] for key in keys}
+        sports = {key[1] for key in keys}
+        stats = {key[2] for key in keys}
+        async with self.session() as s:
+            history_result = await s.execute(
+                select(PlayerGameResult).where(
+                    PlayerGameResult.player_name.in_(players),
+                    PlayerGameResult.sport.in_(sports),
+                    PlayerGameResult.stat_type.in_(stats),
+                )
+            )
+            for row in history_result.scalars().all():
+                key = (
+                    row.player_name,
+                    row.sport,
+                    str(row.stat_type or "").lower().strip(),
+                )
+                if key in results_by_key:
+                    results_by_key[key].append(row)
+
+            grading_result = await s.execute(
+                select(PropLineGradingResult).where(
+                    PropLineGradingResult.player_name.in_(players),
+                    PropLineGradingResult.sport.in_(sports),
+                    PropLineGradingResult.stat_type.in_(stats),
+                )
+            )
+            for row in grading_result.scalars().all():
+                key = (
+                    row.player_name,
+                    row.sport,
+                    str(row.stat_type or "").lower().strip(),
+                )
+                if key in results_by_key:
+                    results_by_key[key].append(_as_player_game_result(row))
+
+        for rows in results_by_key.values():
+            deduplicated = {
+                (
+                    row.game_date,
+                    str(row.game_id or ""),
+                    str(row.source or "").strip().casefold(),
+                ): row
+                for row in rows
+            }
+            ordered = sorted(
+                deduplicated.values(),
+                key=lambda row: row.game_date or "",
+                reverse=True,
+            )
+            # Preserve all exact-identity PropLine rows, even when older than
+            # the normal history window, so the grader can reconcile backlog.
+            grade_rows = [
+                row
+                for row in ordered
+                if str(row.source or "").strip().casefold()
+                in _UNDERDOG_FINAL_PLAYER_GAME_RESULT_SOURCES
+            ]
+            recent_other_rows = [
+                row
+                for row in ordered
+                if str(row.source or "").strip().casefold()
+                not in _UNDERDOG_FINAL_PLAYER_GAME_RESULT_SOURCES
+            ][: max(1, int(limit))]
+            rows[:] = sorted(
+                [*grade_rows, *recent_other_rows],
+                key=lambda row: row.game_date or "",
+                reverse=True,
+            )
         return results_by_key
 
     async def count_player_results(
@@ -10468,9 +10771,9 @@ class Database:
 
         Matching stays strict: a dated opportunity requires that date (or the
         provider-local previous date already allowed by the grader), while an
-        undated opportunity requires its event identity. Underdog accepts only
-        explicit PropLine settlement rows and keeps supplied event IDs strict;
-        other providers may use the existing dated fallback.
+        undated opportunity requires its event identity. Underdog accepts
+        explicit PropLine settlements or final PropLine player-game stats with
+        the exact saved event ID; player-game stats are never date-only fallback.
         """
         if not opportunities:
             return {}
@@ -10613,7 +10916,9 @@ class Database:
             event_row = None
             if game_id:
                 for row in by_event.get((player_key, sport, stat, game_id), []):
-                    if not is_gradeable_player_result_source(provider, row.source):
+                    if not is_gradeable_player_result_for_event(
+                        provider, row.source, game_id, row.game_id
+                    ):
                         continue
                     event_row = row
                     break
@@ -10631,7 +10936,9 @@ class Database:
                     dated_rows = [
                         row
                         for row in dated_rows
-                        if is_gradeable_player_result_source(provider, row.source)
+                        if is_gradeable_player_result_for_event(
+                            provider, row.source, game_id, row.game_id
+                        )
                         and (
                             not game_id
                             or str(row.game_id or "") == game_id
@@ -10641,7 +10948,9 @@ class Database:
                     dated_rows = [
                         row
                         for row in dated_rows
-                        if is_gradeable_player_result_source(provider, row.source)
+                        if is_gradeable_player_result_for_event(
+                            provider, row.source, game_id, row.game_id
+                        )
                         and (
                             not game_id
                             or str(row.game_id or "") == game_id
@@ -10664,13 +10973,27 @@ class Database:
                         for row in by_date.get(
                             (player_key, sport, component, candidate_date), []
                         )
-                        if is_gradeable_player_result_source(provider, row.source)
+                        if is_gradeable_player_result_for_event(
+                            provider, row.source, game_id, row.game_id
+                        )
                     ]
                     if eligible_components:
                         component_rows[component] = eligible_components[0]
                 if len(component_rows) != len(components):
                     continue
                 selected = [component_rows[component] for component in components]
+                if any(
+                    str(row.source or "").strip().casefold()
+                    == "propline_player_games"
+                    for row in selected
+                ) and (
+                    not game_id
+                    or any(
+                        str(row.game_id or "").strip() != str(game_id).strip()
+                        for row in selected
+                    )
+                ):
+                    continue
                 resolved[opp_id] = (
                     PlayerGameResult(
                         player_name=player_name,
@@ -10707,18 +11030,17 @@ class Database:
     ) -> "Optional[PlayerGameResult]":
         """
         Return the PlayerGameResult for a given player / sport / stat / date and
-        optional event identity, or None. Underdog opportunities accept only
-        explicit PropLine settlement rows; other providers keep their existing
-        dated-stat lookup behavior.
+        optional event identity, or None. Underdog opportunities accept explicit
+        PropLine settlements plus final player-game stats when the event ID
+        matches exactly. Final player-game stats never use date-only fallback.
 
         stat_type is normalised to lowercase before lookup because upsert_player_result
         stores all stat types in lowercase.  This prevents silent mismatches between
         Underdog's mixed-case stat names ("Points") and the stored values ("points").
 
-        If a source provider supplies an event ID that differs from the result
-        provider's event ID, retry by player / sport / stat / date without the
-        source ID. This is safe because the date is still required for the
-        cross-provider fallback.
+        Resolved history may reconcile a cross-provider event ID by date under
+        the existing rules. Completed player-game stats always require the
+        saved event ID to match exactly.
         """
         normalised_stat = stat_type.lower().strip()
         is_underdog = str(provider or "").strip().casefold() == "underdog"
@@ -10731,7 +11053,7 @@ class Database:
             if is_underdog:
                 filters.append(
                     func.lower(PlayerGameResult.source).in_(
-                        tuple(_UNDERDOG_SETTLEMENT_RESULT_SOURCES)
+                        tuple(_UNDERDOG_GRADE_RESULT_SOURCES)
                     )
                 )
             else:
@@ -10749,6 +11071,13 @@ class Database:
             # empty game_id in that case silently misses valid official stats.
             if game_id:
                 filters.append(PlayerGameResult.game_id == str(game_id))
+            else:
+                # Completed player-game stats need an event identity. Resolved
+                # history may retain its existing date-based reconciliation.
+                filters.append(
+                    func.lower(PlayerGameResult.source)
+                    != "propline_player_games"
+                )
             if not game_date and not game_id:
                 return None
             result = await s.execute(
@@ -10779,9 +11108,15 @@ class Database:
                 if is_underdog:
                     fallback_filters.append(
                         func.lower(PlayerGameResult.source).in_(
-                            tuple(_UNDERDOG_SETTLEMENT_RESULT_SOURCES)
+                            tuple(_UNDERDOG_GRADE_RESULT_SOURCES)
                         )
                     )
+                # A date-only fallback is not enough to identify a completed
+                # player-game row, even for providers with cross-ID fallback.
+                fallback_filters.append(
+                    func.lower(PlayerGameResult.source)
+                    != "propline_player_games"
+                )
                 fallback = await s.execute(
                     select(PlayerGameResult)
                     .where(*fallback_filters)
@@ -10816,16 +11151,29 @@ class Database:
             if is_underdog or not components or not game_date or not provider:
                 return None
 
+            component_source = func.lower(PlayerGameResult.source)
+            component_filters = [
+                func.lower(PlayerGameResult.player_name)
+                == str(player_name).lower().strip(),
+                func.upper(PlayerGameResult.sport)
+                == str(sport).upper().strip(),
+                func.lower(PlayerGameResult.stat_type).in_(components),
+                PlayerGameResult.game_date == game_date,
+            ]
+            if game_id:
+                component_filters.append(
+                    or_(
+                        component_source != "propline_player_games",
+                        PlayerGameResult.game_id == str(game_id),
+                    )
+                )
+            else:
+                component_filters.append(
+                    component_source != "propline_player_games"
+                )
             component_result = await s.execute(
                 select(PlayerGameResult)
-                .where(
-                    func.lower(PlayerGameResult.player_name)
-                    == str(player_name).lower().strip(),
-                    func.upper(PlayerGameResult.sport)
-                    == str(sport).upper().strip(),
-                    func.lower(PlayerGameResult.stat_type).in_(components),
-                    PlayerGameResult.game_date == game_date,
-                )
+                .where(*component_filters)
                 .order_by(PlayerGameResult.id.desc())
             )
             component_rows = component_result.scalars().all()
@@ -10837,6 +11185,18 @@ class Database:
                 return None
 
             selected = [by_stat[component] for component in components]
+            if any(
+                str(row.source or "").strip().casefold()
+                == "propline_player_games"
+                for row in selected
+            ) and (
+                not game_id
+                or any(
+                    str(row.game_id or "").strip() != str(game_id).strip()
+                    for row in selected
+                )
+            ):
+                return None
             return PlayerGameResult(
                 player_name=player_name,
                 sport=str(sport).upper().strip(),
@@ -11508,7 +11868,7 @@ class Database:
             result_rows_by_key: dict[tuple[str, str, str], list[PlayerGameResult]] = {}
             key_list = list(keys)
             trusted_sources = tuple(
-                _UNDERDOG_SETTLEMENT_RESULT_SOURCES | _UNDERDOG_VOID_RESULT_SOURCES
+                _UNDERDOG_GRADE_RESULT_SOURCES | _UNDERDOG_VOID_RESULT_SOURCES
             )
             for offset in range(0, len(key_list), 200):
                 batch = key_list[offset : offset + 200]
@@ -11622,6 +11982,8 @@ class Database:
                         row
                         for row in candidate_rows
                         if str(row.game_date or "") in valid_dates
+                        and str(row.source or "").strip().casefold()
+                        not in _UNDERDOG_FINAL_PLAYER_GAME_RESULT_SOURCES
                     ]
                 if not matching:
                     continue

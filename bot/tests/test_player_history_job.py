@@ -505,6 +505,7 @@ def test_player_games_persist_only_final_identified_rows_and_preserve_zero():
         ("game-final-zero", 0.0),
         ("game-complete", 14.0),
     ]
+    assert {row.source for row in rows} == {"propline_player_games"}
 
 
 def test_player_games_map_cs2_market_to_documented_maps_1_2_field():

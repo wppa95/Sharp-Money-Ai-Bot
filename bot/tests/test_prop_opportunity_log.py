@@ -23,6 +23,7 @@ from database import (
     PropOpportunityLog,
     PropTrackingLog,
     UnderdogSnapshotRecord,
+    is_trusted_directional_grade_source,
 )
 
 
@@ -43,6 +44,25 @@ def _past(hours: int = 5) -> datetime:
 
 def _future(hours: int = 5) -> datetime:
     return datetime.utcnow() + timedelta(hours=hours)
+
+
+@pytest.mark.parametrize(
+    ("result", "source", "expected"),
+    [
+        ("HIT", "propline_player_games", True),
+        ("PUSH", "propline_player_games", True),
+        ("VOID", "propline_player_games", False),
+        ("UNRESOLVED", "propline_player_games", False),
+        ("VOID", "propline_event_results", True),
+    ],
+)
+def test_final_player_game_stats_only_support_directional_grades(
+    result: str, source: str, expected: bool
+) -> None:
+    assert (
+        is_trusted_directional_grade_source("Underdog", result, source)
+        is expected
+    )
 
 
 async def _log(db: Database, **kwargs) -> None:
@@ -439,6 +459,128 @@ class TestGetGameResultForGrading:
         assert row is not None
         assert row.actual_value == 24.0
 
+    @pytest.mark.parametrize(
+        ("sport", "stat_type"),
+        [
+            ("TENNIS", "aces"),
+            ("NBA", "points"),
+            ("MLB", "hits"),
+            ("CS", "kills"),
+        ],
+    )
+    @pytest.mark.asyncio
+    async def test_underdog_lookup_accepts_final_player_game_for_exact_event(
+        self, db: Database, sport: str, stat_type: str
+    ) -> None:
+        await db.upsert_player_result(
+            PlayerGameResult(
+                player_name="Exact Match Player",
+                sport=sport,
+                stat_type=stat_type,
+                game_date="2026-08-31",
+                actual_value=7.0,
+                source="propline_player_games",
+                game_id="underdog-event-exact",
+            )
+        )
+
+        row = await db.get_game_result_for_grading(
+            "Exact Match Player",
+            sport,
+            stat_type,
+            "2026-08-31",
+            game_id="underdog-event-exact",
+            provider="Underdog",
+        )
+
+        assert row is not None
+        assert row.actual_value == 7.0
+        assert row.source == "propline_player_games"
+
+    @pytest.mark.asyncio
+    async def test_underdog_player_game_stats_never_use_a_date_only_match(
+        self, db: Database
+    ) -> None:
+        await db.upsert_player_result(
+            PlayerGameResult(
+                player_name="Exact Match Player",
+                sport="TENNIS",
+                stat_type="aces",
+                game_date="2026-08-31",
+                actual_value=7.0,
+                source="propline_player_games",
+                game_id="propline-event-id",
+            )
+        )
+
+        mismatched_event = await db.get_game_result_for_grading(
+            "Exact Match Player",
+            "TENNIS",
+            "aces",
+            "2026-08-31",
+            game_id="underdog-event-id",
+            provider="Underdog",
+        )
+        no_event_identity = await db.get_game_result_for_grading(
+            "Exact Match Player",
+            "TENNIS",
+            "aces",
+            "2026-08-31",
+            provider="Underdog",
+        )
+
+        assert mismatched_event is None
+        assert no_event_identity is None
+
+    @pytest.mark.parametrize("bulk", [False, True])
+    @pytest.mark.asyncio
+    async def test_result_upserts_keep_source_with_the_most_trusted_value(
+        self, db: Database, bulk: bool
+    ) -> None:
+        async def _upsert(actual_value: float, source: str) -> None:
+            row = PlayerGameResult(
+                player_name="Source Priority Player",
+                sport="NBA",
+                stat_type="points",
+                game_date="2026-08-31",
+                actual_value=actual_value,
+                source=source,
+                game_id="priority-event",
+            )
+            if bulk:
+                await db.upsert_player_results_bulk([row])
+            else:
+                await db.upsert_player_result(row)
+
+        await _upsert(8.0, "api")
+        await _upsert(12.0, "propline_player_games")
+        await _upsert(3.0, "api")
+
+        player_game_result = await db.get_game_result_for_grading(
+            "Source Priority Player",
+            "NBA",
+            "points",
+            "2026-08-31",
+            game_id="priority-event",
+            provider="Underdog",
+        )
+        assert player_game_result is not None
+        assert player_game_result.actual_value == 12.0
+        assert player_game_result.source == "propline_player_games"
+
+        await _upsert(15.0, "propline_event_results")
+        explicit_settlement = await db.get_game_result_for_grading(
+            "Source Priority Player",
+            "NBA",
+            "points",
+            "2026-08-31",
+            game_id="priority-event",
+            provider="Underdog",
+        )
+        assert explicit_settlement is not None
+        assert explicit_settlement.actual_value == 15.0
+        assert explicit_settlement.source == "propline_event_results"
+
     @pytest.mark.asyncio
     async def test_underdog_composite_does_not_derive_from_player_stats(
         self, db: Database
@@ -523,6 +665,56 @@ class TestGetGameResultForGrading:
         matches = await db.get_game_results_for_grading_bulk([opportunity])
 
         assert matches[902][0].actual_value == 24.0
+
+    @pytest.mark.asyncio
+    async def test_bulk_underdog_resolver_requires_exact_event_for_player_game_stats(
+        self, db: Database
+    ) -> None:
+        await db.upsert_player_result(
+            PlayerGameResult(
+                player_name="Exact Match Player",
+                sport="TENNIS",
+                stat_type="aces",
+                game_date="2026-08-31",
+                actual_value=7.0,
+                source="propline_player_games",
+                game_id="propline-event-id",
+            )
+        )
+        opportunities = [
+            SimpleNamespace(
+                id=903,
+                player_name="Exact Match Player",
+                sport="TENNIS",
+                stat_type="aces",
+                game_time=datetime(2026, 8, 31, 18, 0),
+                game_id="propline-event-id",
+                provider="Underdog",
+            ),
+            SimpleNamespace(
+                id=904,
+                player_name="Exact Match Player",
+                sport="TENNIS",
+                stat_type="aces",
+                game_time=datetime(2026, 8, 31, 18, 0),
+                game_id="different-event-id",
+                provider="Underdog",
+            ),
+            SimpleNamespace(
+                id=905,
+                player_name="Exact Match Player",
+                sport="TENNIS",
+                stat_type="aces",
+                game_time=datetime(2026, 8, 31, 18, 0),
+                game_id="",
+                provider="Underdog",
+            ),
+        ]
+
+        matches = await db.get_game_results_for_grading_bulk(opportunities)
+
+        assert set(matches) == {903}
+        assert matches[903][0].source == "propline_player_games"
 
 
 class TestGetTrackingSummary:

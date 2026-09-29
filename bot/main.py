@@ -32,7 +32,7 @@ from database import (
     Database,
     OddsRecord,
     get_sqlite_backpressure_metrics,
-    is_gradeable_player_result_source,
+    is_gradeable_player_result_for_event,
     is_official_underdog_settlement_source,
 )
 from engine import AnalysisEngine
@@ -1228,7 +1228,11 @@ async def _grade_opportunities_job(context) -> None:
         # This prevents optional-provider warnings and requests for rows the
         # database can already grade.
         _stored_grade_results = {}
-        _bulk_result_loader = getattr(db, "get_player_results_bulk", None)
+        _bulk_result_loader = getattr(
+            db, "get_player_results_bulk_for_grading", None
+        )
+        if not callable(_bulk_result_loader):
+            _bulk_result_loader = getattr(db, "get_player_results_bulk", None)
         if callable(_bulk_result_loader):
             _bulk_result = _bulk_result_loader(
                 [
@@ -1250,14 +1254,20 @@ async def _grade_opportunities_job(context) -> None:
             # as permission to settle from a general player-stat feed.
             return not provider or provider == "underdog"
 
-        def _is_official_underdog_result(opp, row) -> bool:
-            if not is_official_underdog_settlement_source(
-                getattr(row, "source", "")
+        def _is_gradeable_underdog_result(opp, row) -> bool:
+            source = getattr(row, "source", "")
+            event_id = str(getattr(opp, "game_id", "") or "").strip()
+            result_event_id = str(getattr(row, "game_id", "") or "").strip()
+            if not is_gradeable_player_result_for_event(
+                "Underdog", source, event_id, result_event_id
             ):
                 return False
-            event_id = str(getattr(opp, "game_id", "") or "").strip()
+            if str(source or "").strip().casefold() == "propline_player_games":
+                return True
+            if not is_official_underdog_settlement_source(source):
+                return False
             if event_id:
-                return str(getattr(row, "game_id", "") or "").strip() == event_id
+                return result_event_id == event_id
 
             row_date = str(getattr(row, "game_date", "") or "")
             game_time = getattr(opp, "game_time", None)
@@ -1299,12 +1309,15 @@ async def _grade_opportunities_job(context) -> None:
             _game_id = str(getattr(opp, "game_id", "") or "")
             if _is_underdog_opportunity(opp):
                 return any(
-                    _is_official_underdog_result(opp, row)
+                    _is_gradeable_underdog_result(opp, row)
                     for row in _stored_grade_results.get(_key, [])
                 )
             return any(
-                is_gradeable_player_result_source(
-                    opp.provider, getattr(row, "source", "")
+                is_gradeable_player_result_for_event(
+                    opp.provider,
+                    getattr(row, "source", ""),
+                    _game_id,
+                    getattr(row, "game_id", ""),
                 )
                 and (
                     (
@@ -1338,8 +1351,8 @@ async def _grade_opportunities_job(context) -> None:
             )
 
         # ── Fetch general player stats only for non-Underdog opportunities ──
-        # Underdog-native grading is restricted to explicit PropLine
-        # settlements; public player-stat feeds are not settlement evidence.
+        # Underdog grading accepts explicit PropLine settlements and completed
+        # PropLine player-game stats only with an exact saved event identity.
         _grade_stat_prov = None
         try:
             from providers.player_stats import PlayerStatsProvider as _GradeStatProvider
@@ -1652,7 +1665,7 @@ async def _grade_opportunities_job(context) -> None:
                 return [
                     row
                     for row in rows
-                    if _is_official_underdog_result(opp, row)
+                    if _is_gradeable_underdog_result(opp, row)
                 ]
             return rows
 
@@ -1728,13 +1741,15 @@ async def _grade_opportunities_job(context) -> None:
             if (
                 result_row is not None
                 and (
-                    not is_gradeable_player_result_source(
+                    not is_gradeable_player_result_for_event(
                         getattr(opp, "provider", None) or "Underdog",
                         getattr(result_row, "source", ""),
+                        getattr(opp, "game_id", ""),
+                        getattr(result_row, "game_id", ""),
                     )
                     or (
                         _is_underdog_opportunity(opp)
-                        and not _is_official_underdog_result(opp, result_row)
+                        and not _is_gradeable_underdog_result(opp, result_row)
                     )
                 )
             ):

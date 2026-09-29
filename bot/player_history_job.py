@@ -213,9 +213,17 @@ def _filter_completed_propline_game_payload(
     return None
 
 
-def _completed_propline_game_rows(target: Any, result: Any) -> list[Any]:
-    """Convert final, identified player-game stats into normal history rows."""
-    if is_football_related_sport(target.canonical_sport):
+def _completed_propline_game_rows(
+    target: Any,
+    result: Any,
+    *,
+    grading_only: bool = False,
+) -> list[Any]:
+    """Convert final, identified player-game stats into persistence rows."""
+    if (
+        is_football_related_sport(target.canonical_sport)
+        and not grading_only
+    ):
         return []
     from providers.player_stats import RawGameResult
     from providers.propline import (
@@ -1283,15 +1291,21 @@ async def propline_read_only_rotation_job(context) -> None:
             events_by_sport=events_by_sport,
         )
 
-        # Keep football-family data outside this supplemental evidence lane,
-        # and persist event box scores only after explicit final status.
+        # Keep football-family data outside general evidence/history, but
+        # allow its final player-game stats through the isolated grading path.
         targets = [
             target
             for target in targets
-            if not is_football_related_sport(target.canonical_sport)
-            and not (
-                target.family == "event_stats"
-                and not _is_explicit_propline_final(target.event_status)
+            if (
+                is_football_related_sport(target.canonical_sport)
+                and target.family == "player_games"
+            )
+            or (
+                not is_football_related_sport(target.canonical_sport)
+                and not (
+                    target.family == "event_stats"
+                    and not _is_explicit_propline_final(target.event_status)
+                )
             )
         ]
         fresh_reader = getattr(
@@ -1414,7 +1428,26 @@ async def propline_read_only_rotation_job(context) -> None:
 
         async def persist(target, result):
             if is_football_related_sport(target.canonical_sport):
-                return False
+                if (
+                    target.family != "player_games"
+                    or not bool(getattr(result, "succeeded", False))
+                    or not bool(getattr(result, "complete", False))
+                    or bool(getattr(result, "redacted", False))
+                ):
+                    return False
+                rows = _completed_propline_game_rows(
+                    target, result, grading_only=True
+                )
+                if rows:
+                    writer = getattr(
+                        db, "upsert_propline_grading_results_bulk", None
+                    )
+                    if not callable(writer):
+                        raise RuntimeError(
+                            "grading-only PropLine result writer is unavailable"
+                        )
+                    await writer(rows)
+                return True
             evidence_writer = getattr(db, "upsert_propline_evidence_batch", None)
             completed_payload = None
             if target.family == "player_games":
