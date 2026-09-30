@@ -4875,7 +4875,6 @@ async def underdog_job(context) -> None:
     # always reflects the actual number of snapshots processed this cycle.
     _n_ud_snaps_this_cycle: int = len(ud_snaps)
 
-    
     # Pre-delivery freshness map — (player, stat_type) → latest known line from this fetch.
     # Built once per scan from the same ud_snaps that scoring uses.  Every alert path
     # confirms its candidate line against this map before delivery, making the freshness

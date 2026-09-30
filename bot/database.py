@@ -6015,9 +6015,9 @@ class Database:
         if not snaps:
             return 0
 
-        # Group the current scan before looking up history.  The live path
+        # Group the current scan before looking up history. The live path
         # supplies an explicit boundary and therefore knows exactly which
-        # provider identities can be relevant.  Do not run the maintenance
+        # provider identities can be relevant. Do not run the maintenance
         # path's all-history GROUP BY against a growing append-only table on
         # every full feed.
         snap_by_key: dict[tuple, list] = {}
