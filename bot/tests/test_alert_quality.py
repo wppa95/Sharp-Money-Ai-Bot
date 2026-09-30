@@ -447,12 +447,18 @@ def test_history_includes_recent_actual_result_values():
 
     decision = types.SimpleNamespace(
         recent_values=(10, 14, 17, 12, 8),
+        sample_values={
+            "l5": (10, 14, 17, 12, 8),
+            "l10": (10, 14, 17, 12, 8, 20, 6, 11, 9, 15),
+            "season": (10, 14, 17, 12, 8, 20, 6, 11, 9, 15),
+            "h2h": (7, 13, 14),
+        },
         l5_games=5,
         l5_over=5,
         l5_hit_rate=1.0,
-        l10_games=None,
-        l10_over=None,
-        l10_hit_rate=None,
+        l10_games=10,
+        l10_over=7,
+        l10_hit_rate=0.7,
         l15_games=None,
         l15_over=None,
         l15_hit_rate=None,
@@ -462,14 +468,26 @@ def test_history_includes_recent_actual_result_values():
         l30_games=None,
         l30_over=None,
         l30_hit_rate=None,
-        h2h_games=None,
-        h2h_over=None,
-        h2h_hit_rate=None,
+        season_games=10,
+        season_over=7,
+        season_hit_rate=0.7,
+        h2h_games=3,
+        h2h_over=2,
+        h2h_hit_rate=2 / 3,
     )
 
     result = _format_history_block(decision)
 
     assert "<b>L5:</b> 10, 14, 17, 12, 8 · 100% (5/5)" in result
+    assert (
+        "<b>L10:</b> 10, 14, 17, 12, 8, 20, 6, 11, 9, 15 · 70% (7/10)"
+        in result
+    )
+    assert (
+        "<b>10-game sample:</b> 10, 14, 17, 12, 8, 20, 6, 11, 9, 15 · 70% (7/10)"
+        in result
+    )
+    assert "<b>H2H:</b> 7, 13, 14 · 67% (2/3)" in result
 
 
 def test_alert_history_includes_h2h_window_from_decision():

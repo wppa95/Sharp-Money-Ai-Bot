@@ -2801,14 +2801,29 @@ async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
         if has_evidence:
             evid: list[str] = []
-            _recent_l5_values = ", ".join(
-                f"{float(value):g}"
-                for value in (getattr(hr, "recent_values", ()) or ())[:5]
-                if isinstance(value, (int, float)) and not isinstance(value, bool)
+            _sample_values = dict(
+                getattr(hr, "sample_values", ()) or ()
             )
+            if not _sample_values and isinstance(
+                getattr(hr, "sample_values", None), dict
+            ):
+                _sample_values = hr.sample_values
+
+            def _actual_values_text(window: str) -> str:
+                values = _sample_values.get(window, ())
+                if not values and window == "l5":
+                    values = getattr(hr, "recent_values", ()) or ()
+                return ", ".join(
+                    f"{float(value):g}"
+                    for value in values
+                    if isinstance(value, (int, float))
+                    and not isinstance(value, bool)
+                )
+
             for _wlbl, _ws in [
                 ("L5",     hr.l5),
                 ("L10",    hr.l10),
+                ("L15",    hr.l15),
                 ("L20",    hr.l20),
                 ("L30",    hr.l30),
                 ("Season", hr.season),
@@ -2818,9 +2833,11 @@ async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
                         f"{_ws.over_count}/{_ws.games}"
                         f" ({_ws.hit_rate:.0%})  avg {_ws.average:.1f}"
                     )
-                    if _wlbl == "L5" and _recent_l5_values:
+                    _window_key = _wlbl.lower()
+                    _actuals = _actual_values_text(_window_key)
+                    if _actuals:
                         evid.append(
-                            f"  {_wlbl:<7} {_recent_l5_values} · {_summary}"
+                            f"  {_wlbl:<7} {_actuals} · {_summary}"
                         )
                     else:
                         evid.append(f"  {_wlbl:<7} {_summary}")
@@ -2836,8 +2853,10 @@ async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             if hr.h2h is not None and hr.h2h.games >= 3 and _opp:
                 _h = hr.h2h
                 _opp_short = _opp[:18] + "…" if len(_opp) > 18 else _opp
+                _h2h_values = _actual_values_text("h2h")
+                _h2h_prefix = f"{_h2h_values} · " if _h2h_values else ""
                 entry_lines.append(
-                    f"  H2H vs {_opp_short} ({_h.games}g): "
+                    f"  H2H vs {_opp_short} ({_h.games}g): {_h2h_prefix}"
                     f"{_h.over_count}/{_h.games} ({_h.hit_rate:.0%})"
                     f"  avg {_h.average:.1f}"
                 )

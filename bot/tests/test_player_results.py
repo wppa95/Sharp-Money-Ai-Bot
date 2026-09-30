@@ -81,8 +81,26 @@ class TestComputeHitRates:
         assert hr.l5.under_count == 2
         assert abs(hr.l5.hit_rate - 0.6) < 0.01
         assert hr.recent_values == (3.0, 1.0, 3.0, 2.0, 3.0)
+        assert dict(hr.sample_values)["l5"] == (3.0, 1.0, 3.0, 2.0, 3.0)
+        assert dict(hr.sample_values)["season"] == (3.0, 1.0, 3.0, 2.0, 3.0)
         assert hr.season is not None
         assert hr.season.games == 5
+
+    def test_actual_values_match_every_available_sample_window(self):
+        values = [float(value) for value in range(30, 0, -1)]
+        hr = compute_hit_rates(_recs(values), 15.5, opponent="OPP")
+        samples = dict(hr.sample_values)
+
+        assert samples["l5"] == tuple(values[:5])
+        assert samples["l10"] == tuple(values[:10])
+        assert samples["l15"] == tuple(values[:15])
+        assert samples["l20"] == tuple(values[:20])
+        assert samples["l30"] == tuple(values[:30])
+        assert samples["season"] == tuple(values)
+        assert samples["h2h_l5"] == tuple(values[:5])
+        assert samples["h2h_l10"] == tuple(values[:10])
+        assert samples["h2h_l20"] == tuple(values[:20])
+        assert samples["h2h"] == tuple(values)
 
     def test_push_counted_as_under(self):
         """Exact-line value is a push, counted as UNDER."""
