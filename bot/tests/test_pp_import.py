@@ -122,8 +122,12 @@ async def test_active_fpr_pool_returns_fresh_mixed_provider_lines(db):
 
     pool = await db.get_all_active_prop_line_history_by_line()
 
-    assert ("PrizePicks", "PP Player", "NBA", "Points", 18.5, "pp-1") in pool
-    assert ("Underdog", "UD Player", "MLB", "Hits", 1.5, "ud-1") in pool
+    assert (
+        "PrizePicks", "PP Player", "NBA", "Points", 18.5, "pp-1", "", "pp-game-1"
+    ) in pool
+    assert (
+        "Underdog", "UD Player", "MLB", "Hits", 1.5, "ud-1", "", "ud-game-1"
+    ) in pool
 
 
 @pytest.mark.asyncio
@@ -161,8 +165,8 @@ async def test_pp_source_ids_keep_same_event_alternate_lines_separate(db):
     )
 
     assert set(pool) == {
-        ("PrizePicks", "PP Player", "NBA", "Points", 18.5, "pp-low"),
-        ("PrizePicks", "PP Player", "NBA", "Points", 20.5, "pp-high"),
+        ("PrizePicks", "PP Player", "NBA", "Points", 18.5, "pp-low", "", "pp-game-1"),
+        ("PrizePicks", "PP Player", "NBA", "Points", 20.5, "pp-high", "", "pp-game-1"),
     }
 
 
@@ -190,7 +194,7 @@ async def test_pp_source_id_line_move_updates_existing_active_projection(db):
         providers=("PrizePicks",)
     )
     assert set(pool) == {
-        ("PrizePicks", "PP Player", "NBA", "Points", 19.5, "pp-source-1")
+        ("PrizePicks", "PP Player", "NBA", "Points", 19.5, "pp-source-1", "", "pp-game-1")
     }
 
 
@@ -237,7 +241,7 @@ async def test_current_pool_ignores_historical_rows_but_history_remains_queryabl
         providers=("PrizePicks",)
     )
     assert set(pool) == {
-        ("PrizePicks", "Historical Player", "NBA", "Points", 19.5, "pp-history-1")
+        ("PrizePicks", "Historical Player", "NBA", "Points", 19.5, "pp-history-1", "", "pp-game-1")
     }
 
     history = await db.get_prop_line_history(

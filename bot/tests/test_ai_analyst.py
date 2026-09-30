@@ -89,6 +89,53 @@ def test_provider_contract_is_model_agnostic():
     assert result.model_version == "test-1"
 
 
+def test_prior_line_movements_are_advisory_context_only():
+    decision = type("Decision", (), {
+        "recommendation": "OVER",
+        "confidence": 72,
+        "risk_level": "MEDIUM",
+        "evidence": {},
+    })()
+    movement_context = {
+        "line_variant": "goblin",
+        "scope": "prior_events",
+        "events": [
+            {
+                "event_id": "previous-game",
+                "lines": [{
+                    "opening_line": 1.5,
+                    "previous_line": 1.5,
+                    "current_line": 2.0,
+                    "movement_count": 1,
+                }],
+            }
+        ],
+    }
+
+    without_context = build_advisory_from_pipeline(
+        player_name="A. Player",
+        sport="MLB",
+        stat_type="Hits",
+        line=1.5,
+        provider="PrizePicks",
+        decision=decision,
+    )
+    with_context = build_advisory_from_pipeline(
+        player_name="A. Player",
+        sport="MLB",
+        stat_type="Hits",
+        line=1.5,
+        provider="PrizePicks",
+        decision=decision,
+        line_movement_context=movement_context,
+    )
+
+    assert with_context.prediction == without_context.prediction == "OVER"
+    assert with_context.confidence == without_context.confidence == 72
+    assert with_context.line_movement_context == movement_context
+    assert "prior_line_movements" in with_context.evidence_used
+
+
 @pytest.mark.parametrize(
     ("prediction", "result", "recommendation", "expected"),
     [

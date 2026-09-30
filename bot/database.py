@@ -5096,6 +5096,184 @@ class Database:
             )
             return list(result.scalars().all())
 
+    async def get_prop_line_movement_context_bulk(
+        self,
+        targets: "Iterable[tuple[str, str, str, str, str, str]]",
+        *,
+        before: Optional[datetime] = None,
+        limit_per_target: int = 8,
+        lookback_days: int = 365,
+    ) -> "dict[tuple[str, str, str, str, str], list[dict]]":
+        """Load compact prior-game line movement context without scoring it.
+
+        Each target is ``(provider, sport, player, stat, variant, current_event)``.
+        Rows are grouped across prior events by provider/sport/player/stat/variant;
+        source IDs remain visible inside each event summary so unlabeled Underdog
+        lines are never guessed to be standard/goblin/demon.
+        """
+        requested: dict[tuple[str, str, str, str, str], set[str]] = {}
+        for target in targets or ():
+            if not isinstance(target, (tuple, list)) or len(target) < 5:
+                continue
+            provider, sport, player, stat, variant = target[:5]
+            key = (
+                str(provider or "").strip(),
+                str(sport or "").upper().strip(),
+                str(player or "").strip(),
+                str(stat or "").strip(),
+                str(variant or "").strip().lower(),
+            )
+            if not all(key[:4]):
+                continue
+            current_event = str(target[5] or "").strip() if len(target) > 5 else ""
+            requested.setdefault(key, set()).add(current_event)
+        if not requested:
+            return {}
+
+        cutoff = before or datetime.utcnow()
+        oldest = cutoff - timedelta(days=max(1, int(lookback_days)))
+        chunk_size = 100
+        keys = list(requested)
+        rows_by_identity: dict[
+            tuple[str, str, str, str, str],
+            list[PropLineHistory],
+        ] = {key: [] for key in keys}
+
+        async with self.session() as s:
+            for start in range(0, len(keys), chunk_size):
+                chunk = keys[start:start + chunk_size]
+                source_identity = case(
+                    (
+                        and_(
+                            PropLineHistory.external_id.isnot(None),
+                            PropLineHistory.external_id != "",
+                        ),
+                        PropLineHistory.external_id,
+                    ),
+                    else_=PropLineHistory.game_id,
+                )
+                latest_rank = (
+                    select(
+                        PropLineHistory.id.label("row_id"),
+                        func.row_number().over(
+                            partition_by=(
+                                PropLineHistory.provider,
+                                PropLineHistory.sport,
+                                PropLineHistory.player_name,
+                                PropLineHistory.stat_type,
+                                PropLineHistory.game_id,
+                                source_identity,
+                                PropLineHistory.line_variant,
+                            ),
+                            order_by=(
+                                desc(PropLineHistory.fetched_at),
+                                desc(PropLineHistory.id),
+                            ),
+                        ).label("source_rank"),
+                    )
+                    .where(
+                        tuple_(
+                            PropLineHistory.provider,
+                            PropLineHistory.sport,
+                            PropLineHistory.player_name,
+                            PropLineHistory.stat_type,
+                            PropLineHistory.line_variant,
+                        ).in_(chunk),
+                        PropLineHistory.fetched_at >= oldest,
+                        PropLineHistory.fetched_at < cutoff,
+                    )
+                    .subquery()
+                )
+                result = await s.execute(
+                    select(PropLineHistory)
+                    .join(
+                        latest_rank,
+                        PropLineHistory.id == latest_rank.c.row_id,
+                    )
+                    .where(latest_rank.c.source_rank == 1)
+                    .order_by(
+                        desc(PropLineHistory.fetched_at),
+                        desc(PropLineHistory.id),
+                    )
+                )
+                for row in result.scalars().all():
+                    key = (
+                        str(row.provider or "").strip(),
+                        str(row.sport or "").upper().strip(),
+                        str(row.player_name or "").strip(),
+                        str(row.stat_type or "").strip(),
+                        str(row.line_variant or "").strip().lower(),
+                    )
+                    if key in rows_by_identity:
+                        rows_by_identity[key].append(row)
+
+        context: dict[tuple[str, str, str, str, str], list[dict]] = {}
+        for key, rows in rows_by_identity.items():
+            current_events = requested[key]
+            events: dict[str, list[PropLineHistory]] = {}
+            for row in rows:
+                event_id = str(row.game_id or "").strip()
+                if event_id and event_id in current_events:
+                    continue
+                event_key = event_id or f"legacy:{row.external_id or row.id}"
+                events.setdefault(event_key, []).append(row)
+
+            summaries = []
+            for event_key, event_rows in events.items():
+                event_rows.sort(
+                    key=lambda row: (
+                        str(row.external_id or ""),
+                        float(row.line_value or 0.0),
+                    )
+                )
+                latest_at = max(
+                    (
+                        row.fetched_at
+                        for row in event_rows
+                        if row.fetched_at is not None
+                    ),
+                    default=None,
+                )
+                summaries.append({
+                    "event_id": (
+                        event_key
+                        if not event_key.startswith("legacy:")
+                        else None
+                    ),
+                    "last_observed_at": (
+                        latest_at.isoformat() if latest_at is not None else None
+                    ),
+                    "lines": [
+                        {
+                            "source_id": str(row.external_id or ""),
+                            "opening_line": (
+                                float(row.opening_line)
+                                if row.opening_line is not None
+                                else None
+                            ),
+                            "previous_line": (
+                                float(row.prev_line)
+                                if row.prev_line is not None
+                                else None
+                            ),
+                            "current_line": float(row.line_value or 0.0),
+                            "movement_count": int(row.change_count or 0),
+                            "last_observed_at": (
+                                row.fetched_at.isoformat()
+                                if row.fetched_at is not None
+                                else None
+                            ),
+                        }
+                        for row in event_rows
+                    ],
+                })
+            summaries.sort(
+                key=lambda item: str(item.get("last_observed_at") or ""),
+                reverse=True,
+            )
+            context[key] = list(reversed(summaries[:max(1, int(limit_per_target))]))
+        return context
+
     async def count_prop_line_observations(
         self, provider: Optional[str] = None
     ) -> int:
@@ -5153,16 +5331,17 @@ class Database:
             stat: str,
             event_id: str,
             external_id: str,
-        ) -> tuple[str, str, str, str, str]:
+            line_variant: str,
+        ) -> tuple[str, str, str, str, str, str]:
             # PrizePicks source IDs identify separate active projections,
-            # including alternate lines for the same event.  Keep the legacy
-            # Underdog identity unchanged because its event/source lifecycle
-            # is maintained by the provider-specific snapshot bridge.
+            # including alternate lines for the same event. Some feeds may
+            # reuse a source ID across standard/goblin/demon variants, so the
+            # normalized variant is part of current-state identity as well.
             # A provider source ID is the stable identity through line
             # movement.  If it is unavailable, event identity is the safest
             # fallback; a later line update can still refresh that row.
             source_key = external_id or event_id
-            return (player, sport, stat, event_id, source_key)
+            return (player, sport, stat, event_id, source_key, line_variant)
 
         keys = {
             _identity(
@@ -5175,10 +5354,14 @@ class Database:
                     or ""
                 ),
                 getattr(prop, "external_id", "") or "",
+                str(getattr(prop, "line_variant", "") or "").strip().lower(),
             )
             for prop in props
         }
-        base_keys = {(player, sport, stat) for player, sport, stat, _, _ in keys}
+        base_keys = {
+            (player, sport, stat)
+            for player, sport, stat, _, _, _ in keys
+        }
         async with self.session() as s:
             result = await s.execute(
                 select(PropLineHistory)
@@ -5192,7 +5375,7 @@ class Database:
                 )
                 .order_by(desc(PropLineHistory.fetched_at))
             )
-            latest: dict[tuple[str, str, str, str, str], PropLineHistory] = {}
+            latest: dict[tuple[str, str, str, str, str, str], PropLineHistory] = {}
             for row in result.scalars().all():
                 key = _identity(
                     row.player_name,
@@ -5200,6 +5383,7 @@ class Database:
                     row.stat_type,
                     row.game_id or "",
                     row.external_id or "",
+                    str(row.line_variant or "").strip().lower(),
                 )
                 latest.setdefault(key, row)
 
@@ -5214,6 +5398,7 @@ class Database:
                         or ""
                     ),
                     getattr(prop, "external_id", "") or "",
+                    str(getattr(prop, "line_variant", "") or "").strip().lower(),
                 )
                 line_value = float(getattr(prop, "line_value", 0.0) or 0.0)
                 observed_at = (
@@ -5236,7 +5421,7 @@ class Database:
                         external_id=getattr(prop, "external_id", "") or "",
                         line_variant=str(
                             getattr(prop, "line_variant", "") or ""
-                        ).lower(),
+                        ).strip().lower(),
                         game_id=(
                             getattr(prop, "event_id", "")
                             or getattr(prop, "game_id", "")
@@ -5247,6 +5432,12 @@ class Database:
                         last_seen=observed_at,
                         change_count=0,
                         opening_line=line_value,
+                        removed=bool(getattr(prop, "removed", False)),
+                        lifecycle_state=(
+                            "REMOVED"
+                            if bool(getattr(prop, "removed", False))
+                            else "DISCOVERED"
+                        ),
                         score_tier=None,
                         bet_recommendation=getattr(prop, "bet_recommendation", None),
                         bet_confidence=None,
@@ -5272,7 +5463,7 @@ class Database:
                         external_id=getattr(prop, "external_id", "") or "",
                         line_variant=str(
                             getattr(prop, "line_variant", "") or ""
-                        ).lower(),
+                        ).strip().lower(),
                         game_id=(
                             getattr(prop, "event_id", "")
                             or getattr(prop, "game_id", "")
@@ -5291,10 +5482,14 @@ class Database:
                         prev_line=old_line if changed else getattr(
                             latest[key], "prev_line", None
                         ),
-                        removed=False,
+                        removed=bool(getattr(prop, "removed", False)),
                         lifecycle_state=(
-                            getattr(latest[key], "lifecycle_state", None)
-                            or "DISCOVERED"
+                            "REMOVED"
+                            if bool(getattr(prop, "removed", False))
+                            else (
+                                getattr(latest[key], "lifecycle_state", None)
+                                or "DISCOVERED"
+                            )
                         ),
                         first_alert_sent_at=getattr(
                             latest[key], "first_alert_sent_at", None
@@ -5336,8 +5531,10 @@ class Database:
                 row.fetched_at = observed_at
                 row.first_seen = row.first_seen or observed_at
                 row.last_seen = observed_at
-                row.removed = False
-                row.lifecycle_state = "DISCOVERED"
+                row.removed = bool(getattr(prop, "removed", False))
+                row.lifecycle_state = (
+                    "REMOVED" if row.removed else "DISCOVERED"
+                )
                 if refresh_metadata:
                     row.score_tier = None
                     row.bet_recommendation = getattr(
@@ -9100,7 +9297,7 @@ class Database:
     async def get_all_active_prop_line_history_by_line(
         self,
         providers: "Optional[Iterable[str]]" = None,
-    ) -> "dict[tuple[str, str, str, str, float, str], PropLineHistory]":
+    ) -> "dict[tuple[str, str, str, str, float, str, str, str], PropLineHistory]":
         """Return the current normalized active prop universe by provider/line.
 
         PropLineHistory is the shared tracking stream for every configured
@@ -9149,7 +9346,9 @@ class Database:
                     PropLineHistory.player_name,
                     PropLineHistory.sport,
                     PropLineHistory.stat_type,
+                    PropLineHistory.game_id,
                     source_identity,
+                    PropLineHistory.line_variant,
                 )
                 .scalar_subquery()
             )
@@ -9174,6 +9373,8 @@ class Database:
                 row.stat_type,
                 float(row.line_value or 0.0),
                 str(row.external_id or row.game_id or ""),
+                str(row.line_variant or "").strip().lower(),
+                str(row.game_id or ""),
             ): row
             for row in rows
             if row.line_value is not None

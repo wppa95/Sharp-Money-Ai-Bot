@@ -8,7 +8,7 @@ without changing the prop pipeline or the persistence contract.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Literal, Mapping, Optional, Protocol
 
 
@@ -57,6 +57,7 @@ class AnalystDecision:
     confidence: Optional[int]
     confidence_source: Optional[str]
     risk_level: Optional[str]
+    line_movement_context: Mapping[str, Any] = field(default_factory=dict)
     model: str = ANALYST_MODEL
     model_version: str = ANALYST_MODEL_VERSION
     schema_version: str = ANALYST_SCHEMA_VERSION
@@ -71,6 +72,7 @@ class AnalystDecision:
             "confidence": self.confidence,
             "confidence_source": self.confidence_source,
             "risk_level": self.risk_level,
+            "line_movement_context": dict(self.line_movement_context),
             "model": self.model,
             "model_version": self.model_version,
             "schema_version": self.schema_version,
@@ -132,6 +134,9 @@ class EvidenceBoundAnalyst:
                 confidence=None,
                 confidence_source=None,
                 risk_level=None,
+                line_movement_context=_context_mapping(
+                    snapshot.evidence.get("prior_line_movements")
+                ),
             )
 
         confidence = quantitative.get("decision_confidence")
@@ -168,6 +173,9 @@ class EvidenceBoundAnalyst:
                 if _present(quantitative.get("risk_level"))
                 else None
             ),
+            line_movement_context=_context_mapping(
+                snapshot.evidence.get("prior_line_movements")
+            ),
         )
 
 
@@ -184,6 +192,15 @@ def _as_mapping(value: Any) -> Optional[Mapping[str, Any]]:
     return None
 
 
+def _context_mapping(value: Any) -> Mapping[str, Any]:
+    """Keep supplemental movement context auditable without scoring it."""
+    if isinstance(value, Mapping):
+        return dict(value)
+    if isinstance(value, (list, tuple)) and value:
+        return {"events": list(value)}
+    return {}
+
+
 def build_advisory_from_pipeline(
     *,
     player_name: str,
@@ -197,6 +214,7 @@ def build_advisory_from_pipeline(
     validation: Any = None,
     hit_rates: Any = None,
     intelligence_trace: Optional[Mapping[str, Any]] = None,
+    line_movement_context: Any = None,
     analyst: Optional[AnalystProvider] = None,
 ) -> AnalystDecision:
     """Build an advisory result exclusively from existing pipeline objects."""
@@ -219,6 +237,9 @@ def build_advisory_from_pipeline(
         mapped = _as_mapping(source)
         if mapped:
             evidence[name] = dict(mapped)
+    movement_context = _context_mapping(line_movement_context)
+    if movement_context:
+        evidence["prior_line_movements"] = movement_context
     quantitative["risk_level"] = getattr(decision, "risk_level", None)
     snapshot = AnalystInput(
         player_name=str(player_name or ""),

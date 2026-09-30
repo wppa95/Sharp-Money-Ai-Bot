@@ -133,6 +133,7 @@ def _analyst_payload(
     validation=None,
     hit_rates=None,
     intelligence_trace=None,
+    line_movement_context=None,
 ) -> dict:
     """Create advisory AI output without affecting any delivery decision."""
     try:
@@ -148,6 +149,7 @@ def _analyst_payload(
             validation=validation,
             hit_rates=hit_rates,
             intelligence_trace=intelligence_trace,
+            line_movement_context=line_movement_context,
         ).to_dict()
     except Exception as exc:
         logger.warning("AI analyst advisory unavailable: %s", type(exc).__name__)
@@ -161,6 +163,64 @@ def _analyst_payload(
             confidence_source=None,
             risk_level=None,
         ).to_dict()
+
+
+def _line_movement_context_key(
+    provider: str,
+    sport: str,
+    player_name: str,
+    stat_type: str,
+    line_variant: str = "",
+) -> tuple[str, str, str, str, str]:
+    return (
+        str(provider or "").strip(),
+        str(sport or "").upper().strip(),
+        str(player_name or "").strip(),
+        str(stat_type or "").strip(),
+        str(line_variant or "").strip().lower(),
+    )
+
+
+async def _load_line_movement_context(
+    db: object,
+    targets: list[tuple[str, str, str, str, str, str]],
+    *,
+    timeout_seconds: float = 8.0,
+) -> dict[tuple[str, str, str, str, str], list[dict]]:
+    """Read compact prior-event summaries for advisory use only."""
+    reader = getattr(db, "get_prop_line_movement_context_bulk", None)
+    if not callable(reader) or not targets:
+        return {}
+    try:
+        operation = reader(
+            list(dict.fromkeys(targets)),
+            before=datetime.utcnow(),
+            limit_per_target=8,
+        )
+        if not inspect.isawaitable(operation):
+            return {}
+        result = await asyncio.wait_for(operation, timeout=timeout_seconds)
+        return result if isinstance(result, dict) else {}
+    except Exception as exc:  # noqa: BLE001
+        logger.debug(
+            "prior line-movement context unavailable: %s",
+            type(exc).__name__,
+        )
+        return {}
+
+
+def _line_movement_context_payload(
+    context_by_key: dict[tuple[str, str, str, str, str], list[dict]],
+    key: tuple[str, str, str, str, str],
+) -> Optional[dict]:
+    events = context_by_key.get(key) or []
+    if not events:
+        return None
+    return {
+        "line_variant": key[-1] or "unlabeled",
+        "scope": "prior_events",
+        "events": events,
+    }
 
 
 from alerts import AlertDelivery, broadcast_alert, identify_sharp_books
@@ -2808,6 +2868,35 @@ async def _run_prizepicks_independent_cycle(
             line_variant,
         )] = history_rows or []
 
+    _pp_movement_targets = []
+    for _movement_prop in unique_props.values():
+        _movement_player = str(
+            getattr(_movement_prop, "player_name", "") or ""
+        ).strip()
+        _movement_sport = str(
+            getattr(_movement_prop, "sport", "") or ""
+        ).upper().strip()
+        _movement_stat = str(
+            getattr(_movement_prop, "stat_type", "") or ""
+        ).strip()
+        _movement_variant = str(
+            getattr(_movement_prop, "line_variant", "") or ""
+        ).strip().lower()
+        if not all((_movement_player, _movement_sport, _movement_stat)):
+            continue
+        _movement_external, _movement_event = _source_identity(_movement_prop)
+        _pp_movement_targets.append((
+            "PrizePicks",
+            _movement_sport,
+            _movement_player,
+            _movement_stat,
+            _movement_variant,
+            _movement_event,
+        ))
+    _pp_line_movement_context = await _load_line_movement_context(
+        db, _pp_movement_targets
+    )
+
     if not _fetched_persisted:
         persisted = await _persist_propline_observations(
             db,
@@ -3003,6 +3092,12 @@ async def _run_prizepicks_independent_cycle(
             score=score,
             validation=validation,
             hit_rates=hit_rates,
+            line_movement_context=_line_movement_context_payload(
+                _pp_line_movement_context,
+                _line_movement_context_key(
+                    "PrizePicks", sport, player, stat, line_variant
+                ),
+            ),
         )
         try:
             await db.log_prop_opportunity(
@@ -5063,6 +5158,38 @@ async def underdog_job(context) -> None:
         "Underdog",
         _snapshot_records,
     )
+    _ud_movement_targets = []
+    for _movement_prop in _canonical_underdog_props:
+        _movement_player = str(
+            getattr(_movement_prop, "player_name", "") or ""
+        ).strip()
+        _movement_sport = str(
+            getattr(_movement_prop, "sport", "") or ""
+        ).upper().strip()
+        _movement_stat = str(
+            getattr(_movement_prop, "stat_type", "") or ""
+        ).strip()
+        _movement_variant = str(
+            getattr(_movement_prop, "line_variant", "") or ""
+        ).strip().lower()
+        if not all((_movement_player, _movement_sport, _movement_stat)):
+            continue
+        _movement_event = str(
+            getattr(_movement_prop, "event_id", "")
+            or getattr(_movement_prop, "game_id", "")
+            or ""
+        ).strip()
+        _ud_movement_targets.append((
+            "Underdog",
+            _movement_sport,
+            _movement_player,
+            _movement_stat,
+            _movement_variant,
+            _movement_event,
+        ))
+    _ud_line_movement_context = await _load_line_movement_context(
+        db, _ud_movement_targets
+    )
     if _canonical_underdog_props and db:
         try:
             await _cycle_timing.await_db(
@@ -5498,6 +5625,16 @@ async def underdog_job(context) -> None:
                     score=score,
                     validation=validation,
                     hit_rates=hit_rates,
+                    line_movement_context=_line_movement_context_payload(
+                        _ud_line_movement_context,
+                        _line_movement_context_key(
+                            "Underdog",
+                            snap.sport or "UNKNOWN",
+                            player,
+                            stat_type,
+                            getattr(snap, "line_variant", ""),
+                        ),
+                    ),
                 )
                 # Persist only directional opportunities. A prop without a
                 # direction remains in the canonical active pool and is
@@ -5854,6 +5991,16 @@ async def underdog_job(context) -> None:
                             score=score,
                             validation=validation,
                             hit_rates=hit_rates,
+                            line_movement_context=_line_movement_context_payload(
+                                _ud_line_movement_context,
+                                _line_movement_context_key(
+                                    "Underdog",
+                                    snap.sport or "UNKNOWN",
+                                    player,
+                                    stat_type,
+                                    getattr(snap, "line_variant", ""),
+                                ),
+                            ),
                         )
                         if decision.recommendation in ("OVER", "UNDER"):
                             try:
@@ -6503,6 +6650,16 @@ async def underdog_job(context) -> None:
                     score=_sscore,
                     validation=_sval,
                     hit_rates=_shits,
+                    line_movement_context=_line_movement_context_payload(
+                        _ud_line_movement_context,
+                        _line_movement_context_key(
+                            "Underdog",
+                            _ssport,
+                            _sp,
+                            _st,
+                            getattr(_ssnap, "line_variant", ""),
+                        ),
+                    ),
                 )
                 if _sdec is None or _sdec.recommendation not in ("OVER", "UNDER"):
                     continue
@@ -8327,7 +8484,10 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
             # may already represent the same source ID, so do not add a second
             # legacy-key entry for that underlying prop.
             _normalized_ud_source_ids = {
-                str(getattr(_normalized_snap, "external_id", "") or "")
+                (
+                    str(getattr(_normalized_snap, "external_id", "") or ""),
+                    _snapshot_event_id(_normalized_snap),
+                )
                 for _normalized_key, _normalized_snap in active_pool.items()
                 if (
                     str(getattr(_normalized_snap, "provider", "") or "").lower()
@@ -8360,7 +8520,14 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
             _legacy_ud_pool = await db.get_all_active_underdog_snapshots_by_line()
             for _ud_key, _ud_snap in _legacy_ud_pool.items():
                 _ud_source_id = str(getattr(_ud_snap, "external_id", "") or "")
-                if _ud_source_id and _ud_source_id in _normalized_ud_source_ids:
+                _ud_source_identity = (
+                    _ud_source_id,
+                    _snapshot_event_id(_ud_snap),
+                )
+                if (
+                    _ud_source_id
+                    and _ud_source_identity in _normalized_ud_source_ids
+                ):
                     continue
                 _ud_legacy_key = (
                     str(getattr(_ud_snap, "player_name", "") or _ud_key[0] or ""),
@@ -8435,14 +8602,27 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
             """
             key, snap = item
             provider, player, stat, sport, line, _source_id = _fpr_parts(key, snap)
-            external_id = str(getattr(snap, "external_id", None) or "")
+            variant = str(
+                getattr(snap, "line_variant", "")
+                or (key[6] if len(key) >= 7 else "")
+            ).strip().lower()
+            event_id = str(
+                getattr(snap, "game_id", "")
+                or getattr(snap, "event_id", "")
+                or (key[7] if len(key) >= 8 else "")
+            ).strip()
+            external_id = str(
+                _source_id or getattr(snap, "external_id", None) or ""
+            )
             return (
                 provider,
                 sport,
                 player,
                 stat,
+                variant,
                 line,
                 external_id,
+                event_id,
             )
 
         sorted_items = sorted(active_pool.items(), key=_fpr_sort_key)
@@ -8451,7 +8631,16 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
         fpr_unique_source_ids = len({
             (
                 _fpr_parts(key, snap)[0],
-                str(getattr(snap, "external_id", None) or key[:3]),
+                _fpr_parts(key, snap)[5] or key[:3],
+                str(
+                    getattr(snap, "line_variant", "")
+                    or (key[6] if len(key) >= 7 else "")
+                ).strip().lower(),
+                str(
+                    getattr(snap, "game_id", "")
+                    or getattr(snap, "event_id", "")
+                    or (key[7] if len(key) >= 8 else "")
+                ).strip(),
             )
             for key, snap in sorted_items
         })
@@ -8526,7 +8715,19 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
         fpr_end_cursor  = min(fpr_cursor + _cursor_advanced, fpr_pool_size)
         fpr_batch_size  = len(batch_keys)
         fpr_batch_source_ids = len({
-            str(getattr(pool_snaps[key], "external_id", None) or key[:3])
+            (
+                _fpr_parts(key, pool_snaps[key])[0],
+                _fpr_parts(key, pool_snaps[key])[5] or key[:3],
+                str(
+                    getattr(pool_snaps[key], "line_variant", "")
+                    or (key[6] if len(key) >= 7 else "")
+                ).strip().lower(),
+                str(
+                    getattr(pool_snaps[key], "game_id", "")
+                    or getattr(pool_snaps[key], "event_id", "")
+                    or (key[7] if len(key) >= 8 else "")
+                ).strip(),
+            )
             for key in batch_keys
         })
         fpr_next_cursor = fpr_end_cursor % fpr_pool_size  # wraps to 0 at pool end
@@ -8611,6 +8812,31 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                     "falling back to per-prop reads: %s",
                     _fpr_bulk_results_exc,
                 )
+
+        _fpr_movement_targets = []
+        for _movement_key in batch_keys:
+            _movement_snap = pool_snaps.get(_movement_key)
+            if _movement_snap is None:
+                continue
+            (
+                _movement_provider,
+                _movement_player,
+                _movement_stat,
+                _movement_sport,
+                _movement_line,
+                _movement_source,
+            ) = _fpr_parts(_movement_key, _movement_snap)
+            _fpr_movement_targets.append((
+                _movement_provider,
+                _movement_sport,
+                _movement_player,
+                _movement_stat,
+                str(getattr(_movement_snap, "line_variant", "") or ""),
+                _snapshot_event_id(_movement_snap),
+            ))
+        _fpr_line_movement_context = await _load_line_movement_context(
+            db, _fpr_movement_targets
+        )
 
         _fpr_opportunity_rows: list[dict] = []
         _fpr_delivery_candidates: list[dict] = []
@@ -8750,6 +8976,16 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                     score=_fpr_score,
                     validation=_fpr_val,
                     hit_rates=_fpr_hits,
+                    line_movement_context=_line_movement_context_payload(
+                        _fpr_line_movement_context,
+                        _line_movement_context_key(
+                            _fpr_provider,
+                            _fpr_sport,
+                            _fpr_player,
+                            _fpr_stat,
+                            getattr(_fpr_snap, "line_variant", ""),
+                        ),
+                    ),
                 )
 
                 # FPR is a real analysis pass, not just a delivery pass.
