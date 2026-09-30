@@ -51,7 +51,7 @@ _UNDERDOG_SETTLEMENT_RESULT_SOURCES = frozenset(
     {"propline_event_results", "propline_history"}
 )
 _UNDERDOG_FINAL_PLAYER_GAME_RESULT_SOURCES = frozenset(
-    {"propline_player_games"}
+    {"propline_event_stats", "propline_player_games"}
 )
 _UNDERDOG_GRADE_RESULT_SOURCES = (
     _UNDERDOG_SETTLEMENT_RESULT_SOURCES
@@ -60,6 +60,7 @@ _UNDERDOG_GRADE_RESULT_SOURCES = (
 _PLAYER_RESULT_SOURCE_PRIORITY = {
     "propline_event_results": 30,
     "propline_history": 20,
+    "propline_event_stats": 15,
     "propline_player_games": 10,
 }
 _UNDERDOG_VOID_RESULT_SOURCES = frozenset({"propline_event_results_void"})

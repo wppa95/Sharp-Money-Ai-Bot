@@ -882,7 +882,7 @@ async def test_raw_propline_games_are_normalized_only_after_final_for_all_sports
     assert len(rows) == 1
     assert rows[0].game_id == "final-1"
     assert rows[0].actual_value == 31.0
-    assert rows[0].source == "propline_games"
+    assert rows[0].source == "propline_player_games"
     assert len(football_rows) == 1
     assert football_rows[0].game_id == "final-1"
 
@@ -925,7 +925,9 @@ async def test_raw_propline_games_match_documented_cs2_fields_without_filtering(
     assert [(row.game_id, row.actual_value) for row in rows] == [
         ("cs-final", 24.0)
     ]
-    assert client.calls == [("esports", "Counter Player", {"limit": 100})]
+    assert client.calls == [
+        ("esports", "Counter Player", {"limit": 100, "stat_type": "kills"})
+    ]
 
 
 @pytest.mark.asyncio

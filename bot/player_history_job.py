@@ -11,7 +11,10 @@ from dataclasses import asdict, is_dataclass, replace
 from types import SimpleNamespace
 from typing import Any
 
-from engine.sport_policy import canonical_sport_key
+from engine.sport_policy import (
+    canonical_sport_key,
+    is_football_related_sport,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -671,6 +674,7 @@ async def player_history_collector_job(context) -> None:
         propline_coverage_by_sport_market: dict[
             str, dict[str, dict[str, int]]
         ] = {}
+        insufficient_evidence_by_sport: dict[str, int] = {}
         budget_exhausted = False
         deadline_targets = 0
         provider_timeout_targets = 0
@@ -838,6 +842,124 @@ async def player_history_collector_job(context) -> None:
                             sport,
                             stat,
                         )
+                    # PropLine is the authoritative fallback for actual
+                    # player-game results on supported non-football sports.
+                    # Keep football on its existing provider route and never
+                    # spend PropLine quota for it in this collector.
+                    supplement = getattr(
+                        history_provider,
+                        "supplement_missing_results",
+                        None,
+                    )
+                    if (
+                        not is_football_related_sport(sport)
+                        and len(usable_rows) < 5
+                        and asyncio.iscoroutinefunction(supplement)
+                    ):
+                        from providers.propline import (
+                            _propline_raw_player_game_stat_supported,
+                            official_player_market_for,
+                        )
+
+                        has_market = bool(
+                            official_player_market_for(stat, sport=sport)
+                        )
+                        has_raw_games = bool(
+                            _propline_raw_player_game_stat_supported(sport, stat)
+                        )
+                        if has_market or has_raw_games:
+                            market = str(stat or "").strip().lower() or "unknown"
+                            propline_attempts_by_sport[sport] = (
+                                propline_attempts_by_sport.get(sport, 0) + 1
+                            )
+                            sport_markets = (
+                                propline_attempts_by_sport_market.setdefault(
+                                    sport, {}
+                                )
+                            )
+                            sport_markets[market] = (
+                                sport_markets.get(market, 0) + 1
+                            )
+                            try:
+                                remaining = target_deadline - time.monotonic()
+                                if remaining <= 0:
+                                    return timeout_status, None
+                                supplemental = await asyncio.wait_for(
+                                    supplement(
+                                        db,
+                                        player,
+                                        sport,
+                                        stat,
+                                        min_samples=5,
+                                        source_provider=source_scope(
+                                            (player, sport, stat)
+                                        ) or "Underdog",
+                                    ),
+                                    timeout=remaining,
+                                )
+                                supplemental_rows = validate_player_result_rows(
+                                    supplemental,
+                                    player_name=player,
+                                    sport=sport,
+                                    stat_type=stat,
+                                )
+                                if supplemental_rows:
+                                    usable_rows = list(usable_rows) + list(
+                                        supplemental_rows
+                                    )
+                                coverage = propline_coverage_by_sport.setdefault(
+                                    sport,
+                                    {},
+                                )
+                                coverage[market] = (
+                                    coverage.get(market, 0)
+                                    + len(supplemental_rows)
+                                )
+                                logger.info(
+                                    "player_history_collector_job: SPORT=%s "
+                                    "PLAYER=%s GAME/EVENT=%s MARKET=%s "
+                                    "PROVIDER_RESULT=%s NORMALIZED_RESULT=%d "
+                                    "STORED_EVIDENCE=pending_batch",
+                                    sport,
+                                    player,
+                                    ",".join(
+                                        str(getattr(row, "game_id", "") or "")
+                                        for row in supplemental_rows
+                                    ) or "none",
+                                    stat,
+                                    "PropLine",
+                                    len(supplemental_rows),
+                                )
+                            except asyncio.TimeoutError:
+                                logger.info(
+                                    "player_history_collector_job: "
+                                    "INSUFFICIENT_EVIDENCE sport=%s player=%s "
+                                    "market=%s reason=propline_timeout",
+                                    sport,
+                                    player,
+                                    stat,
+                                )
+                            except Exception as exc:
+                                logger.debug(
+                                    "player_history_collector_job: PropLine "
+                                    "supplement failed for %s/%s/%s: %s",
+                                    player,
+                                    sport,
+                                    stat,
+                                    exc,
+                                )
+                        else:
+                            insufficient_evidence_by_sport[sport] = (
+                                insufficient_evidence_by_sport.get(sport, 0) + 1
+                            )
+                            logger.info(
+                                "player_history_collector_job: "
+                                "INSUFFICIENT_EVIDENCE sport=%s player=%s "
+                                "market=%s reason=no_propline_player_result_route",
+                                sport,
+                                player,
+                                stat,
+                            )
                     coverage = SimpleNamespace(
                         rows=usable_rows,
                         status="usable" if usable_rows else "",
@@ -970,6 +1092,7 @@ async def player_history_collector_job(context) -> None:
             rows_by_sport.setdefault(sport, 0)
             no_result_by_sport.setdefault(sport, 0)
             propline_coverage_by_sport.setdefault(sport, {})
+            insufficient_evidence_by_sport.setdefault(sport, 0)
 
         async def write_batch(batch: list[object]) -> None:
             """Persist one completed result batch without the fetch deadline."""
@@ -1074,7 +1197,8 @@ async def player_history_collector_job(context) -> None:
              "propline_attempts_by_sport=%s "
             "propline_coverage_by_sport=%s "
             "propline_attempts_by_sport_market=%s "
-            "propline_coverage_by_sport_market=%s",
+             "propline_coverage_by_sport_market=%s "
+             "insufficient_evidence_by_sport=%s",
             ok, rows, persisted_rows, processed, rows,
             len(cycle_targets) - processed, processed,
             len(cycle_targets) - processed, failed, deadline_targets,
@@ -1086,7 +1210,7 @@ async def player_history_collector_job(context) -> None:
             ok_by_sport, rows_by_sport, no_result_by_sport,
             propline_attempts_by_sport,
             propline_coverage_by_sport, propline_attempts_by_sport_market,
-            propline_coverage_by_sport_market,
+            propline_coverage_by_sport_market, insufficient_evidence_by_sport,
         )
     except Exception as exc:
         logger.exception("player_history_collector_job: %s", exc)

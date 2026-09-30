@@ -203,6 +203,56 @@ async def test_player_history_does_not_persist_unusable_single_player_rows():
 
 
 @pytest.mark.asyncio
+async def test_nonfootball_collector_persists_propline_player_result_supplement():
+    from providers.player_stats import RawGameResult
+
+    snapshot = SimpleNamespace(
+        player_name="NBA Player",
+        sport="NBA",
+        stat_type="points",
+    )
+    db = MagicMock()
+    db.get_all_active_prop_line_history_by_line = AsyncMock(
+        return_value={("Underdog", "NBA Player", "NBA", "points"): snapshot}
+    )
+    db.upsert_player_results_bulk = AsyncMock()
+    primary_provider = MagicMock()
+    primary_provider.fetch_results = AsyncMock(return_value=[])
+    scheduled_provider = MagicMock()
+    scheduled_provider.supplement_missing_results = AsyncMock(
+        return_value=[
+            RawGameResult(
+                player_name="NBA Player",
+                sport="NBA",
+                stat_type="points",
+                game_date="2026-09-20",
+                actual_value=24.0,
+                opponent="CHI",
+                source="propline_player_games",
+                game_id="nba-event-1",
+            )
+        ]
+    )
+    context = SimpleNamespace(
+        bot_data={
+            "db": db,
+            "player_history_provider": scheduled_provider,
+        }
+    )
+
+    with patch(
+        "providers.player_stats.PlayerStatsProvider",
+        return_value=primary_provider,
+    ):
+        await player_history_collector_job(context)
+
+    scheduled_provider.supplement_missing_results.assert_awaited_once()
+    saved = db.upsert_player_results_bulk.await_args.args[0]
+    assert [row.game_id for row in saved] == ["nba-event-1"]
+    assert saved[0].source == "propline_player_games"
+
+
+@pytest.mark.asyncio
 async def test_history_collector_never_calls_scheduled_propline_history():
     snapshot = SimpleNamespace(
         player_name="CS Player",

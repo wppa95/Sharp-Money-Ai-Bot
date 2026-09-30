@@ -633,16 +633,64 @@ class PlayerHistoryProvider:
             self._supplement_cache[key] = []
             return []
 
+        # Do not spend PropLine quota on a guessed market. Raw player-game
+        # support is also valid for documented raw-only sports such as golf.
+        # A missing capability is an explicit evidence gap, not a reason to
+        # infer a player result from odds or team scores.
+        has_market = True
+        try:
+            from providers.propline import (
+                _propline_raw_player_game_stat_supported,
+                official_player_market_for,
+            )
+
+            client_for_capability = self._propline_client
+            if client_for_capability is None:
+                from providers.propline import PropLineClient
+
+                client_for_capability = PropLineClient()
+            has_market = bool(
+                official_player_market_for(stat_type, sport=sport)
+            )
+            has_raw_games = bool(
+                _propline_raw_player_game_stat_supported(sport, stat_type)
+            )
+            if (
+                callable(getattr(client_for_capability, "official_sport_for", None))
+                and not has_market
+                and not has_raw_games
+            ):
+                logger.info(
+                    "PlayerHistoryProvider: INSUFFICIENT_EVIDENCE "
+                    "sport=%s player=%s market=%s reason=unsupported_propline_market",
+                    sport,
+                    player_name,
+                    stat_type,
+                )
+                self._supplement_cache[key] = []
+                return []
+        except Exception as exc:
+            logger.debug(
+                "PlayerHistoryProvider: PropLine capability check failed "
+                "%s/%s/%s: %s",
+                sport,
+                player_name,
+                stat_type,
+                exc,
+            )
+
         # Event stats are the authoritative raw box-score path.  Persist them
         # before returning so a later scan does not have to repeat the
         # provider request.  The database uniqueness constraint makes this
         # safe when a caller retries the same cycle.
-        event_stats = await self._fetch_propline_event_stats(
-            player_name,
-            sport,
-            stat_type,
-            instrumentation=instrumentation,
-        )
+        event_stats = []
+        if has_market:
+            event_stats = await self._fetch_propline_event_stats(
+                player_name,
+                sport,
+                stat_type,
+                instrumentation=instrumentation,
+            )
         event_stats_merged = _merge_game_results(existing, event_stats)
         new_event_stats = event_stats_merged[len(existing):]
         if new_event_stats:
@@ -1364,6 +1412,7 @@ class PlayerHistoryProvider:
             _normalize_stat,
             _parse_datetime,
             _propline_raw_player_game_stat_matches,
+            _team_names_match,
         )
         sport_u = str(sport or "").upper().strip()
         if not sport_u:
@@ -1385,6 +1434,7 @@ class PlayerHistoryProvider:
             official_sport,
             player_name,
             limit=100,
+            stat_type=stat_type,
         )
         if not result.succeeded or not result.complete:
             return []
@@ -1426,6 +1476,26 @@ class PlayerHistoryProvider:
             opponent = game.get("opponent")
             if opponent is None:
                 opponent = game.get("opponent_name")
+            if opponent is None:
+                team = (
+                    game.get("team")
+                    or game.get("player_team")
+                    or game.get("team_name")
+                )
+                home = (
+                    game.get("home_team")
+                    or game.get("home")
+                    or game.get("home_name")
+                )
+                away = (
+                    game.get("away_team")
+                    or game.get("away")
+                    or game.get("away_name")
+                )
+                if _team_names_match(team, home):
+                    opponent = away
+                elif _team_names_match(team, away):
+                    opponent = home
             rows.append(RawGameResult(
                 player_name=player_name,
                 sport=sport_u,
@@ -1433,9 +1503,19 @@ class PlayerHistoryProvider:
                 game_date=game_time.date().isoformat(),
                 actual_value=value,
                 opponent=str(opponent).strip() if opponent else None,
-                source="propline_games",
+                source="propline_player_games",
                 game_id=game_id,
             ))
+            logger.debug(
+                "PlayerHistoryProvider: SPORT=%s PLAYER=%s GAME/EVENT=%s "
+                "MARKET=%s PROVIDER_RESULT=%s NORMALIZED_RESULT=%.3f",
+                sport_u,
+                player_name,
+                game_id,
+                stat_type,
+                "PropLine",
+                value,
+            )
         return rows
 
 

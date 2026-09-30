@@ -1,0 +1,323 @@
+FIX THE MISSING PLAYER-RESULT EVIDENCE COVERAGE — IMPLEMENTATION ONLY
+
+Do not perform an audit. Do not give me an audit report. Make the required code changes.
+
+OBJECTIVE
+
+Fix the missing-evidence problem across supported non-MLB sports by making PropLine player-game/result data the authoritative source for actual player performance results.
+
+Do NOT re-enable The Odds API.
+
+Do NOT estimate player results from team scores, bookmaker odds, lines, projections, or other indirect data.
+
+Do NOT replace or rewrite the existing grading pipeline.
+
+PRESERVE EXISTING MLB BEHAVIOR.
+
+USE THE EXISTING DATABASE AND EXISTING PROP/RUN/GRADING ARCHITECTURE.
+
+==================================================
+1. USE PROP LINE PLAYER RESULTS AS ACTUAL EVIDENCE
+==================================================
+
+The project already has PropLine player-history/player-game parsing and the existing `propline_player_games` infrastructure.
+
+Extend and complete that implementation so supported sports consistently obtain actual player-game results.
+
+For each supported sport/league where PropLine provides player-game/result data:
+
+- Fetch the actual completed player-game result.
+- Resolve the player identity.
+- Resolve the sport/league.
+- Resolve the team.
+- Resolve opponent when available.
+- Resolve the event/game/match identity.
+- Resolve the game date/time.
+- Resolve the player stat category.
+- Resolve the exact final stat value.
+- Normalize the result into the existing SQLite history structure.
+- Make the normalized result available to the existing grading/evidence system.
+
+The final player statistic must be explicit.
+
+Examples:
+
+NBA:
+player → points/rebounds/assists/etc. → final value
+
+WNBA:
+player → points/rebounds/assists/etc. → final value
+
+NHL:
+player → shots/goals/assists/etc. → final value
+
+MLB:
+preserve the existing working behavior.
+
+Tennis:
+player → match/event → applicable player statistic → final value
+
+Esports:
+player → match/map/event → applicable player statistic → final value
+
+And the same principle for every other supported sport where PropLine provides an authoritative player-game/result record.
+
+Do not assume every sport has the same stat schema. Normalize according to the actual PropLine response.
+
+==================================================
+2. COMPLETE THE SPORT → PLAYER → EVENT → MARKET IDENTITY CHAIN
+==================================================
+
+The evidence lookup must not simply search by player name.
+
+For every observed prop, establish as much of this identity chain as the available data supports:
+
+sport
+→ league
+→ player
+→ team
+→ opponent
+→ event/game/match
+→ event start time/date
+→ market/stat type
+→ actual player result
+
+Use stable IDs from PropLine whenever available.
+
+Do not rely on display-name matching when a stable identifier exists.
+
+Handle name variations, team changes, abbreviations, and league naming differences through the existing normalization layer.
+
+The same player name appearing in multiple sports/leagues/events must never cause unrelated historical results to be attached to a prop.
+
+==================================================
+3. MATCH OBSERVED PROPS TO PLAYER RESULTS
+==================================================
+
+When grading an observed Underdog or PrizePicks prop:
+
+1. Identify sport/league.
+2. Identify player.
+3. Identify team/opponent.
+4. Identify event/game/match.
+5. Identify market/stat.
+6. Search normalized SQLite player-game history.
+7. Match the historical/result record to the correct player/event/stat.
+8. Require an explicit final player-stat value.
+9. Only then allow the existing grading system to determine HIT/MISS/PUSH.
+
+Do NOT grade from:
+
+- team score
+- bookmaker odds
+- sportsbook line alone
+- projection
+- implied probability
+- player average
+- median
+- trend
+- estimated result
+- missing/null result
+- inferred stat from another player's data
+
+Those may be evidence/context where already supported, but they are NOT a settlement result.
+
+==================================================
+4. PERSIST EVERYTHING INTO EXISTING SQLITE HISTORY
+==================================================
+
+Use the existing SQLite schema and existing persistence layer.
+
+Do not create a second competing history database.
+
+Persist normalized PropLine player-game results so they can be reused by:
+
+- grading
+- history
+- hit/miss/push resolution
+- evidence checks
+- directional analysis
+- qualification
+- auto-slip eligibility
+- Telegram commands that already read SQLite
+
+Prevent duplicate records using the existing identifiers where possible.
+
+If the existing schema lacks a required identity field, make the smallest compatible schema migration necessary.
+
+Do not destroy existing data.
+
+==================================================
+5. COVERAGE ACROSS ALL SUPPORTED NON-MLB SPORTS
+==================================================
+
+The current problem is incomplete coverage.
+
+Do not hard-code only NBA/WNBA/tennis as a fix.
+
+Use the project's configured supported-sports universe and make the PropLine player-result ingestion generic enough to process every supported sport for which PropLine actually exposes player-game/result data.
+
+Football remains excluded.
+
+Do not:
+
+- fetch NFL/NCAAF player results
+- call PropLine football markets
+- grade football
+- resolve football
+- create football history
+- use football evidence
+
+If PropLine does not provide the required player-result evidence for a particular sport/market, mark it as:
+
+INSUFFICIENT_EVIDENCE
+
+Do not estimate or fabricate a result.
+
+==================================================
+6. EXISTING GRADING PIPELINE
+==================================================
+
+Keep the existing pipeline intact:
+
+OBSERVED
+→ NORMALIZED
+→ STORED
+→ EVALUATION_ELIGIBLE
+→ EVALUATED
+→ EVIDENCE_CHECK / HISTORY / HIT RATE CHECK
+→ ANALYZED
+→ DIRECTIONAL
+→ QUALIFIED
+→ ACTIONABLE
+→ ALERT_CREATED
+→ DELIVERY_ELIGIBLE
+→ TELEGRAM_SENT
+
+The new player-result evidence must feed into this existing pipeline.
+
+Do not create a second grading engine.
+
+Do not bypass evidence checks.
+
+Do not weaken the current auto-slip gate just to increase the number of qualifying props.
+
+==================================================
+7. EVIDENCE GATE
+==================================================
+
+A prop cannot become gradeable merely because a player exists in history.
+
+The system must have:
+
+- correct sport
+- correct player
+- correct event/game/match when available
+- correct market/stat identity
+- explicit actual player result
+
+before treating the result as trusted settlement evidence.
+
+If any required identity component cannot be safely resolved, do not guess.
+
+Mark the evidence as insufficient and keep the prop from being falsely graded.
+
+==================================================
+8. PROP LINE ENDPOINT USAGE
+==================================================
+
+Continue using the existing PropLine Pro integration and existing endpoint architecture.
+
+Use the available PropLine player-game/result/history endpoints necessary to populate actual player performance history.
+
+Do NOT use the single-player stat endpoint that was intentionally excluded because of unnecessary credit consumption.
+
+Do NOT introduce unnecessary high-frequency calls.
+
+Reuse cached/stored player-game results whenever possible.
+
+Avoid fetching the same completed game repeatedly.
+
+Use the existing PropLine scheduler/rate-control architecture.
+
+==================================================
+9. MLB
+==================================================
+
+Do not redesign or replace the existing MLB result/grading behavior.
+
+Preserve the current working MLB pipeline.
+
+The implementation should improve non-MLB evidence coverage without breaking MLB.
+
+==================================================
+10. ODDS API
+==================================================
+
+The Odds API remains disabled.
+
+Do not re-enable it.
+
+Do not add network calls to The Odds API.
+
+Do not use Odds API data as a substitute for actual player-result evidence.
+
+==================================================
+11. REQUIRED DEBUG/VALIDATION OUTPUT
+==================================================
+
+After implementation, add enough structured logging/debug information to determine:
+
+- PropLine player-result fetch attempted
+- sport
+- league
+- player
+- event/game/match ID
+- result record found/not found
+- stat category
+- final player stat value
+- normalized result stored/not stored
+- duplicate skipped
+- evidence matched/not matched
+- reason for INSUFFICIENT_EVIDENCE
+
+Do not spam Telegram.
+
+These diagnostics should be available through the existing application logs/database diagnostics.
+
+==================================================
+12. ACCEPTANCE CRITERIA
+==================================================
+
+The fix is complete only when:
+
+1. Existing MLB behavior still works.
+2. Non-MLB supported sports can populate actual player-game results when PropLine provides them.
+3. Results are persisted into the existing SQLite history.
+4. The same result can be reused by the grader instead of repeatedly refetching it.
+5. Player identity is correctly associated with the event/game/match.
+6. Stat identity is correctly associated with the actual result.
+7. HIT/MISS/PUSH is only determined when an explicit player result exists.
+8. Team scores and bookmaker odds cannot be mistaken for player results.
+9. Unsupported/insufficient sport-market combinations become INSUFFICIENT_EVIDENCE instead of being estimated.
+10. Football remains completely excluded.
+11. The Odds API remains disabled.
+12. No duplicate grading system is introduced.
+13. No existing MLB grading behavior is removed or degraded.
+14. Existing SQLite history remains intact.
+15. Existing Telegram commands continue reading stored SQLite data rather than making live grading/evidence API calls.
+
+IMPLEMENT THIS NOW.
+
+After making the changes, report only:
+
+- files changed
+- database migrations made, if any
+- PropLine result endpoints actually wired into the existing pipeline
+- how player/event/stat identity matching now works
+- how non-MLB results reach the existing grader
+- validation performed
+- any remaining sport/market combinations that PropLine genuinely cannot provide sufficient player-result evidence for
+
+Do not modify unrelated functionality.
+Do not perform an audit instead of implementing the fix.
