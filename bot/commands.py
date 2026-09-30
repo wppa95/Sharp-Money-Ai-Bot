@@ -3487,6 +3487,39 @@ def _build_auto_slips_by_sport(
     return slips, {sport: len(rows) for sport, rows in sorted(grouped.items())}
 
 
+def _auto_slip_evidence_status(
+    results: list[Any],
+    *,
+    target_game_id: Optional[str] = None,
+) -> tuple[bool, bool]:
+    """Return whether prior history and gradeable result-source coverage exist."""
+    unusable_history_sources = {"", "graded_prop", "manual", "unknown"}
+    usable_rows = []
+    expected_game_id = str(target_game_id or "").strip()
+
+    for result in results or []:
+        if getattr(result, "actual_value", None) is None:
+            continue
+        source = str(getattr(result, "source", "") or "").strip().casefold()
+        if source in unusable_history_sources:
+            continue
+        result_game_id = str(getattr(result, "game_id", "") or "").strip()
+        if expected_game_id and result_game_id == expected_game_id:
+            continue
+        usable_rows.append(result)
+
+    has_prior_history = bool(usable_rows)
+    has_gradeable_coverage = any(
+        str(getattr(result, "game_id", "") or "").strip()
+        and is_gradeable_player_result_source(
+            "Underdog",
+            getattr(result, "source", None),
+        )
+        for result in usable_rows
+    )
+    return has_prior_history, has_gradeable_coverage
+
+
 async def cmd_slip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """/slip — Build correlation-aware prop slips (2–6 legs) from live market props.
 
@@ -3760,6 +3793,8 @@ async def cmd_slip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         _slip_results_by_key = {}
 
     _slip_ineligible = 0
+    _slip_no_history = 0
+    _slip_no_result_coverage = 0
     _eligible_slip_entries: list[
         tuple[PropPickAdapter, Any, Any]
     ] = []
@@ -3786,6 +3821,28 @@ async def cmd_slip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
                 _history_exc,
             )
             _history = None
+        if isinstance(_slip_build_capture, dict):
+            _has_prior_history, _has_gradeable_coverage = (
+                _auto_slip_evidence_status(
+                    _results,
+                    target_game_id=getattr(_plh, "game_id", None),
+                )
+            )
+            if not _has_prior_history or not _has_gradeable_coverage:
+                _slip_ineligible += 1
+                if not _has_prior_history:
+                    _slip_no_history += 1
+                if not _has_gradeable_coverage:
+                    _slip_no_result_coverage += 1
+                logger.debug(
+                    "cmd_slip: excluding auto-slip candidate %s/%s — "
+                    "prior_history=%s gradeable_result_coverage=%s",
+                    _cand.player_name,
+                    _cand.stat_type,
+                    _has_prior_history,
+                    _has_gradeable_coverage,
+                )
+                continue
         if (
             _direction not in ("OVER", "UNDER")
             or not has_qualifying_directional_pick(
@@ -3805,9 +3862,13 @@ async def cmd_slip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         _eligible_slip_entries.append((_cand, _plh, _history))
     if _slip_ineligible:
         logger.info(
-            "cmd_slip: filtered %d ineligible candidates (direction/history threshold); "
-            "%d eligible remain",
-            _slip_ineligible, len(_eligible_slip_entries),
+            "cmd_slip: filtered %d ineligible candidates "
+            "(direction/history threshold; auto-slip missing-history=%d "
+            "missing-result-coverage=%d); %d eligible remain",
+            _slip_ineligible,
+            _slip_no_history,
+            _slip_no_result_coverage,
+            len(_eligible_slip_entries),
         )
     _candidates = _order_slip_candidates_by_sport(_eligible_slip_entries)
 

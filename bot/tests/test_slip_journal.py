@@ -495,7 +495,7 @@ class TestSlipSubcommandRouting:
             confidence=None,
             external_id="canonical-123",
             game_id="canonical-game",
-            game_time=now + timedelta(hours=2),
+            game_time=now + timedelta(hours=1),
             detected_at=now,
             alert_sent_at=now,
             result="PENDING",
@@ -541,6 +541,58 @@ class TestSlipSubcommandRouting:
         assert len(candidates) == 1
         msg = update.message.reply_text.call_args[0][0]
         assert "not enough" in msg.lower()
+
+        ctx._slip_build_capture = {}
+        with (
+            patch("commands._db", SlipDB()),
+            patch(
+                "engine.slip_builder.build_all_slips",
+                return_value={},
+            ),
+            patch(
+                "engine.player_prop_market.build_player_prop_market_comparison",
+                return_value=None,
+            ),
+            patch("commands._is_active_display_sport", return_value=True),
+            patch("commands._is_upcoming_game", return_value=True),
+            patch("reporting.is_current_reporting_day", return_value=True),
+        ):
+            await cmd_slip(update, ctx)
+
+        assert ctx._slip_build_capture["candidate_count"] == 0
+
+        class CoveredSlipDB(SlipDB):
+            async def get_player_results_bulk(self, requested, **kwargs):
+                return {
+                    ("Canonical A", "TENNIS", "points"): [
+                        SimpleNamespace(
+                            actual_value=21,
+                            game_date=now - timedelta(days=1),
+                            opponent="OPP",
+                            source="propline_player_games",
+                            game_id="previous-game",
+                        )
+                    ]
+                }
+
+        ctx._slip_build_capture = {}
+        with (
+            patch("commands._db", CoveredSlipDB()),
+            patch(
+                "engine.slip_builder.build_all_slips",
+                return_value={},
+            ),
+            patch(
+                "engine.player_prop_market.build_player_prop_market_comparison",
+                return_value=None,
+            ),
+            patch("commands._is_active_display_sport", return_value=True),
+            patch("commands._is_upcoming_game", return_value=True),
+            patch("reporting.is_current_reporting_day", return_value=True),
+        ):
+            await cmd_slip(update, ctx)
+
+        assert ctx._slip_build_capture["candidate_count"] == 1
 
 
 # ═══════════════════════════════════════════════════════════════════════════

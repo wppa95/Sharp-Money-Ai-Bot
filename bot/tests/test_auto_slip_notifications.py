@@ -77,6 +77,35 @@ def test_slip_candidate_order_uses_directional_evidence_per_sport():
     ]
 
 
+def test_auto_slip_requires_prior_history_and_gradeable_result_coverage():
+    from commands import _auto_slip_evidence_status
+
+    prior_api_history = SimpleNamespace(
+        actual_value=18.0,
+        source="espn_gamelog",
+        game_id="previous-game",
+    )
+    gradeable_history = SimpleNamespace(
+        actual_value=20.0,
+        source="propline_player_games",
+        game_id="covered-game",
+    )
+    untrusted_history = SimpleNamespace(
+        actual_value=20.0,
+        source="manual",
+        game_id="manual-game",
+    )
+
+    assert _auto_slip_evidence_status([]) == (False, False)
+    assert _auto_slip_evidence_status([prior_api_history]) == (True, False)
+    assert _auto_slip_evidence_status([gradeable_history]) == (True, True)
+    assert _auto_slip_evidence_status([untrusted_history]) == (False, False)
+    # A row for the exact upcoming event is not prior-history coverage.
+    assert _auto_slip_evidence_status(
+        [gradeable_history], target_game_id="covered-game"
+    ) == (False, False)
+
+
 @pytest.mark.asyncio
 async def test_auto_slip_notification_claim_is_durable_and_idempotent():
     from database import Database
