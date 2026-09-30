@@ -1,0 +1,52 @@
+📊 Player Prop Grades
+
+🧾 ALL TRACKED PROP LINES
+  Distinct tracked lines: 264,717
+  Pending: 249,523 · Resolved: 15,194 · Source-verified: 15,194 · Unverified: 0
+  Above line: 5,914 · Below line: 9,196 · Push: 4 · Void/other: 80
+  Above-line rate: 39.1% (HIT / (HIT + MISS + PUSH), n=15,114)
+  For neutral rows, HIT/MISS means above/below the line, not a recommended pick.
+  By provider
+    Underdog: 231,804 lines · 5,773 above / 9,001 below / 0 push · 216,995 pending
+    PrizePicks: 32,065 lines · 107 above / 148 below / 4 push · 31,763 pending
+    FanDuel: 500 lines · 32 above / 45 below / 0 push · 421 pending
+    DraftKings: 348 lines · 2 above / 2 below / 0 push · 344 pending
+  By sport
+    MLB: 71,162 lines · 56,690 pending · 14,472 verified · 0 unverified
+    NFL: 54,810 lines · 54,749 pending · 61 verified · 0 unverified
+    CFB: 44,837 lines · 44,837 pending · 0 verified · 0 unverified
+    TENNIS: 27,972 lines · 27,960 pending · 12 verified · 0 unverified
+    WNBA: 17,613 lines · 17,522 pending · 91 verified · 0 unverified
+    FIFA: 10,586 lines · 10,586 pending · 0 verified · 0 unverified
+    CS: 8,174 lines · 8,174 pending · 0 verified · 0 unverified
+    MLS: 6,581 lines · 6,581 pending · 0 verified · 0 unverified
+    Other 32 sports: 22,982 lines
+
+─ Directional Picks (OVER/UNDER) ───
+  Stored directional picks: 69122
+  13059 verified outcomes  W:8388  L:4671  P:0  → hit rate 64% (HIT/(HIT+MISS+PUSH), n=13059)
+  Pending: 45318 · Unverified: 10745 (excluded from hit rate)
+  Cross-checked against exact tracked lines: 13044
+  Corroborated by exact PropLine result rows: 16
+Source-less grades are corroborated only by exact auto-grade tracking matches or PropLine results matching event, player, sport, stat, actual value, and direction. Bot-generated grades are not evidence. Neutral tracking results are mapped through OVER/UNDER. Tracked-line and pick totals are separate populations and may overlap. Pushes count in the denominator.
+
+─ By Provider ───────────────
+  PrizePicks: 10H / 6M / 0P · 394 pending · 0 unverified · 62% (n=16) · 1 tracked-line matches · 16 exact PropLine result matches
+  Underdog: 8378H / 4665M / 0P · 44924 pending · 10745 unverified · 64% (n=13043) · 13043 tracked-line matches
+
+─ By Sport ──────────────────
+  CFB: 1169 picks · 0H/0M/0P · 1169 pending · 0 unverified · — (n=0)
+  CS: 557 picks · 0H/0M/0P · 557 pending · 0 unverified · — (n=0)
+  DOTA: 238 picks · 9H/2M/0P · 220 pending · 7 unverified · 82% (n=11) · 11 tracked-line matches
+  LIGUE1: 1 picks · 1H/0M/0P · 0 pending · 0 unverified · 100% (n=1) · 1 tracked-line matches · 1 exact PropLine result matches
+  LOL: 48 picks · 0H/0M/0P · 48 pending · 0 unverified · — (n=0)
+  MLB: 59161 picks · 8358H/4657M/0P · 35524 pending · 10622 unverified · 64% (n=13015) · 13015 tracked-line matches
+  MMA: 13 picks · 0H/0M/0P · 13 pending · 0 unverified · — (n=0)
+  NBA: 106 picks · 0H/0M/0P · 106 pending · 0 unverified · — (n=0)
+  NFL: 5143 picks · 13H/6M/0P · 5036 pending · 88 unverified · 68% (n=19) · 17 tracked-line matches · 2 exact PropLine result matches
+  NHL: 1469 picks · 0H/0M/0P · 1469 pending · 0 unverified · — (n=0)
+  NPB: 2 picks · 0H/0M/0P · 2 pending · 0 unverified · — (n=0)
+  SERIEA: 1 picks · 1H/0M/0P · 0 pending · 0 unverified · 100% (n=1) · 1 exact PropLine result matches
+  TENNIS: 168 picks · 1H/0M/0P · 167 pending · 0 unverified · 100% (n=1) · 1 exact PropLine result matches
+  VAL: 20 picks · 0H/0M/0P · 20 pending · 0 unverified · — (n=0)
+  WNBA: 1026 picks · 5H/6M/0P · 987 pending · 28 unverified · 45% (n=11) · 11 exact PropLine result matches
