@@ -93,6 +93,12 @@ class PlayerHitRates:
     h2h_l5: Optional[WindowStats] = None
     h2h_l10: Optional[WindowStats] = None
     h2h_l20: Optional[WindowStats] = None
+    # Most-recent settled actuals, retained for evidence display only. These
+    # values do not participate in direction or qualification calculations.
+    recent_values: tuple[float, ...] = ()
+    # Actual results for every available displayed sample window, newest first.
+    # Keys include l5/l10/l15/l20/l30/season and the corresponding h2h windows.
+    sample_values: tuple[tuple[str, tuple[float, ...]], ...] = ()
 
 
 # ── Computation ───────────────────────────────────────────────────────────────
@@ -168,6 +174,18 @@ def compute_hit_rates(
             average     = round(avg, 2),
         )
 
+    def _window_values(
+        subset: list,
+        stats: Optional[WindowStats],
+    ) -> tuple[float, ...]:
+        if stats is None:
+            return ()
+        return tuple(
+            float(row.actual_value)
+            for row in subset
+            if row.actual_value is not None
+        )
+
     l5_stats  = _window_stats(sorted_results[:5], 5)
     l10_stats = _window_stats(sorted_results[:10], 10)
     l15_stats = _window_stats(sorted_results[:15], 15)
@@ -190,6 +208,27 @@ def compute_hit_rates(
         h2h_l5_stats = _window_stats(h2h_subset[:5], 5)
         h2h_l10_stats = _window_stats(h2h_subset[:10], 10)
         h2h_l20_stats = _window_stats(h2h_subset[:20], 20)
+
+    sample_values = {
+        "l5": _window_values(sorted_results[:5], l5_stats),
+        "l10": _window_values(sorted_results[:10], l10_stats),
+        "l15": _window_values(sorted_results[:15], l15_stats),
+        "l20": _window_values(sorted_results[:20], l20_stats),
+        "l30": _window_values(sorted_results[:30], l30_stats),
+        "season": _window_values(sorted_results, season_stats),
+        "h2h_l5": _window_values(
+            h2h_subset[:5] if opponent else [], h2h_l5_stats
+        ),
+        "h2h_l10": _window_values(
+            h2h_subset[:10] if opponent else [], h2h_l10_stats
+        ),
+        "h2h_l20": _window_values(
+            h2h_subset[:20] if opponent else [], h2h_l20_stats
+        ),
+        "h2h": _window_values(
+            h2h_subset if opponent else [], h2h_stats
+        ),
+    }
 
     # Determine player_name / stat_type from first record
     first = sorted_results[0]
@@ -238,6 +277,16 @@ def compute_hit_rates(
         h2h_l5       = h2h_l5_stats,
         h2h_l10      = h2h_l10_stats,
         h2h_l20      = h2h_l20_stats,
+        recent_values=tuple(
+            float(row.actual_value)
+            for row in sorted_results[:5]
+            if row.actual_value is not None
+        ),
+        sample_values=tuple(
+            (window, values)
+            for window, values in sample_values.items()
+            if values
+        ),
     )
 
 

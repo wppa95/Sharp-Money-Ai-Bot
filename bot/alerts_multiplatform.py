@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from html import escape
+import math
 import re
 from typing import Optional
 
@@ -596,20 +597,64 @@ def _format_history_block(
 
     l30_games = _numeric_attr(decision, "l30_games")
     windows = (
-        ("L5", "l5_hit_rate", "l5_games", "l5_over"),
-        ("L10", "l10_hit_rate", "l10_games", "l10_over"),
-        ("L15", "l15_hit_rate", "l15_games", "l15_over"),
-        ("L20", "l20_hit_rate", "l20_games", "l20_over"),
-        ("L30", "l30_hit_rate", "l30_games", "l30_over"),
-        ("Season", "season_hit_rate", "season_games", "season_over"),
-        ("H2H L5", "h2h_l5_hit_rate", "h2h_l5_games", "h2h_l5_over"),
-        ("H2H L10", "h2h_l10_hit_rate", "h2h_l10_games", "h2h_l10_over"),
-        ("H2H L20", "h2h_l20_hit_rate", "h2h_l20_games", "h2h_l20_over"),
-        ("H2H", "h2h_hit_rate", "h2h_games", "h2h_over"),
+        ("L5", "l5", "l5_hit_rate", "l5_games", "l5_over"),
+        ("L10", "l10", "l10_hit_rate", "l10_games", "l10_over"),
+        ("L15", "l15", "l15_hit_rate", "l15_games", "l15_over"),
+        ("L20", "l20", "l20_hit_rate", "l20_games", "l20_over"),
+        ("L30", "l30", "l30_hit_rate", "l30_games", "l30_over"),
+        ("Season", "season", "season_hit_rate", "season_games", "season_over"),
+        ("H2H L5", "h2h_l5", "h2h_l5_hit_rate", "h2h_l5_games", "h2h_l5_over"),
+        ("H2H L10", "h2h_l10", "h2h_l10_hit_rate", "h2h_l10_games", "h2h_l10_over"),
+        ("H2H L20", "h2h_l20", "h2h_l20_hit_rate", "h2h_l20_games", "h2h_l20_over"),
+        ("H2H", "h2h", "h2h_hit_rate", "h2h_games", "h2h_over"),
     )
     rows: list[str] = []
     h2h_rendered = False
-    for label, rate_name, games_name, over_name in windows:
+    actuals_source = decision if decision is not None else validation
+    if isinstance(actuals_source, dict):
+        raw_recent_values = actuals_source.get("recent_values")
+        raw_sample_values = actuals_source.get("sample_values")
+    else:
+        raw_recent_values = getattr(actuals_source, "recent_values", None)
+        raw_sample_values = getattr(actuals_source, "sample_values", None)
+
+    def _format_actuals(raw_values: object) -> list[str]:
+        rendered: list[str] = []
+        if isinstance(raw_values, (list, tuple)):
+            for raw_value in raw_values:
+                if isinstance(raw_value, bool):
+                    continue
+                try:
+                    numeric_value = float(raw_value)
+                except (TypeError, ValueError):
+                    continue
+                if not math.isfinite(numeric_value):
+                    continue
+                rendered.append(
+                    f"{numeric_value:.2f}".rstrip("0").rstrip(".")
+                )
+        return rendered
+
+    recent_actuals = _format_actuals(raw_recent_values[:5] if isinstance(
+        raw_recent_values, (list, tuple)
+    ) else ())
+    if isinstance(raw_sample_values, dict):
+        sample_values = raw_sample_values
+    elif isinstance(raw_sample_values, (list, tuple)):
+        sample_values = {
+            str(item[0]): item[1]
+            for item in raw_sample_values
+            if (
+                isinstance(item, (list, tuple))
+                and len(item) == 2
+                and isinstance(item[0], str)
+            )
+        }
+    else:
+        sample_values = {}
+
+    sample_values_rendered = False
+    for label, values_key, rate_name, games_name, over_name in windows:
         rate = _numeric_attr(decision, rate_name)
         games = _numeric_attr(decision, games_name)
         over = _numeric_attr(decision, over_name)
@@ -622,9 +667,20 @@ def _format_history_block(
             value = f"{rate:.0%} ({int(over)}/{int(games)})"
         else:
             value = f"{rate:.0%} ({int(games)} games)"
+        actuals = _format_actuals(sample_values.get(values_key))
+        if values_key == "l5" and not actuals:
+            actuals = recent_actuals
+        if actuals:
+            value = f"{', '.join(actuals)} · {value}"
+            sample_values_rendered = True
         rows.append(f"   <b>{shown_label}:</b> {value}")
         if label == "H2H":
             h2h_rendered = True
+
+    if recent_actuals and not sample_values_rendered:
+        rows.append(
+            f"   <b>Recent actuals:</b> {', '.join(recent_actuals)}"
+        )
 
     # Compatibility delivery callers may provide a validated history snapshot
     # without a fully materialized UDBetDecision.  Keep the alert historical

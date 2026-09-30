@@ -111,6 +111,7 @@ def _hit_rates(
     season_n: int | None = None, season_r: float | None = None,
     h2h_n: int | None = None,   h2h_r: float | None = None,
     current_line: float = 25.5,
+    recent_values: tuple[float, ...] = (),
 ) -> PlayerHitRates:
     def _w(n, r):
         return _make_window(n, r) if n is not None and r is not None else None
@@ -128,6 +129,7 @@ def _hit_rates(
         h2h           = _w(h2h_n, h2h_r),
         has_real_data = has_real_data,
         total_games   = total_games,
+        recent_values = recent_values,
     )
 
 
@@ -547,6 +549,21 @@ class TestSerialization:
         assert isinstance(blob["conf"], int)
         assert blob["evidence_source"] == "settled_results"
         assert blob["evidence_label"] == "Settled player-game results"
+
+    def test_to_json_stores_recent_actual_values(self):
+        hr = _hit_rates(
+            l5_r=0.80,
+            l10_r=0.70,
+            recent_values=(10.0, 14.0, 17.0, 12.0, 8.0),
+        )
+        decision = make_ud_bet_decision(
+            _score(), _validation(), 25.5, hit_rates=hr
+        )
+
+        blob = json.loads(decision.to_json())
+
+        assert blob["recent_values"] == [10.0, 14.0, 17.0, 12.0, 8.0]
+        assert blob["recent_values_window"] == "L5"
 
     def test_to_json_l5_sub_dict(self):
         hr   = _hit_rates(l5_r=0.80, l10_r=0.70)

@@ -441,6 +441,37 @@ def test_history_uses_sample_label_for_short_season_window():
     assert "<b>Season:</b>" not in result
 
 
+def test_history_includes_recent_actual_result_values():
+    from alerts_multiplatform import _format_history_block
+    import types
+
+    decision = types.SimpleNamespace(
+        recent_values=(10, 14, 17, 12, 8),
+        l5_games=5,
+        l5_over=5,
+        l5_hit_rate=1.0,
+        l10_games=None,
+        l10_over=None,
+        l10_hit_rate=None,
+        l15_games=None,
+        l15_over=None,
+        l15_hit_rate=None,
+        l20_games=None,
+        l20_over=None,
+        l20_hit_rate=None,
+        l30_games=None,
+        l30_over=None,
+        l30_hit_rate=None,
+        h2h_games=None,
+        h2h_over=None,
+        h2h_hit_rate=None,
+    )
+
+    result = _format_history_block(decision)
+
+    assert "<b>L5:</b> 10, 14, 17, 12, 8 · 100% (5/5)" in result
+
+
 def test_alert_history_includes_h2h_window_from_decision():
     from alerts_multiplatform import format_underdog_change_alert
     import types

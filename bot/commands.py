@@ -2801,6 +2801,11 @@ async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
         if has_evidence:
             evid: list[str] = []
+            _recent_l5_values = ", ".join(
+                f"{float(value):g}"
+                for value in (getattr(hr, "recent_values", ()) or ())[:5]
+                if isinstance(value, (int, float)) and not isinstance(value, bool)
+            )
             for _wlbl, _ws in [
                 ("L5",     hr.l5),
                 ("L10",    hr.l10),
@@ -2809,10 +2814,16 @@ async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
                 ("Season", hr.season),
             ]:
                 if _ws and _ws.games >= 3:
-                    evid.append(
-                        f"  {_wlbl:<7} {_ws.over_count}/{_ws.games}"
+                    _summary = (
+                        f"{_ws.over_count}/{_ws.games}"
                         f" ({_ws.hit_rate:.0%})  avg {_ws.average:.1f}"
                     )
+                    if _wlbl == "L5" and _recent_l5_values:
+                        evid.append(
+                            f"  {_wlbl:<7} {_recent_l5_values} · {_summary}"
+                        )
+                    else:
+                        evid.append(f"  {_wlbl:<7} {_summary}")
 
             if evid:
                 entry_lines.append("")

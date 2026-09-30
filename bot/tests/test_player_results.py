@@ -80,6 +80,7 @@ class TestComputeHitRates:
         assert hr.l5.over_count == 3
         assert hr.l5.under_count == 2
         assert abs(hr.l5.hit_rate - 0.6) < 0.01
+        assert hr.recent_values == (3.0, 1.0, 3.0, 2.0, 3.0)
         assert hr.season is not None
         assert hr.season.games == 5
 

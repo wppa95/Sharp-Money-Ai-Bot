@@ -151,6 +151,9 @@ class UDBetDecision:
     # What supplied the direction. A pick can retain settled windows while
     # using the validated historical-average fallback.
     evidence_source: Optional[str] = None
+    # Recent actual player results are display/persistence evidence only.
+    recent_values: tuple[float, ...] = ()
+    sample_values: tuple[tuple[str, tuple[float, ...]], ...] = ()
 
     # ── Constructors ─────────────────────────────────────────────────────────
 
@@ -172,6 +175,12 @@ class UDBetDecision:
             avg_vs_line_pct    = avg_vs_line_pct,
             at_historical_low  = at_historical_low,
             evidence_source    = None,
+            recent_values      = tuple(
+                getattr(hit_rates, "recent_values", ()) or ()
+            ),
+            sample_values      = tuple(
+                getattr(hit_rates, "sample_values", ()) or ()
+            ),
             **w,
         )
 
@@ -240,6 +249,12 @@ class UDBetDecision:
                     else None
                 )
             ),
+            recent_values      = tuple(
+                getattr(hit_rates, "recent_values", ()) or ()
+            ),
+            sample_values      = tuple(
+                getattr(hit_rates, "sample_values", ()) or ()
+            ),
             **w,
         )
 
@@ -294,6 +309,12 @@ class UDBetDecision:
                 "conf": self.confidence or 0,
                 "evidence_source": self.evidence_source,
                 "evidence_label": self.evidence_source_display(),
+                "recent_values": list(self.recent_values),
+                "recent_values_window": "L5",
+                "sample_values": {
+                    str(window): list(values)
+                    for window, values in self.sample_values
+                },
                 "l5":   {"g": self.l5_games, "o": self.l5_over, "r": _r(self.l5_hit_rate), "avg": _r(self.l5_avg)},
                 "l10":  {"g": self.l10_games, "o": self.l10_over, "r": _r(self.l10_hit_rate), "avg": _r(self.l10_avg)},
                 "l15":  {"g": self.l15_games, "o": self.l15_over, "r": _r(self.l15_hit_rate), "avg": _r(self.l15_avg)},

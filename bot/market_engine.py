@@ -115,8 +115,13 @@ def _snapshot_event_id(snapshot) -> str:
     """Return the provider event identity from any supported snapshot shape."""
     for attr in ("event", "game_id", "event_id", "match_id"):
         value = getattr(snapshot, attr, None)
-        if value is not None and str(value).strip():
-            return str(value).strip()
+        # Provider event identifiers are strings or numeric IDs. Reject
+        # arbitrary mock/object attributes so a test double's repr cannot
+        # become a false event identity and split source deduplication.
+        if isinstance(value, (str, int)) and not isinstance(value, bool):
+            normalized = str(value).strip()
+            if normalized:
+                return normalized
     return ""
 
 

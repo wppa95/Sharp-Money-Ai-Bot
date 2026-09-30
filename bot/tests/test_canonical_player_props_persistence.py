@@ -128,7 +128,8 @@ async def test_same_source_variants_keep_separate_history_and_future_context(
         [
             ("PrizePicks", "MLB", "Alex Example", "Hits", "standard", "next-event"),
             ("PrizePicks", "MLB", "Alex Example", "Hits", "demon", "next-event"),
-        ]
+        ],
+        before=now + timedelta(minutes=2),
     )
     standard = contexts[
         ("PrizePicks", "MLB", "Alex Example", "Hits", "standard")
@@ -146,6 +147,22 @@ async def test_same_source_variants_keep_separate_history_and_future_context(
     assert demon["previous_line"] == 2.5
     assert demon["current_line"] == 3.0
     assert demon["movement_count"] == 1
+    same_event_context = await db.get_prop_line_movement_context_bulk(
+        [
+            (
+                "PrizePicks",
+                "MLB",
+                "Alex Example",
+                "Hits",
+                "standard",
+                "history-event",
+            )
+        ],
+        before=now + timedelta(minutes=2),
+    )
+    assert same_event_context[
+        ("PrizePicks", "MLB", "Alex Example", "Hits", "standard")
+    ] == []
 
 
 @pytest.mark.asyncio
