@@ -978,6 +978,13 @@ async def test_grade_shows_all_tracked_lines_separately_from_directional_picks()
         "void": 0,
         "denominator": 34,
         "above_line_rate": 58.8,
+        "pending_by_event_age": {
+            "upcoming": 10,
+            "past_24h": 20,
+            "past_1_7d": 30,
+            "past_over_7d": 40,
+            "unknown": 50,
+        },
         "by_provider": {},
         "by_sport": {},
     })
@@ -996,6 +1003,10 @@ async def test_grade_shows_all_tracked_lines_separately_from_directional_picks()
     assert "1 tracked-line matches" in message
     assert "Corroborated by exact PropLine result rows: <b>1</b>" in message
     assert "1 exact PropLine result matches" in message
+    assert (
+        "Pending by scheduled game time: upcoming 10 · past 24h 20 · "
+        "1–7d ago 30 · over 7d ago 40 · no start time 50"
+    ) in message
     assert "not a recommended pick" in message
 
 

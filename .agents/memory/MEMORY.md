@@ -1,6 +1,6 @@
 - [CLV formula direction](clv-formula.md) — CLV% uses (fp_close/fp_bet - 1), NOT (fp_bet/fp_close - 1); higher fp_close = market tightened after your bet = positive CLV.
 - [Player prop picks/slip framework](picks-slip-framework.md) — /picks and /slip use PropPickAdapter wrapping PropLineHistory+PlayerPropMarketComparison; no PP edge data required; PropPickAdapter implements the slip optimizer interface.
-- [Auto-sent slip outcomes](auto-slip-outcomes.md) — settlements or exact-identity final player-game stats grade saved legs; combos are not payout records.
+- [Auto-sent slip outcomes](auto-slip-outcomes.md) — settlements or exact/uniquely validated final player-game results grade saved legs; combos are not payout records.
 - [Async test event loop pattern](async-test-loop.md) — Python 3.11 aiosqlite tests must use module-level asyncio.new_event_loop(); never asyncio.get_event_loop() across test files.
 - [Provider and connector architecture](connector-architecture.md) — Underdog owns live pick'em evaluation; PropLine supplies supplemental observations while historical sportsbook identities remain read-only.
 - [Alert source priority](source-priority.md) — Underdog live evaluation → PropLine observations and evidence; retired sportsbook work is out of scope.

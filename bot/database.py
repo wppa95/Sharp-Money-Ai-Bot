@@ -12064,6 +12064,14 @@ class Database:
         not whether a model pick won. Only grades written by the verified
         automatic grader count as source-verified outcomes.
         """
+        now = datetime.utcnow()
+        pending_event_age = case(
+            (PropTrackingLog.game_time.is_(None), "unknown"),
+            (PropTrackingLog.game_time > now, "upcoming"),
+            (PropTrackingLog.game_time >= now - timedelta(hours=24), "past_24h"),
+            (PropTrackingLog.game_time >= now - timedelta(days=7), "past_1_7d"),
+            else_="past_over_7d",
+        )
         async with self.session() as s:
             result = await s.execute(
                 select(
@@ -12071,12 +12079,14 @@ class Database:
                     PropTrackingLog.sport,
                     PropTrackingLog.result,
                     PropTrackingLog.settlement_source,
+                    pending_event_age.label("pending_event_age"),
                     func.count(PropTrackingLog.id),
                 ).group_by(
                     PropTrackingLog.provider,
                     PropTrackingLog.sport,
                     PropTrackingLog.result,
                     PropTrackingLog.settlement_source,
+                    pending_event_age,
                 )
             )
             grouped_rows = result.all()
@@ -12097,6 +12107,13 @@ class Database:
         overall = _empty_counts()
         by_provider: dict[str, dict] = {}
         by_sport: dict[str, dict] = {}
+        pending_by_event_age = {
+            "upcoming": 0,
+            "past_24h": 0,
+            "past_1_7d": 0,
+            "past_over_7d": 0,
+            "unknown": 0,
+        }
 
         def _add_counts(target: dict, result_key: str, source_key: str, count: int) -> None:
             target["total"] += count
@@ -12123,7 +12140,14 @@ class Database:
             else:
                 target["void"] += count
 
-        for provider, sport, result, settlement_source, row_count in grouped_rows:
+        for (
+            provider,
+            sport,
+            result,
+            settlement_source,
+            event_age,
+            row_count,
+        ) in grouped_rows:
             if not _is_supported_tracking_sport(sport):
                 continue
             provider_key = str(provider or "Unknown").strip() or "Unknown"
@@ -12133,6 +12157,11 @@ class Database:
             count = int(row_count or 0)
 
             _add_counts(overall, result_key, source_key, count)
+            if result_key == "PENDING":
+                age_key = str(event_age or "unknown").strip()
+                pending_by_event_age[age_key] = (
+                    pending_by_event_age.get(age_key, 0) + count
+                )
             _add_counts(
                 by_provider.setdefault(provider_key, _empty_counts()),
                 result_key,
@@ -12161,6 +12190,7 @@ class Database:
         return {
             **_finish_counts(overall),
             "tracked": overall["total"],
+            "pending_by_event_age": pending_by_event_age,
             "by_provider": {
                 key: _finish_counts(value) for key, value in by_provider.items()
             },
@@ -12680,7 +12710,12 @@ class Database:
             return True
 
     async def grade_auto_slip_notification_legs(self) -> int:
-        """Grade pending automatic-slip legs from already persisted settlements."""
+        """Grade sent slip legs from trusted, identity-matched stored results.
+
+        Use the shared bounded resolver instead of normalizing columns in SQL.
+        Applying LOWER/TRIM to the large player-results ledger forced a full
+        table scan on every grading pass.
+        """
         now = datetime.utcnow()
         async with self.session() as s:
             pending_result = await s.execute(
@@ -12698,41 +12733,6 @@ class Database:
             pending = list(pending_result.scalars().all())
             if not pending:
                 return 0
-
-            keys = {
-                (
-                    str(leg.player_name or "").strip().casefold(),
-                    str(leg.sport or "").strip().upper(),
-                    str(leg.stat_type or "").strip().casefold(),
-                )
-                for leg in pending
-            }
-            result_rows_by_key: dict[tuple[str, str, str], list[PlayerGameResult]] = {}
-            key_list = list(keys)
-            trusted_sources = tuple(
-                _UNDERDOG_GRADE_RESULT_SOURCES | _UNDERDOG_VOID_RESULT_SOURCES
-            )
-            for offset in range(0, len(key_list), 200):
-                batch = key_list[offset : offset + 200]
-                result = await s.execute(
-                    select(PlayerGameResult).where(
-                        tuple_(
-                            func.lower(func.trim(PlayerGameResult.player_name)),
-                            func.upper(func.trim(PlayerGameResult.sport)),
-                            func.lower(func.trim(PlayerGameResult.stat_type)),
-                        ).in_(batch),
-                        func.lower(func.trim(PlayerGameResult.source)).in_(
-                            trusted_sources
-                        ),
-                    )
-                )
-                for row in result.scalars().all():
-                    key = (
-                        str(row.player_name or "").strip().casefold(),
-                        str(row.sport or "").strip().upper(),
-                        str(row.stat_type or "").strip().casefold(),
-                    )
-                    result_rows_by_key.setdefault(key, []).append(row)
 
             voids_by_identity: dict[tuple[str, str, str], list[PropOpportunityLog]] = {}
             external_ids = {
@@ -12774,42 +12774,85 @@ class Database:
                         )
                         voids_by_identity.setdefault(key, []).append(row)
 
-            graded = 0
-            for leg in pending:
-                if str(leg.provider or "").strip().casefold() != "underdog":
-                    continue
-                event_id = str(leg.game_id or "").strip()
-                if event_id and leg.external_id:
-                    void_rows = voids_by_identity.get(
-                        (
-                            str(leg.external_id).strip(),
-                            str(leg.stat_type or "").strip().casefold(),
-                            event_id,
-                        ),
-                        [],
-                    )
-                    if void_rows:
-                        leg.result = "VOID"
-                        leg.actual_value = None
-                        leg.grade_result_source = str(
-                            void_rows[0].grade_result_source or ""
-                        )
-                        leg.graded_at = now
-                        graded += 1
-                        continue
+        resolver_legs = [
+            SimpleNamespace(
+                id=int(leg.id),
+                provider=str(leg.provider or ""),
+                player_name=str(leg.player_name or ""),
+                sport=str(leg.sport or ""),
+                stat_type=str(leg.stat_type or ""),
+                game_time=leg.game_time,
+                game_id=str(leg.game_id or ""),
+                team="",
+            )
+            for leg in pending
+        ]
+        result_matches = await self.get_game_results_for_grading_bulk(
+            resolver_legs
+        )
 
-                key = (
-                    str(leg.player_name or "").strip().casefold(),
-                    str(leg.sport or "").strip().upper(),
-                    str(leg.stat_type or "").strip().casefold(),
+        grades: dict[int, tuple[str, Optional[float], str]] = {}
+        for leg in pending:
+            if str(leg.provider or "").strip().casefold() != "underdog":
+                continue
+
+            event_id = str(leg.game_id or "").strip()
+            if event_id and leg.external_id:
+                void_rows = voids_by_identity.get(
+                    (
+                        str(leg.external_id).strip(),
+                        str(leg.stat_type or "").strip().casefold(),
+                        event_id,
+                    ),
+                    [],
                 )
-                candidate_rows = result_rows_by_key.get(key, [])
+                if void_rows:
+                    grades[int(leg.id)] = (
+                        "VOID",
+                        None,
+                        str(void_rows[0].grade_result_source or "").strip().casefold(),
+                    )
+                    continue
+
+            match = result_matches.get(int(leg.id))
+            if not match:
+                continue
+            row, matched_date = match
+            source = str(row.source or "").strip().casefold()
+            result_event_id = str(row.game_id or "").strip()
+
+            if source in _UNDERDOG_FINAL_PLAYER_GAME_RESULT_SOURCES:
+                # Exact IDs are preferred. Cross-ID reconciliation is allowed
+                # only when the shared resolver attached its unique
+                # player/stat/date/team/opponent validation marker.
+                if not event_id or not result_event_id:
+                    continue
+                if result_event_id != event_id:
+                    marker = getattr(row, "_underdog_composite_match", None)
+                    expected_marker = (
+                        int(leg.id),
+                        event_id,
+                        result_event_id,
+                        str(row.game_date or "").strip(),
+                    )
+                    if isinstance(marker, (set, frozenset, list)):
+                        marker_valid = expected_marker in marker
+                    else:
+                        marker_valid = marker == expected_marker
+                    if not marker_valid:
+                        continue
+                elif not is_gradeable_player_result_for_event(
+                    leg.provider, source, event_id, result_event_id
+                ):
+                    continue
+            else:
+                if not is_gradeable_player_result_for_event(
+                    leg.provider, source, event_id, result_event_id
+                ):
+                    continue
                 if event_id:
-                    matching = [
-                        row
-                        for row in candidate_rows
-                        if str(row.game_id or "").strip() == event_id
-                    ]
+                    if result_event_id != event_id:
+                        continue
                 else:
                     game_time = leg.game_time
                     valid_dates = (
@@ -12820,51 +12863,44 @@ class Database:
                         if game_time is not None
                         else set()
                     )
-                    matching = [
-                        row
-                        for row in candidate_rows
-                        if str(row.game_date or "") in valid_dates
-                        and str(row.source or "").strip().casefold()
-                        not in _UNDERDOG_FINAL_PLAYER_GAME_RESULT_SOURCES
-                    ]
-                if not matching:
-                    continue
-                row = max(
-                    matching,
-                    key=lambda candidate: (
-                        (
-                            candidate.fetched_at.isoformat()
-                            if candidate.fetched_at
-                            else ""
-                        ),
-                        candidate.id or 0,
-                    ),
+                    if not matched_date or matched_date not in valid_dates:
+                        continue
+
+            if leg.line_value is None or row.actual_value is None:
+                continue
+            actual = float(row.actual_value)
+            line_value = float(leg.line_value)
+            if abs(actual - line_value) < 0.01:
+                outcome = "PUSH"
+            elif str(leg.direction or "").upper() == "UNDER":
+                outcome = "HIT" if actual < line_value else "MISS"
+            elif str(leg.direction or "").upper() == "OVER":
+                outcome = "HIT" if actual > line_value else "MISS"
+            else:
+                continue
+            grades[int(leg.id)] = (outcome, actual, source)
+
+        if not grades:
+            return 0
+
+        graded = 0
+        async with self.session() as s:
+            refreshed_result = await s.execute(
+                select(AutoSlipNotificationLeg).where(
+                    AutoSlipNotificationLeg.id.in_(tuple(grades)),
+                    AutoSlipNotificationLeg.result == "PENDING",
                 )
-                source = str(row.source or "").strip().casefold()
-                if source in _UNDERDOG_VOID_RESULT_SOURCES:
-                    leg.result = "VOID"
-                    leg.actual_value = None
-                else:
-                    if leg.line_value is None:
-                        continue
-                    actual = float(row.actual_value)
-                    if abs(actual - float(leg.line_value)) < 0.01:
-                        outcome = "PUSH"
-                    elif str(leg.direction or "").upper() == "UNDER":
-                        outcome = "HIT" if actual < float(leg.line_value) else "MISS"
-                    elif str(leg.direction or "").upper() == "OVER":
-                        outcome = "HIT" if actual > float(leg.line_value) else "MISS"
-                    else:
-                        continue
-                    leg.result = outcome
-                    leg.actual_value = actual
+            )
+            for leg in refreshed_result.scalars().all():
+                result, actual, source = grades[int(leg.id)]
+                leg.result = result
+                leg.actual_value = actual
                 leg.grade_result_source = source
                 leg.graded_at = now
                 graded += 1
-
             if graded:
                 await s.commit()
-            return graded
+        return graded
 
     @staticmethod
     def _auto_slip_combination_result(legs: list[dict]) -> str:

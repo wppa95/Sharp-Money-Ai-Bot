@@ -391,6 +391,151 @@ async def test_auto_slip_grades_final_player_game_stats_for_exact_event(
 
 
 @pytest.mark.asyncio
+async def test_auto_slip_grades_unique_propline_cross_event_match_from_saved_teams():
+    from database import Database, PlayerGameResult, PropLineHistory
+
+    db = Database("sqlite+aiosqlite:///:memory:")
+    await db.init()
+    leg = {
+        "provider": "Underdog",
+        "external_id": "cross-id-slip-prop",
+        "game_id": "underdog-event-cross-id",
+        "player_name": "Player A",
+        "sport": "NBA",
+        "stat_type": "points",
+        "line_value": 18.5,
+        "direction": "OVER",
+        "game_time": datetime(2026, 9, 28, 19, 0),
+    }
+    try:
+        assert await db.claim_auto_slip_notification(
+            "cross-id-slip-notification",
+            2,
+            combination_signature="cross-id-slip-combination",
+            legs=[leg],
+        )
+        assert await db.mark_auto_slip_notification_sent(
+            "cross-id-slip-notification"
+        )
+        async with db.session() as session:
+            session.add_all([
+                PropLineHistory(
+                    provider="Underdog",
+                    product="Player Props",
+                    sport="NBA",
+                    player_name="Player A",
+                    team="Boston Celtics",
+                    stat_type="points",
+                    line_value=18.5,
+                    external_id="cross-id-slip-prop",
+                    game_id="underdog-event-cross-id",
+                ),
+                PropLineHistory(
+                    provider="Underdog",
+                    product="Player Props",
+                    sport="NBA",
+                    player_name="Opponent Player",
+                    team="New York Knicks",
+                    stat_type="points",
+                    line_value=18.5,
+                    external_id="cross-id-opponent-prop",
+                    game_id="underdog-event-cross-id",
+                ),
+                PlayerGameResult(
+                    player_name="Player A",
+                    sport="NBA",
+                    stat_type="points",
+                    game_date="2026-09-28",
+                    actual_value=24.0,
+                    opponent="New York Knicks",
+                    source="propline_player_games",
+                    game_id="propline-event-cross-id",
+                ),
+            ])
+            await session.commit()
+
+        assert await db.grade_auto_slip_notification_legs() == 1
+        history = await db.get_auto_slip_notification_history(limit=1)
+        graded_leg = history[0]["legs"][0]
+        assert graded_leg["result"] == "HIT"
+        assert graded_leg["actual_value"] == 24.0
+        assert graded_leg["grade_result_source"] == "propline_player_games"
+    finally:
+        await db.close()
+
+
+@pytest.mark.asyncio
+async def test_auto_slip_keeps_cross_event_stats_pending_when_opponent_disagrees():
+    from database import Database, PlayerGameResult, PropLineHistory
+
+    db = Database("sqlite+aiosqlite:///:memory:")
+    await db.init()
+    leg = {
+        "provider": "Underdog",
+        "external_id": "wrong-opponent-slip-prop",
+        "game_id": "underdog-event-wrong-opponent",
+        "player_name": "Player B",
+        "sport": "NBA",
+        "stat_type": "points",
+        "line_value": 18.5,
+        "direction": "OVER",
+        "game_time": datetime(2026, 9, 28, 19, 0),
+    }
+    try:
+        assert await db.claim_auto_slip_notification(
+            "wrong-opponent-slip-notification",
+            2,
+            combination_signature="wrong-opponent-slip-combination",
+            legs=[leg],
+        )
+        assert await db.mark_auto_slip_notification_sent(
+            "wrong-opponent-slip-notification"
+        )
+        async with db.session() as session:
+            session.add_all([
+                PropLineHistory(
+                    provider="Underdog",
+                    product="Player Props",
+                    sport="NBA",
+                    player_name="Player B",
+                    team="Boston Celtics",
+                    stat_type="points",
+                    line_value=18.5,
+                    external_id="wrong-opponent-slip-prop",
+                    game_id="underdog-event-wrong-opponent",
+                ),
+                PropLineHistory(
+                    provider="Underdog",
+                    product="Player Props",
+                    sport="NBA",
+                    player_name="Opponent Player",
+                    team="New York Knicks",
+                    stat_type="points",
+                    line_value=18.5,
+                    external_id="wrong-opponent-context",
+                    game_id="underdog-event-wrong-opponent",
+                ),
+                PlayerGameResult(
+                    player_name="Player B",
+                    sport="NBA",
+                    stat_type="points",
+                    game_date="2026-09-28",
+                    actual_value=24.0,
+                    opponent="Brooklyn Nets",
+                    source="propline_player_games",
+                    game_id="propline-event-wrong-opponent",
+                ),
+            ])
+            await session.commit()
+
+        assert await db.grade_auto_slip_notification_legs() == 0
+        history = await db.get_auto_slip_notification_history(limit=1)
+        assert history[0]["legs"][0]["result"] == "PENDING"
+    finally:
+        await db.close()
+
+
+@pytest.mark.asyncio
 async def test_auto_slip_player_game_stats_require_saved_event_identity():
     from database import Database, PlayerGameResult
 

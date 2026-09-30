@@ -875,6 +875,25 @@ def _tracked_prop_grade_lines(summary: object) -> list[str]:
         "  <i>For neutral rows, HIT/MISS means above/below the line, not a recommended pick.</i>",
     ]
 
+    pending_by_event_age = summary.get("pending_by_event_age")
+    if isinstance(pending_by_event_age, dict):
+        age_labels = (
+            ("upcoming", "upcoming"),
+            ("past_24h", "past 24h"),
+            ("past_1_7d", "1–7d ago"),
+            ("past_over_7d", "over 7d ago"),
+            ("unknown", "no start time"),
+        )
+        age_counts = [
+            f"{label} {int(pending_by_event_age.get(key, 0) or 0):,}"
+            for key, label in age_labels
+        ]
+        lines.append("  Pending by scheduled game time: " + " · ".join(age_counts))
+        lines.append(
+            "  <i>Pending includes old tracked feed lines, not just today’s picks; "
+            "only supported final evidence clears them.</i>"
+        )
+
     by_provider = summary.get("by_provider", {})
     if isinstance(by_provider, dict) and by_provider:
         lines.append("  <b>By provider</b>")
