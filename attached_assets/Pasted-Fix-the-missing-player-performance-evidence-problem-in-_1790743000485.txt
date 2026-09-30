@@ -1,0 +1,47 @@
+Fix the missing player-performance evidence problem in Sharp Money AI Bot V4.
+
+The current audit confirmed that The Odds API would NOT solve this problem because market odds/lines are not sufficient to grade player props. Do NOT re-enable The Odds API for this fix.
+
+The actual requirement is to make sure supported non-football sports can obtain and persist the player-game results/history required to:
+
+* establish prior player-history support before qualification
+* calculate hit/miss/push results when applicable
+* confirm exact final player stat values for the prop market
+* support OVER/UNDER evaluation
+* provide evidence to the existing analysis and qualification pipeline
+* grade completed props correctly
+
+Use the existing PropLine integration and all currently available PropLine endpoints that can provide player history, player games, results, events, and other relevant evidence. Do not use the single-player stat endpoint that was intentionally avoided because of credit usage.
+
+Implement this as an additive evidence/history fix without replacing the existing V4 pipeline.
+
+Required behavior:
+
+1. Identify every currently supported non-football sport/league where V4 can observe player props but cannot obtain sufficient player-performance evidence/history.
+2. For each supported sport, map the V4 normalized:
+    * sport/league
+    * player
+    * team
+    * opponent
+    * event/game
+    * market/stat type
+    * line
+        to the corresponding PropLine player/game/result data.
+3. Resolve the correct player and game/event identity before requesting historical evidence. Do not rely only on player name matching when a stronger identifier is available.
+4. Retrieve and persist actual player-game performance results, not bookmaker odds or team scores.
+5. Normalize provider-specific stat names into the existing V4 market/stat model so supported markets do not become unknown_market simply because the provider uses different terminology.
+6. Store the evidence in the existing SQLite evidence/history structures and make it available to the existing evaluation/analysis pipeline.
+7. Do not create a separate parallel grading system. The existing grading system must consume the normalized player result.
+8. Make sure completed player props have an explicit final player stat value available for grading. Team-level final scores alone must never satisfy player-prop evidence requirements.
+9. If a sport or market genuinely has no supported player-result data available from the existing providers, mark it as insufficient evidence rather than fabricating, estimating, or treating odds as player performance.
+10. Preserve existing MLB behavior and existing working evidence/history behavior.
+11. Do not change the alert thresholds, qualification logic, AI Analyst, scoring model, Telegram delivery logic, or unrelated scheduler behavior as part of this fix.
+12. Do not add The Odds API.
+13. Do not add broad scraping, a new external provider, or unnecessary API calls. Reuse the existing PropLine endpoints and existing evidence cache wherever possible.
+14. Respect the existing PropLine request budget. Avoid duplicate requests and cache/reuse evidence when the same player/game/result has already been retrieved.
+15. Ensure the fix works across ALL supported non-football sports rather than adding a one-off solution for a single league.
+16. Make the evidence pipeline observable with clear logging showing:
+    SPORT → PLAYER → GAME/EVENT → MARKET → PROVIDER RESULT → NORMALIZED RESULT → STORED EVIDENCE
+17. After implementation, verify with representative non-MLB sports that previously lacked evidence. Confirm that the actual player-game result reaches SQLite and becomes available to the existing evaluation/history/grading flow.
+
+Do not perform an unrelated refactor. Do not rebuild the architecture. Do not replace working components. Make the smallest targeted changes necessary to solve the missing player-performance evidence problem across supported non-football sports.
