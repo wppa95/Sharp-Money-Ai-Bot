@@ -2033,6 +2033,27 @@ async def _grade_opportunities_job(context) -> None:
                         getattr(opp, "game_id", ""),
                         getattr(result_row, "game_id", ""),
                     )
+            logger.debug(
+                "player_result_evidence_match matched=%s player=%s sport=%s "
+                "market=%s expected_event_id=%s result_source=%s "
+                "result_event_id=%s reason=%s",
+                _result_is_gradeable,
+                getattr(opp, "player_name", ""),
+                getattr(opp, "sport", ""),
+                getattr(opp, "stat_type", ""),
+                getattr(opp, "game_id", ""),
+                getattr(result_row, "source", "") if result_row is not None else "",
+                getattr(result_row, "game_id", "") if result_row is not None else "",
+                (
+                    "exact_identity_match"
+                    if _result_is_gradeable
+                    else (
+                        "source_or_event_identity_mismatch"
+                        if result_row is not None
+                        else "no_exact_player_result"
+                    )
+                ),
+            )
             if result_row is not None and not _result_is_gradeable:
                 # Defense in depth for compatibility resolvers or stale
                 # PlayerGameResult rows written by a generic stats provider.

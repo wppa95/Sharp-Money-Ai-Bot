@@ -1,0 +1,794 @@
+COMPLETE CURRENT BOT BREAKDOWN — READ ONLY
+
+I need a complete technical breakdown of the CURRENT bot/project exactly as it exists right now.
+
+This is strictly an inspection and documentation task.
+
+CRITICAL — DO NOT MODIFY ANYTHING
+
+* DO NOT modify files
+* DO NOT refactor
+* DO NOT delete anything
+* DO NOT install packages
+* DO NOT uninstall packages
+* DO NOT change configuration
+* DO NOT change environment variables
+* DO NOT change database data
+* DO NOT run migrations
+* DO NOT change scheduler behavior
+* DO NOT change API calls
+* DO NOT fix bugs
+* DO NOT optimize anything
+* DO NOT deploy
+* DO NOT push to GitHub
+
+Inspect the entire project and report what is actually implemented.
+
+If something cannot be verified from the code, database, configuration, or logs, explicitly say:
+
+NOT VERIFIED
+
+Do not guess.
+
+⸻
+
+1. COMPLETE PROJECT TREE
+
+Provide the complete current file/folder structure.
+
+For every important file, document:
+
+* File path
+* Purpose
+* Main responsibilities
+* Important classes/functions
+* Dependencies
+* Modules it interacts with
+* Whether it is actively used
+* Whether it appears unused/dead
+* Whether duplicate implementations exist
+
+⸻
+
+2. APPLICATION ENTRYPOINT
+
+Identify the actual application entrypoint.
+
+Document the complete startup sequence:
+
+* Configuration loading
+* Environment variables
+* Database initialization
+* API initialization
+* Telegram initialization
+* Scheduler initialization
+* Other startup tasks
+
+Then document the shutdown sequence.
+
+Show the actual execution flow from startup through normal operation.
+
+⸻
+
+3. ALL EXTERNAL DATA SOURCES
+
+Identify EVERY external API, service, feed, or data source currently used.
+
+For each source document:
+
+* Provider
+* Endpoint
+* HTTP method
+* Purpose
+* Sports covered
+* Markets covered
+* Calling file/function
+* Calling scheduler/job
+* Frequency
+* Data retrieved
+* Data actually used
+* Database destination
+* Downstream consumers
+* Rate limits
+* Credit usage
+* Caching
+* Retry behavior
+* Error handling
+* Current active/inactive status
+
+Do not assume something is active simply because code exists for it.
+
+Trace the actual call path.
+
+⸻
+
+4. UNDERDOG INTEGRATION
+
+Document the complete current Underdog implementation.
+
+Include:
+
+* API/request logic
+* Observation process
+* Sports
+* Markets
+* Events
+* Players
+* Lines
+* Normalization
+* Storage
+* Deduplication
+* Result resolution
+* Grading
+* Historical data
+* Evidence
+* Analysis
+* Qualification
+* Alert generation
+
+Identify the exact files/functions responsible for each stage.
+
+⸻
+
+5. PRIZEPICKS INTEGRATION
+
+Document the complete current PrizePicks implementation.
+
+Include:
+
+* How PrizePicks observations enter the system
+* Whether data is obtained directly or through another provider
+* Event identification
+* Player identification
+* Market identification
+* Line extraction
+* Normalization
+* Storage
+* Result resolution
+* Grading
+* Historical data
+* Evidence
+* Analysis
+* Qualification
+* Alert generation
+
+Identify the exact implementation.
+
+⸻
+
+6. PROPLINE INTEGRATION
+
+Document EVERY PropLine endpoint that exists in the project.
+
+For each endpoint provide:
+
+* Endpoint path
+* HTTP method
+* Parameters
+* Purpose
+* Calling function
+* Calling scheduler/job
+* Frequency
+* Sports
+* Markets
+* Response fields used
+* Database destination
+* Downstream consumers
+* Credit usage
+* Retry behavior
+* Error handling
+
+Specifically inspect all implemented PropLine functionality involving:
+
+* Sports
+* Events
+* Event odds
+* Player props
+* Player history
+* Player games
+* Results
+* EV
+* Best line
+* Movement
+* Trends
+* Any other PropLine endpoint present in the project
+
+Separate the results into:
+
+ACTIVE
+
+Actually called during normal operation.
+
+IMPLEMENTED BUT UNUSED
+
+Code exists but the endpoint is not actually called.
+
+PARTIALLY IMPLEMENTED
+
+Some functionality exists but is incomplete.
+
+NOT VERIFIED
+
+Cannot be confirmed.
+
+Explicitly identify the single-player-stat endpoint and whether it is currently used.
+
+⸻
+
+7. ALL SPORTS
+
+Document ALL sports currently supported, configured, observed, processed, or referenced anywhere in the project.
+
+Do not assume one sport is the primary sport.
+
+Do not assume one sport is excluded.
+
+Do not hardcode any sport classification into this report.
+
+For every sport identify:
+
+* Observation support
+* Event/game support
+* Player support
+* Market support
+* Historical support
+* Player-result support
+* Grading support
+* Analysis support
+* Alert support
+
+Classify each area as:
+
+* WORKING
+* PARTIALLY WORKING
+* BROKEN
+* INSUFFICIENT DATA
+* NOT VERIFIED
+
+Use actual implementation and data rather than assumptions.
+
+⸻
+
+8. ESPORTS
+
+Explicitly inspect all esports present in the project.
+
+Include every esports title encountered in:
+
+* Code
+* Configuration
+* Database
+* Logs
+* API responses
+* Historical data
+
+Document how each is handled.
+
+Include player identity, event identity, markets, historical data, player results, grading, analysis, and alerts.
+
+Do not assume esports uses the same statistics or event structure as traditional sports.
+
+⸻
+
+9. SPORT / MARKET NORMALIZATION
+
+Document how the current system normalizes:
+
+* Sports
+* Leagues
+* Teams
+* Players
+* Events
+* Games
+* Matches
+* Markets
+* Stat names
+* Prop types
+
+Identify provider-specific naming differences and how they are handled.
+
+⸻
+
+10. PLAYER IDENTITY
+
+Document exactly how the system identifies players.
+
+Include:
+
+* Provider player IDs
+* Internal player IDs
+* Name matching
+* Aliases
+* Fuzzy matching
+* Normalization
+* Cross-provider identity
+* Duplicate handling
+
+Identify weaknesses or conflicts in the current implementation.
+
+⸻
+
+11. TEAM / EVENT IDENTITY
+
+Document how the system identifies and matches:
+
+* Teams
+* Events
+* Games
+* Matches
+
+Include provider IDs, internal IDs, names, aliases, dates, opponents, and any matching logic.
+
+⸻
+
+12. COMPLETE DATABASE SCHEMA
+
+Document the entire current database.
+
+For EVERY table provide:
+
+* Table name
+* Columns
+* Data types
+* Primary keys
+* Foreign keys
+* Unique constraints
+* Indexes
+* Relationships
+* What creates rows
+* What updates rows
+* What reads rows
+* Current purpose
+* Whether actively used
+* Whether redundant
+
+Explain relationships between:
+
+* Sports
+* Leagues
+* Players
+* Teams
+* Events
+* Games
+* Props
+* Markets
+* Lines
+* Observations
+* Player results
+* Historical data
+* Evidence
+* Evaluations
+* Alerts
+* Telegram deliveries
+
+⸻
+
+13. OBSERVATION PIPELINE
+
+Document exactly what happens after a prop is discovered.
+
+Show the actual implementation of:
+
+OBSERVED
+→ NORMALIZED
+→ STORED
+
+Explain:
+
+* What gets observed
+* What gets normalized
+* What gets persisted
+* IDs generated
+* Duplicate detection
+* Updates versus inserts
+* Timestamps
+* Source/provider tracking
+
+⸻
+
+14. RESULT / GRADING SYSTEM
+
+Document exactly how the current bot determines:
+
+* HIT
+* MISS
+* PUSH
+* UNRESOLVED
+* INSUFFICIENT EVIDENCE
+
+Explain how the actual player statistic is obtained.
+
+Identify whether grading ever relies on:
+
+* Team scores
+* Event completion
+* Bookmaker odds
+* Estimated statistics
+* Missing player statistics
+* Partial/incomplete player data
+
+List all supported stat types and sports actually being graded.
+
+⸻
+
+15. HISTORICAL DATA SYSTEM
+
+Document exactly how historical data currently works.
+
+Identify:
+
+* Historical data sources
+* Storage
+* Player-game records
+* Number of games available
+* L5
+* L10
+* L20
+* L30
+* Season
+* Current-year data
+* H2H
+* Average
+* Median
+* Hit rate
+
+For each sport/market, identify what historical data actually exists.
+
+Do not assume history exists simply because code for retrieving it exists.
+
+⸻
+
+16. EVIDENCE SYSTEM
+
+Document the complete evidence system.
+
+Include:
+
+* Evidence sources
+* Evidence cache
+* Evidence tables
+* Evidence keys
+* Cache expiration
+* Evidence lookup
+* Evidence merging
+* Evidence sufficiency
+* Evidence thresholds
+* Evidence consumers
+
+Identify evidence that is collected but never actually used downstream.
+
+⸻
+
+17. ANALYSIS ENGINE
+
+Document exactly how the current bot analyzes a prop.
+
+Include:
+
+* Inputs
+* Historical windows
+* Statistical calculations
+* Average
+* Median
+* Hit rate
+* Context
+* Trends
+* OVER determination
+* UNDER determination
+* Directional determination
+* Confidence
+* Data sufficiency
+* Qualification
+
+Identify whether the current analysis is:
+
+* Rule-based
+* Statistical
+* ML-based
+* AI-based
+* Hybrid
+
+Only describe what actually exists.
+
+⸻
+
+18. PIPELINE STATES
+
+Document every state/status field used by the system.
+
+Compare the actual implementation against:
+
+OBSERVED
+→ NORMALIZED
+→ STORED
+→ EVALUATION_ELIGIBLE
+→ EVALUATED
+→ EVIDENCE_CHECK
+→ HISTORY_CHECK
+→ ANALYZED
+→ DIRECTIONAL
+→ QUALIFIED
+→ ACTIONABLE
+→ ALERT_CREATED
+→ DELIVERY_ELIGIBLE
+→ TELEGRAM_SENT
+
+For every stage determine:
+
+* Whether it actually exists
+* File/function responsible
+* Database field
+* Transition condition
+* What causes failure
+* What happens afterward
+
+Identify conceptual states that are not actually implemented.
+
+⸻
+
+19. QUALIFICATION / ALERT SYSTEM
+
+Document exactly what causes a prop to become actionable.
+
+Include:
+
+* Evidence requirements
+* Historical requirements
+* Direction requirements
+* Confidence requirements
+* Market requirements
+* Duplicate handling
+* Player restrictions
+* Event restrictions
+* Any other filters
+* Alert creation
+* Alert persistence
+* Delivery eligibility
+
+Do not evaluate whether these rules are good or bad.
+
+Document what the code actually does.
+
+⸻
+
+20. TELEGRAM BOT
+
+Document:
+
+* Commands
+* Command handlers
+* Admin commands
+* User commands
+* Alert messages
+* Message formatting
+* Database queries
+* External API calls
+* Deduplication
+* Error handling
+
+For every command identify whether it:
+
+* Reads SQLite/database only
+* Calls an external API
+* Does both
+
+⸻
+
+21. SCHEDULERS / JOBS
+
+List EVERY scheduler/job.
+
+For each document:
+
+* Job name
+* File/function
+* Frequency
+* Trigger
+* Purpose
+* APIs called
+* Database operations
+* Dependencies
+* Whether it starts another job
+* Whether it can overlap
+* Queue behavior
+* Retry behavior
+* Failure behavior
+* Completion semantics
+
+Identify:
+
+* Duplicate schedulers
+* Nested schedulers
+* Dead schedulers
+* Overlapping jobs
+* Stale queued work
+* Jobs reporting success without completing the intended work
+
+⸻
+
+22. API RATE LIMITING / CREDIT USAGE
+
+Document how the current bot handles:
+
+* Rate limits
+* API credits
+* Request frequency
+* Caching
+* Deduplication
+* Retries
+* Backoff
+* Failed requests
+* Duplicate requests
+
+Identify areas where the same information may be requested repeatedly.
+
+⸻
+
+23. LOGGING / MONITORING
+
+Document:
+
+* Logging system
+* Log levels
+* Important log messages
+* Error tracking
+* Debug output
+* Scheduler logging
+* API logging
+* Database logging
+* Telegram logging
+
+Identify what can currently be observed when something fails.
+
+⸻
+
+24. CURRENT DATABASE / RUNTIME COUNTS
+
+Inspect the current database and available runtime/debug information.
+
+Report actual current numbers where available for:
+
+* Observations
+* Stored props
+* Evaluations
+* Active tracked props
+* Directional props
+* Actionable props
+* Alerts
+* Telegram deliveries
+* Resolved props
+* HIT
+* MISS
+* PUSH
+* Evidence rows
+* Historical rows
+
+Use actual data.
+
+Do not estimate.
+
+⸻
+
+25. CURRENT ERRORS / FAILURES
+
+Inspect available logs and runtime information.
+
+Identify:
+
+* API failures
+* Missing data
+* Missing player results
+* Player-resolution failures
+* Event-resolution failures
+* Grading failures
+* Historical-data failures
+* Scheduler failures
+* Database errors
+* Telegram errors
+* Rate-limit errors
+* Timeout errors
+
+Group the findings by subsystem.
+
+Do not fix anything.
+
+⸻
+
+26. UNUSED / DEAD / DUPLICATE CODE
+
+Identify code that appears:
+
+* Unused
+* Dead
+* Duplicate
+* Superseded
+* Obsolete
+* Partially implemented
+* Implemented but never called
+
+Do not delete or modify it.
+
+⸻
+
+27. CURRENT ARCHITECTURE DIAGRAM
+
+Create a diagram showing the ACTUAL current architecture.
+
+Include:
+
+DATA SOURCES
+↓
+INGESTION
+↓
+NORMALIZATION
+↓
+DATABASE
+↓
+RESULTS
+↓
+HISTORY
+↓
+EVIDENCE
+↓
+ANALYSIS
+↓
+QUALIFICATION
+↓
+ALERTS
+↓
+TELEGRAM
+
+Use actual modules/functions where possible.
+
+If the current architecture does not actually follow this flow, show the actual flow instead.
+
+⸻
+
+28. CURRENT BOT SUMMARY
+
+End the report with a factual summary of:
+
+1. What the bot currently does
+2. All external data sources currently used
+3. All sports currently encountered/supported
+4. All markets currently encountered/supported
+5. How observations work
+6. How normalization works
+7. How storage works
+8. How results are obtained
+9. How grading works
+10. How historical data works
+11. How evidence works
+12. How analysis works
+13. How qualification works
+14. How alerts are generated
+15. How Telegram delivery works
+16. Current scheduler structure
+17. Current database structure
+18. Current API/credit usage
+19. Current errors/failures
+20. Unused/dead/duplicate components
+
+FINAL REQUIREMENT
+
+This is a documentation-only task.
+
+Inspect the ENTIRE current project.
+
+Report what the bot ACTUALLY does.
+
+Do not make assumptions.
+
+Do not fix anything.
+
+Do not change anything.
+
+Do not propose a replacement architecture.
+
+Do not discuss future development.
+
+Do not discuss what should be built next.
+
+Do not mention a new bot.
+
+Return ONLY the complete breakdown of the CURRENT bot.

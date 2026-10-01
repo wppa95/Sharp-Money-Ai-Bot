@@ -5840,6 +5840,8 @@ def build_propline_read_only_targets(
     The caller may provide active props and/or discovered events.  No
     canonical sport is converted to a guessed provider key here.
     """
+    from engine.sport_policy import is_football_related_sport
+
     official_by_canonical: dict[str, str] = {}
     canonical_by_official: dict[str, str] = {}
     for sport in sports:
@@ -5847,6 +5849,8 @@ def build_propline_read_only_targets(
         canonical = _normalize_sport(
             _read_only_input(sport, "canonical_key", "canonical_sport", "sport")
         )
+        if is_football_related_sport(canonical):
+            continue
         # A discovered title may be normalized into a familiar-looking
         # canonical value even when its provider key is new.  Do not let that
         # heuristic identity create score/history targets.
@@ -6133,6 +6137,7 @@ class PropLineReadOnlyRotation:
                 target.official_sport,
                 target.player_name,
                 limit=100,
+                stat_type=target.market,
             )
         if target.family == "player_history":
             return await method(
@@ -6167,7 +6172,15 @@ class PropLineReadOnlyRotation:
         max_requests: Optional[int] = None,
     ) -> PropLineReadOnlyRotationReport:
         """Run one bounded slice and checkpoint after every attempted request."""
-        target_list = list(targets)
+        from engine.sport_policy import is_football_related_sport
+
+        target_list = [
+            target
+            for target in targets
+            if not is_football_related_sport(
+                target.canonical_sport or target.official_sport
+            )
+        ]
         by_family = {
             family: sorted(
                 {

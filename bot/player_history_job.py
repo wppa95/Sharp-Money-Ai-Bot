@@ -217,72 +217,174 @@ def _completed_propline_game_rows(
     result: Any,
 ) -> list[Any]:
     """Convert final, identified player-game stats into shared history rows."""
+    import math
+
+    if is_football_related_sport(
+        getattr(target, "canonical_sport", "") or getattr(target, "official_sport", "")
+    ):
+        return []
+
     from providers.player_stats import RawGameResult
     from providers.propline import (
         _normalize_stat,
         _parse_datetime,
         _propline_raw_player_game_stat_matches,
+        _team_names_match,
     )
 
-    rows = []
+    rows_by_identity: dict[tuple[str, str, str, str, str], Any] = {}
+    conflicting_identities: set[tuple[str, str, str, str, str]] = set()
+    duplicates = 0
     target_stat = _normalize_stat(target.market)
     for game in _propline_game_records(getattr(result, "payload", None)):
         if not _is_explicit_propline_final(game):
             continue
+        declared_sport = _propline_value(
+            game, "canonical_sport", "sport", "sport_key", "league"
+        )
+        if declared_sport:
+            declared = str(declared_sport).strip()
+            expected_canonical = str(
+                getattr(target, "canonical_sport", "") or ""
+            ).strip().casefold()
+            expected_official = str(
+                getattr(target, "official_sport", "") or ""
+            ).strip().casefold()
+            if (
+                declared.casefold() not in {expected_canonical, expected_official}
+                and canonical_sport_key(declared).casefold()
+                != expected_canonical
+            ):
+                continue
+        declared_player = _propline_value(
+            game, "player_name", "athlete_name", "player"
+        )
+        if isinstance(declared_player, dict):
+            declared_player = _propline_value(
+                declared_player, "name", "full_name", "display_name"
+            )
+        if declared_player:
+            expected_player = " ".join(
+                str(getattr(target, "player_name", "") or "").casefold().split()
+            )
+            returned_player = " ".join(str(declared_player).casefold().split())
+            if not expected_player or returned_player != expected_player:
+                continue
+
         game_id = _propline_value(game, "event_id", "game_id", "id")
         game_date = _parse_datetime(
             _propline_value(
                 game, "game_date", "date", "start_time", "commence_time"
             )
         )
-        actual = _propline_value(game, "actual_value", "value", "stat_value")
-        if actual is None:
-            stats = _propline_value(game, "stats", "statistics", "player_stats")
-            if isinstance(stats, dict):
-                for stat_name, stat_value in stats.items():
-                    if not _propline_raw_player_game_stat_matches(
-                        target.canonical_sport, target_stat, stat_name
-                    ):
-                        continue
-                    if isinstance(stat_value, dict):
-                        actual = _propline_value(
-                            stat_value, "actual_value", "value", "stat_value"
-                        )
-                    else:
-                        actual = stat_value
-                    break
-            elif isinstance(stats, (list, tuple)):
-                for stat_item in stats:
-                    stat_name = _propline_value(
-                        stat_item, "stat_type", "stat", "name", "market"
-                    )
-                    if not _propline_raw_player_game_stat_matches(
-                        target.canonical_sport, target_stat, stat_name
-                    ):
-                        continue
+        stats = _propline_value(game, "stats", "statistics", "player_stats")
+        actual = None
+        if isinstance(stats, dict):
+            for stat_name, stat_value in stats.items():
+                if not _propline_raw_player_game_stat_matches(
+                    target.canonical_sport, target_stat, stat_name
+                ):
+                    continue
+                if isinstance(stat_value, dict):
                     actual = _propline_value(
-                        stat_item, "actual_value", "value", "stat_value"
+                        stat_value, "actual_value", "value", "stat_value"
                     )
-                    break
+                else:
+                    actual = stat_value
+                break
+        elif isinstance(stats, (list, tuple)):
+            for stat_item in stats:
+                stat_name = _propline_value(
+                    stat_item, "stat_type", "stat", "name", "market"
+                )
+                if not _propline_raw_player_game_stat_matches(
+                    target.canonical_sport, target_stat, stat_name
+                ):
+                    continue
+                actual = _propline_value(
+                    stat_item, "actual_value", "value", "stat_value"
+                )
+                break
+        if actual is None:
+            declared_stat = _propline_value(
+                game, "stat_type", "stat", "market", "market_name"
+            )
+            if not declared_stat or not _propline_raw_player_game_stat_matches(
+                target.canonical_sport, target_stat, declared_stat
+            ):
+                continue
+            actual = _propline_value(
+                game, "actual_value", "value", "stat_value"
+            )
         if game_id is None or game_date is None or actual is None:
+            continue
+        if isinstance(actual, bool):
             continue
         try:
             actual_value = float(actual)
         except (TypeError, ValueError):
             continue
-        rows.append(
-            RawGameResult(
-                player_name=target.player_name,
-                sport=target.canonical_sport,
-                stat_type=target_stat,
-                game_date=game_date.date().isoformat(),
-                actual_value=actual_value,
-                opponent=_propline_value(game, "opponent", "opponent_name"),
-                source="propline_player_games",
-                game_id=str(game_id),
-            )
+        if not math.isfinite(actual_value):
+            continue
+        team = _propline_value(game, "team", "player_team", "team_name")
+        opponent = _propline_value(game, "opponent", "opponent_name")
+        home = _propline_value(game, "home_team", "home", "home_name")
+        away = _propline_value(game, "away_team", "away", "away_name")
+        if opponent is None and team and home and away:
+            if _team_names_match(team, home):
+                opponent = away
+            elif _team_names_match(team, away):
+                opponent = home
+
+        row = RawGameResult(
+            player_name=target.player_name,
+            sport=target.canonical_sport,
+            stat_type=target_stat,
+            game_date=game_date.date().isoformat(),
+            actual_value=actual_value,
+            opponent=opponent,
+            source="propline_player_games",
+            game_id=str(game_id),
         )
-    return rows
+        identity = (
+            row.player_name.casefold().strip(),
+            row.sport.upper().strip(),
+            row.stat_type.casefold().strip(),
+            row.game_date,
+            str(row.game_id),
+        )
+        if identity in rows_by_identity:
+            duplicates += 1
+            if rows_by_identity[identity].actual_value != actual_value:
+                conflicting_identities.add(identity)
+            continue
+        rows_by_identity[identity] = row
+        logger.debug(
+            "propline_player_game_result sport=%s league=%s player=%s "
+            "player_id=%s event_id=%s market=%s value=%s team=%s opponent=%s",
+            target.canonical_sport,
+            getattr(target, "official_sport", ""),
+            target.player_name,
+            _propline_value(game, "player_id", "athlete_id", "participant_id") or "",
+            game_id,
+            target.market,
+            actual_value,
+            team or "",
+            opponent or "",
+        )
+    for identity in conflicting_identities:
+        rows_by_identity.pop(identity, None)
+    if duplicates or conflicting_identities:
+        logger.info(
+            "propline_player_game_result sport=%s player=%s market=%s "
+            "duplicate_skipped=%d ambiguous_conflicts_rejected=%d",
+            target.canonical_sport,
+            target.player_name,
+            target.market,
+            duplicates,
+            len(conflicting_identities),
+        )
+    return list(rows_by_identity.values())
 
 
 def _fair_cycle_targets(
@@ -674,7 +776,6 @@ async def player_history_collector_job(context) -> None:
         propline_coverage_by_sport_market: dict[
             str, dict[str, dict[str, int]]
         ] = {}
-        insufficient_evidence_by_sport: dict[str, int] = {}
         budget_exhausted = False
         deadline_targets = 0
         provider_timeout_targets = 0
@@ -842,124 +943,6 @@ async def player_history_collector_job(context) -> None:
                             sport,
                             stat,
                         )
-                    # PropLine is the authoritative fallback for actual
-                    # player-game results on supported non-football sports.
-                    # Keep football on its existing provider route and never
-                    # spend PropLine quota for it in this collector.
-                    supplement = getattr(
-                        history_provider,
-                        "supplement_missing_results",
-                        None,
-                    )
-                    if (
-                        not is_football_related_sport(sport)
-                        and len(usable_rows) < 5
-                        and asyncio.iscoroutinefunction(supplement)
-                    ):
-                        from providers.propline import (
-                            _propline_raw_player_game_stat_supported,
-                            official_player_market_for,
-                        )
-
-                        has_market = bool(
-                            official_player_market_for(stat, sport=sport)
-                        )
-                        has_raw_games = bool(
-                            _propline_raw_player_game_stat_supported(sport, stat)
-                        )
-                        if has_market or has_raw_games:
-                            market = str(stat or "").strip().lower() or "unknown"
-                            propline_attempts_by_sport[sport] = (
-                                propline_attempts_by_sport.get(sport, 0) + 1
-                            )
-                            sport_markets = (
-                                propline_attempts_by_sport_market.setdefault(
-                                    sport, {}
-                                )
-                            )
-                            sport_markets[market] = (
-                                sport_markets.get(market, 0) + 1
-                            )
-                            try:
-                                remaining = target_deadline - time.monotonic()
-                                if remaining <= 0:
-                                    return timeout_status, None
-                                supplemental = await asyncio.wait_for(
-                                    supplement(
-                                        db,
-                                        player,
-                                        sport,
-                                        stat,
-                                        min_samples=5,
-                                        source_provider=source_scope(
-                                            (player, sport, stat)
-                                        ) or "Underdog",
-                                    ),
-                                    timeout=remaining,
-                                )
-                                supplemental_rows = validate_player_result_rows(
-                                    supplemental,
-                                    player_name=player,
-                                    sport=sport,
-                                    stat_type=stat,
-                                )
-                                if supplemental_rows:
-                                    usable_rows = list(usable_rows) + list(
-                                        supplemental_rows
-                                    )
-                                coverage = propline_coverage_by_sport.setdefault(
-                                    sport,
-                                    {},
-                                )
-                                coverage[market] = (
-                                    coverage.get(market, 0)
-                                    + len(supplemental_rows)
-                                )
-                                logger.info(
-                                    "player_history_collector_job: SPORT=%s "
-                                    "PLAYER=%s GAME/EVENT=%s MARKET=%s "
-                                    "PROVIDER_RESULT=%s NORMALIZED_RESULT=%d "
-                                    "STORED_EVIDENCE=pending_batch",
-                                    sport,
-                                    player,
-                                    ",".join(
-                                        str(getattr(row, "game_id", "") or "")
-                                        for row in supplemental_rows
-                                    ) or "none",
-                                    stat,
-                                    "PropLine",
-                                    len(supplemental_rows),
-                                )
-                            except asyncio.TimeoutError:
-                                logger.info(
-                                    "player_history_collector_job: "
-                                    "INSUFFICIENT_EVIDENCE sport=%s player=%s "
-                                    "market=%s reason=propline_timeout",
-                                    sport,
-                                    player,
-                                    stat,
-                                )
-                            except Exception as exc:
-                                logger.debug(
-                                    "player_history_collector_job: PropLine "
-                                    "supplement failed for %s/%s/%s: %s",
-                                    player,
-                                    sport,
-                                    stat,
-                                    exc,
-                                )
-                        else:
-                            insufficient_evidence_by_sport[sport] = (
-                                insufficient_evidence_by_sport.get(sport, 0) + 1
-                            )
-                            logger.info(
-                                "player_history_collector_job: "
-                                "INSUFFICIENT_EVIDENCE sport=%s player=%s "
-                                "market=%s reason=no_propline_player_result_route",
-                                sport,
-                                player,
-                                stat,
-                            )
                     coverage = SimpleNamespace(
                         rows=usable_rows,
                         status="usable" if usable_rows else "",
@@ -1092,7 +1075,6 @@ async def player_history_collector_job(context) -> None:
             rows_by_sport.setdefault(sport, 0)
             no_result_by_sport.setdefault(sport, 0)
             propline_coverage_by_sport.setdefault(sport, {})
-            insufficient_evidence_by_sport.setdefault(sport, 0)
 
         async def write_batch(batch: list[object]) -> None:
             """Persist one completed result batch without the fetch deadline."""
@@ -1197,8 +1179,7 @@ async def player_history_collector_job(context) -> None:
              "propline_attempts_by_sport=%s "
             "propline_coverage_by_sport=%s "
             "propline_attempts_by_sport_market=%s "
-             "propline_coverage_by_sport_market=%s "
-             "insufficient_evidence_by_sport=%s",
+             "propline_coverage_by_sport_market=%s",
             ok, rows, persisted_rows, processed, rows,
             len(cycle_targets) - processed, processed,
             len(cycle_targets) - processed, failed, deadline_targets,
@@ -1210,7 +1191,7 @@ async def player_history_collector_job(context) -> None:
             ok_by_sport, rows_by_sport, no_result_by_sport,
             propline_attempts_by_sport,
             propline_coverage_by_sport, propline_attempts_by_sport_market,
-            propline_coverage_by_sport_market, insufficient_evidence_by_sport,
+            propline_coverage_by_sport_market,
         )
     except Exception as exc:
         logger.exception("player_history_collector_job: %s", exc)
@@ -1218,6 +1199,17 @@ async def player_history_collector_job(context) -> None:
 
 async def _persist_propline_player_history_rows(db, target, result) -> int:
     """Persist only explicitly settled entries from an already-fetched rotation result."""
+    if is_football_related_sport(
+        getattr(target, "canonical_sport", "") or getattr(target, "sport", "")
+    ):
+        logger.info(
+            "propline_read_only_rotation_job: INSUFFICIENT_EVIDENCE "
+            "sport=%s player=%s market=%s reason=football_excluded_from_propline",
+            getattr(target, "canonical_sport", ""),
+            getattr(target, "player_name", ""),
+            getattr(target, "market", ""),
+        )
+        return 0
     if (
         str(getattr(target, "family", "") or "") != "player_history"
         or not bool(getattr(result, "succeeded", False))
@@ -1286,6 +1278,31 @@ async def propline_read_only_rotation_job(context) -> None:
             active = await db.get_active_underdog_snapshot_per_prop()
             active_rows = list(active.values()) if hasattr(active, "values") else list(active or [])
 
+        def _source_value(value, *names):
+            if isinstance(value, dict):
+                for name in names:
+                    candidate = value.get(name)
+                    if candidate not in (None, ""):
+                        return candidate
+                return None
+            for name in names:
+                candidate = getattr(value, name, None)
+                if candidate not in (None, ""):
+                    return candidate
+            return None
+
+        active_before_football_filter = len(active_rows)
+        active_rows = [
+            row
+            for row in active_rows
+            if not is_football_related_sport(
+                _source_value(row, "sport", "sport_key", "league")
+            )
+        ]
+        excluded_football_active = (
+            active_before_football_filter - len(active_rows)
+        )
+
         async def cached_discovery(family: str, target_key: str, official: str):
             reader = getattr(db, "get_propline_evidence", None)
             if not asyncio.iscoroutinefunction(reader):
@@ -1343,6 +1360,24 @@ async def propline_read_only_rotation_job(context) -> None:
                     discovered_sports,
                     active_props=active_rows,
                 )
+        propline_sports = [
+            sport
+            for sport in discovered_sports or ()
+            if not is_football_related_sport(
+                _source_value(
+                    sport,
+                    "canonical_key",
+                    "canonical_sport",
+                    "sport",
+                    "official_key",
+                    "sport_key",
+                    "key",
+                )
+            )
+        ]
+        excluded_football_sports = (
+            len(discovered_sports or ()) - len(propline_sports)
+        )
         if discovery_audit.pending:
             logger.warning(
                 "propline_read_only_rotation_job: discovery audit pending "
@@ -1356,7 +1391,7 @@ async def propline_read_only_rotation_job(context) -> None:
             # Event discovery is deliberately sequential: each request uses
             # the client's persistent limiter and a restart can safely repeat
             # the last discovery without creating an unbounded burst.
-            for sport in discovered_sports:
+            for sport in propline_sports:
                 official_sport = (
                     getattr(sport, "official_key", None)
                     or getattr(sport, "sport_key", None)
@@ -1397,7 +1432,7 @@ async def propline_read_only_rotation_job(context) -> None:
                     events_by_sport[official_sport] = tuple(events)
         targets = build_propline_read_only_targets(
             active_rows,
-            sports=discovered_sports,
+            sports=propline_sports,
             events_by_sport=events_by_sport,
         )
 
@@ -1554,10 +1589,36 @@ async def propline_read_only_rotation_job(context) -> None:
                     if rows:
                         writer = getattr(db, "upsert_player_results_bulk", None)
                         if callable(writer):
-                            await writer(rows)
+                            stored = await writer(rows)
                         else:
                             for row in rows:
                                 await db.upsert_player_result(row)
+                            stored = len(rows)
+                        logger.info(
+                            "PropLine player-game evidence sport=%s league=%s "
+                            "player=%s market=%s rows_after_identity_dedupe=%d "
+                            "normalized=%d db_upsert_rows=%s "
+                            "duplicate_policy=unique_game_identity "
+                            "result_source=propline_player_games",
+                            target.canonical_sport,
+                            target.official_sport,
+                            target.player_name,
+                            target.market,
+                            len(rows),
+                            len(rows),
+                            stored if stored is not None else len(rows),
+                        )
+                    else:
+                        logger.info(
+                            "PropLine INSUFFICIENT_EVIDENCE sport=%s league=%s "
+                            "player=%s event_id=%s market=%s "
+                            "reason=no_explicit_final_player_stat",
+                            target.canonical_sport,
+                            target.official_sport,
+                            target.player_name,
+                            target.event_id or "not_available",
+                            target.market,
+                        )
                 elif target.family == "player_history":
                     await _persist_propline_player_history_rows(
                         db, target, result
@@ -1585,6 +1646,17 @@ async def propline_read_only_rotation_job(context) -> None:
             max_requests_per_cycle=4,
         )
         report = await rotation.run(targets, persist=persist)
+        for provenance in report.provenance:
+            if (
+                provenance.get("family") == "player_games"
+                and provenance.get("status") != "completed"
+            ):
+                logger.info(
+                    "PropLine INSUFFICIENT_EVIDENCE family=player_games "
+                    "target=%s reason=%s",
+                    provenance.get("target", ""),
+                    provenance.get("reason") or "no_complete_response",
+                )
         report = replace(
             report,
             discovery_audit=discovery_audit_payload,
@@ -1594,7 +1666,8 @@ async def propline_read_only_rotation_job(context) -> None:
         logger.info(
             "propline_read_only_rotation_job: attempted=%d completed=%d "
             "persisted=%d pending=%d skipped=%d errors=%d next_family=%s "
-            "families=%s",
+            "families=%s excluded_football_active_props=%d "
+            "excluded_football_sports=%d",
             report.attempted,
             report.completed,
             report.persisted,
@@ -1603,6 +1676,8 @@ async def propline_read_only_rotation_job(context) -> None:
             report.errors,
             report.next_family,
             report.family_counts,
+            excluded_football_active,
+            excluded_football_sports,
         )
     except Exception as exc:  # noqa: BLE001
         logger.exception("propline_read_only_rotation_job: %s", exc)

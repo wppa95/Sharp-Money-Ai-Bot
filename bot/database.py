@@ -7858,6 +7858,7 @@ class Database:
             return case(
                 (source_expression == "propline_event_results", 30),
                 (source_expression == "propline_history", 20),
+                (source_expression == "propline_event_stats", 15),
                 (source_expression == "propline_player_games", 10),
                 else_=0,
             )

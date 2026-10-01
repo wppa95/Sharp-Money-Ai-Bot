@@ -203,9 +203,7 @@ async def test_player_history_does_not_persist_unusable_single_player_rows():
 
 
 @pytest.mark.asyncio
-async def test_nonfootball_collector_persists_propline_player_result_supplement():
-    from providers.player_stats import RawGameResult
-
+async def test_player_history_collector_leaves_propline_calls_to_bounded_rotation():
     snapshot = SimpleNamespace(
         player_name="NBA Player",
         sport="NBA",
@@ -220,18 +218,7 @@ async def test_nonfootball_collector_persists_propline_player_result_supplement(
     primary_provider.fetch_results = AsyncMock(return_value=[])
     scheduled_provider = MagicMock()
     scheduled_provider.supplement_missing_results = AsyncMock(
-        return_value=[
-            RawGameResult(
-                player_name="NBA Player",
-                sport="NBA",
-                stat_type="points",
-                game_date="2026-09-20",
-                actual_value=24.0,
-                opponent="CHI",
-                source="propline_player_games",
-                game_id="nba-event-1",
-            )
-        ]
+        side_effect=AssertionError("unbounded PropLine supplement")
     )
     context = SimpleNamespace(
         bot_data={
@@ -246,10 +233,11 @@ async def test_nonfootball_collector_persists_propline_player_result_supplement(
     ):
         await player_history_collector_job(context)
 
-    scheduled_provider.supplement_missing_results.assert_awaited_once()
-    saved = db.upsert_player_results_bulk.await_args.args[0]
-    assert [row.game_id for row in saved] == ["nba-event-1"]
-    assert saved[0].source == "propline_player_games"
+    scheduled_provider.supplement_missing_results.assert_not_awaited()
+    primary_provider.fetch_results.assert_awaited_once_with(
+        "NBA Player", "NBA", "points"
+    )
+    db.upsert_player_results_bulk.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -593,7 +581,7 @@ def test_player_games_map_cs2_market_to_documented_maps_1_2_field():
     ("sport", "official_sport"),
     [("NFL", "football_nfl"), ("CFB", "football_ncaaf")],
 )
-def test_player_games_persist_final_football_rows_to_shared_history(
+def test_player_games_never_persist_football_rows_to_shared_history(
     sport, official_sport
 ):
     target = PropLineReadOnlyTarget(
@@ -618,19 +606,7 @@ def test_player_games_persist_final_football_rows_to_shared_history(
     rows = _completed_propline_game_rows(target, result)
 
     assert persisted_payload == result.payload
-    assert [
-        (row.player_name, row.sport, row.stat_type, row.game_id, row.actual_value)
-        for row in rows
-    ] == [
-        (
-            "Football Player",
-            sport,
-            "passing yards",
-            f"{sport.lower()}-final",
-            250.0,
-        ),
-    ]
-    assert rows[0].source == "propline_player_games"
+    assert rows == []
 
 
 @pytest.mark.asyncio
