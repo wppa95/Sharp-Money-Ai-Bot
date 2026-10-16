@@ -443,7 +443,10 @@ def test_fetch_uses_documented_endpoints_and_never_single_player_stats(tmp_path)
     }
     assert "markets" not in calls["fetch_event_results"]
     assert calls["fetch_event_stats"]["stat_type"] == "points"
-    assert calls["fetch_player_games"] == {"limit": 100}
+    assert calls["fetch_player_games"] == {
+        "limit": 100,
+        "stat_type": "points",
+    }
     assert calls["fetch_player_history"]["limit"] == 100
     assert calls["fetch_player_history"]["bookmaker"] == "prizepicks"
 
@@ -705,7 +708,7 @@ async def test_read_only_player_history_rotation_persists_verified_rows():
 
 
 @pytest.mark.asyncio
-async def test_read_only_history_persists_settled_nfl_and_rejects_incomplete():
+async def test_read_only_history_excludes_football_and_rejects_incomplete():
     from types import SimpleNamespace
     from unittest.mock import AsyncMock, MagicMock
 
@@ -748,12 +751,9 @@ async def test_read_only_history_persists_settled_nfl_and_rejects_incomplete():
         ),
     )
 
-    assert football_count == 1
+    assert football_count == 0
     assert incomplete_count == 0
-    db.upsert_player_results_bulk.assert_awaited_once()
-    saved = db.upsert_player_results_bulk.await_args.args[0]
-    assert len(saved) == 1
-    assert saved[0].sport == "NFL"
+    db.upsert_player_results_bulk.assert_not_awaited()
     assert saved[0].stat_type == "passing yards"
     assert saved[0].game_id == "match-1"
     assert saved[0].source == "propline_history"
