@@ -577,6 +577,63 @@ def test_player_games_map_cs2_market_to_documented_maps_1_2_field():
     ]
 
 
+def test_player_games_require_matching_player_sport_stat_and_final_value():
+    target = PropLineReadOnlyTarget(
+        family="player_games",
+        official_sport="basketball_nba",
+        canonical_sport="NBA",
+        player_name="History Player",
+        market="points",
+    )
+    result = SimpleNamespace(
+        payload={
+            "games": [
+                {
+                    "game_id": "no-stat",
+                    "status": "Final",
+                    "game_date": "2026-09-20",
+                    "actual_value": 28,
+                },
+                {
+                    "game_id": "wrong-stat",
+                    "status": "Final",
+                    "game_date": "2026-09-20",
+                    "stat_type": "assists",
+                    "actual_value": 8,
+                },
+                {
+                    "game_id": "wrong-player",
+                    "status": "Final",
+                    "game_date": "2026-09-20",
+                    "player_name": "Different Player",
+                    "stats": {"points": 31},
+                },
+                {
+                    "game_id": "wrong-sport",
+                    "status": "Final",
+                    "game_date": "2026-09-20",
+                    "sport": "NFL",
+                    "stats": {"points": 31},
+                },
+                {
+                    "game_id": "valid",
+                    "status": "Final",
+                    "game_date": "2026-09-20",
+                    "player_name": "History Player",
+                    "sport": "NBA",
+                    "stats": {"player_points": 21},
+                },
+            ]
+        }
+    )
+
+    rows = _completed_propline_game_rows(target, result)
+
+    assert [(row.game_id, row.stat_type, row.actual_value) for row in rows] == [
+        ("valid", "points", 21.0),
+    ]
+
+
 @pytest.mark.parametrize(
     ("sport", "official_sport"),
     [("NFL", "football_nfl"), ("CFB", "football_ncaaf")],

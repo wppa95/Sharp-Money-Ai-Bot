@@ -9,7 +9,9 @@ a separate persistence timeout, and report any rows that could not be written.
 
 **Why:** A large active book can finish collection at the cadence boundary; using
 the same deadline for writes turned a successful fetch into zero persisted
-evidence and made later grading impossible.
+evidence and made later grading impossible. Per-row UPSERT CASE expressions also
+consume bind variables and can push a safe-looking batch over SQLite's 999-variable
+ceiling.
 
 **How to apply:** Treat fetch timing and evidence persistence as separate phases.
 Keep SQLite history writes bulk-oriented with large bounded upsert batches
@@ -17,4 +19,6 @@ Keep SQLite history writes bulk-oriented with large bounded upsert batches
 the shared write window per batch, not for the entire drain, so the two-minute
 FPR can run between history batches. Use only a small cooperative yield between
 commits, and make supplemental provider calls timeout-bounded without replacing
-valid primary-provider rows.
+valid primary-provider rows. Recompute the SQLite bind-variable budget whenever
+per-row UPSERT conditions change; application batch limits do not guarantee that
+the generated SQL stays below the engine's parameter ceiling.

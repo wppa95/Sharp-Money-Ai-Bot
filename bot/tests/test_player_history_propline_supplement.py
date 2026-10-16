@@ -301,7 +301,7 @@ async def test_event_stats_rejects_in_progress_and_provider_failure_without_writ
 
 
 @pytest.mark.asyncio
-async def test_event_stats_supports_football():
+async def test_event_stats_excludes_football():
     client = _event_stats_client(
         players=[{"name": "Alex Example", "stats": {"points": 31}}]
     )
@@ -312,7 +312,7 @@ async def test_event_stats_supports_football():
         "NFL", "NFL", "passing yards"
     )
     assert rows == []
-    client.fetch_scores.assert_awaited_once()
+    client.fetch_scores.assert_not_awaited()
 
 
 @pytest.mark.asyncio

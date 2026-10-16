@@ -7865,11 +7865,13 @@ class Database:
 
         prepared_rows = list(prepared.values())
         async with self.session() as s:
-            # Nine result columns per row; 100 rows stays below conservative
-            # SQLite builds' 999-variable limit for multi-values statements.
-            for offset in range(0, len(prepared_rows), 100):
+            # Per-row UPSERT conflict guards add bound parameters in addition
+            # to the result columns. Keep batches at 90 to stay below the
+            # conservative SQLite 999-variable limit.
+            batch_size = 90
+            for offset in range(0, len(prepared_rows), batch_size):
                 insert_stmt = sqlite_insert(PlayerGameResult).values(
-                    prepared_rows[offset : offset + 100]
+                    prepared_rows[offset : offset + batch_size]
                 )
                 incoming_source = func.lower(
                     func.trim(func.coalesce(insert_stmt.excluded.source, ""))

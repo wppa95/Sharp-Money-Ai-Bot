@@ -66,7 +66,7 @@ async def test_grader_bulk_paths_process_more_than_two_thousand_rows(db: Databas
         event.remove(
             db._engine.sync_engine, "before_cursor_execute", capture_result_inserts
         )
-    assert len(result_insert_binds) == ceil(total / 100)
+    assert len(result_insert_binds) == ceil(total / 90)
     assert max(result_insert_binds) <= 999
 
     props = [

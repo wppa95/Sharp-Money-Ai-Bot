@@ -558,6 +558,31 @@ def test_rotation_checkpoints_each_request_and_resumes_after_restart(tmp_path):
     assert second.provenance
 
 
+@pytest.mark.asyncio
+async def test_rotation_never_requests_football_targets(tmp_path):
+    from providers.propline import (
+        PropLineReadOnlyRotation,
+        PropLineReadOnlyTarget,
+    )
+
+    target = PropLineReadOnlyTarget(
+        family="event_results",
+        official_sport="football_nfl",
+        canonical_sport="NFL",
+        event_id="nfl-event",
+    )
+    rotation = PropLineReadOnlyRotation(
+        object(),
+        state_path=str(tmp_path / "rotation.sqlite3"),
+        max_requests_per_cycle=4,
+    )
+
+    report = await rotation.run([target])
+
+    assert report.attempted == 0
+    assert report.completed == 0
+
+
 def test_rotation_reports_unresolved_results_without_persisting_them(tmp_path):
     target = build_propline_read_only_targets(
         [
@@ -754,9 +779,6 @@ async def test_read_only_history_excludes_football_and_rejects_incomplete():
     assert football_count == 0
     assert incomplete_count == 0
     db.upsert_player_results_bulk.assert_not_awaited()
-    assert saved[0].stat_type == "passing yards"
-    assert saved[0].game_id == "match-1"
-    assert saved[0].source == "propline_history"
 
 
 @pytest.mark.asyncio
