@@ -2322,11 +2322,31 @@ async def _fetch_and_compute_hit_rates(
         if not _supports_history_enrichment(db):
             allow_remote = False
 
+        # Read existing evidence before attempting optional provider refreshes.
+        # A provider outage must not turn usable local history into no history.
+        if preloaded_results is not None:
+            db_results = list(preloaded_results)
+        elif cycle_timing is not None:
+            db_results = await cycle_timing.await_db(
+                "read", "get_player_results",
+                db.get_player_results(player_name, sport, stat_type, limit=30),
+            )
+        else:
+            db_results = await db.get_player_results(
+                player_name, sport, stat_type, limit=30
+            )
+        if not isinstance(db_results, list):
+            db_results = []
+        db_results = [
+            row for row in db_results
+            if str(getattr(row, "source", "") or "").casefold()
+            != "sleeper_stats_weekly"
+        ]
+
         if (
             allow_remote
             and cache_key not in _player_result_fetch_cache
-            and len(list(preloaded_results or []))
-            < config.UD_VALIDATION_MIN_SAMPLES
+            and len(db_results) < config.UD_VALIDATION_MIN_SAMPLES
         ):
             provider = _get_player_stats_provider()
             # Guard against unbounded growth: clear the whole set when it exceeds the
@@ -2339,17 +2359,24 @@ async def _fetch_and_compute_hit_rates(
                 )
                 _player_result_fetch_cache.clear()
             _provider_started = time.monotonic()
-            if cycle_timing is not None:
-                raw_results = await provider.fetch_results(
-                    player_name,
-                    sport,
-                    stat_type,
-                    instrumentation=cycle_timing,
+            try:
+                if cycle_timing is not None:
+                    raw_results = await provider.fetch_results(
+                        player_name,
+                        sport,
+                        stat_type,
+                        instrumentation=cycle_timing,
+                    )
+                else:
+                    raw_results = await provider.fetch_results(
+                        player_name, sport, stat_type
+                    )
+            except Exception as exc:
+                logger.warning(
+                    "Optional history refresh failed for %s/%s; retaining "
+                    "local evidence: %s", player_name, stat_type, exc,
                 )
-            else:
-                raw_results = await provider.fetch_results(
-                    player_name, sport, stat_type
-                )
+                raw_results = []
             if cycle_timing is not None:
                 cycle_timing.provider(
                     _player_provider_label(sport),
@@ -2378,24 +2405,15 @@ async def _fetch_and_compute_hit_rates(
                         await db.upsert_player_result(r)
             _player_result_fetch_cache.add(cache_key)
             if raw_results:
+                if preloaded_results is None:
+                    db_results = await db.get_player_results(
+                        player_name, sport, stat_type, limit=30
+                    )
                 logger.debug(
                     "player_results: fetched %d results for %s / %s",
                     len(raw_results), player_name, stat_type,
                 )
 
-        # An explicit preloaded batch, including an empty batch, is authoritative
-        # for this live scan. The independent history collector owns any durable
-        # refill; do not reopen SQLite per prop after a bulk hydration miss.
-        if preloaded_results is not None:
-            db_results = list(preloaded_results)
-        elif cycle_timing is not None:
-            db_results = await cycle_timing.await_db(
-                "read",
-                "get_player_results",
-                db.get_player_results(player_name, sport, stat_type, limit=30),
-            )
-        else:
-            db_results = await db.get_player_results(player_name, sport, stat_type, limit=30)
         if not isinstance(db_results, list):
             db_results = []
         if cycle_timing is not None:

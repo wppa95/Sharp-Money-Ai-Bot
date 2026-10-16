@@ -528,11 +528,11 @@ def test_client_handles_rate_limit_with_backoff():
     assert len(session.calls) == 1
 
 
-def test_client_default_pacing_uses_shared_pro_subscription_cap():
+def test_client_default_pacing_uses_shared_operating_cap():
     client = PropLineClient(api_key="test-only-key")
 
-    assert client.min_request_interval == pytest.approx(3600 / 1020)
-    assert client.request_limiter.effective_limit == 1020
+    assert client.min_request_interval == pytest.approx(90)
+    assert client.request_limiter.effective_limit == 40
     assert client.endpoint_request_limiter is client.request_limiter
 
 
@@ -547,7 +547,7 @@ def test_shared_limiter_caps_rate_and_continuously_spaces_requests():
     limiter = PropLineRequestLimiter(limit=2000, clock=lambda: clock[0], sleep=advance)
 
     async def exercise():
-        for _ in range(1020):
+        for _ in range(40):
             await limiter.acquire()
         before = list(limiter._request_times)
         await limiter.acquire()
@@ -555,10 +555,10 @@ def test_shared_limiter_caps_rate_and_continuously_spaces_requests():
 
     before = asyncio.run(exercise())
 
-    assert limiter.configured_limit == 1020
-    assert len(before) == 1020
-    assert all(delay == pytest.approx(3600 / 1020) for delay in sleeps)
-    assert clock[0] >= 3600 / 1020 * 1020
+    assert limiter.configured_limit == 40
+    assert len(before) == 40
+    assert all(delay == pytest.approx(90) for delay in sleeps)
+    assert clock[0] >= 3600
 
 
 def test_ledger_limiter_is_shared_and_restart_safe(tmp_path):
@@ -630,8 +630,8 @@ def test_daily_quota_headers_do_not_change_hourly_pacing():
     limiter.observe_provider_limit({"X-RateLimit-Limit": "100"})
     limiter.observe_provider_limit({"X-RateLimit-Limit": "999"})
 
-    assert limiter.effective_limit == 1020
-    assert limiter.min_interval == pytest.approx(3600 / 1020)
+    assert limiter.effective_limit == 40
+    assert limiter.min_interval == pytest.approx(90)
 
 
 def test_public_and_pro_daily_headers_are_telemetry_only():
@@ -646,7 +646,7 @@ def test_public_and_pro_daily_headers_are_telemetry_only():
         "X-Daily-Limit": "25000",
         "X-Daily-Remaining": "24999",
     })
-    assert limiter.effective_limit == 1020
+    assert limiter.effective_limit == 40
     assert limiter._provider_headers["x-daily-limit"] == "25000"
 
 
@@ -1422,11 +1422,11 @@ def test_propline_line_movement_rejects_mixed_source_identities():
 def test_propline_default_budget_matches_plan_without_exceeding_hourly_limit():
     budget = PropLineRequestBudget()
 
-    assert PROPLINE_DAILY_REQUEST_LIMIT == 25_000
-    assert budget.limit == 25_000
-    assert PROPLINE_ENDPOINT_DAILY_REQUEST_LIMIT == 25_000
-    assert PROPLINE_ENDPOINT_REQUESTS_PER_HOUR == 1020
-    assert PROPLINE_MAX_REQUESTS_PER_HOUR == 1020
+    assert PROPLINE_DAILY_REQUEST_LIMIT == 1_000
+    assert budget.limit == 1_000
+    assert PROPLINE_ENDPOINT_DAILY_REQUEST_LIMIT == 1_000
+    assert PROPLINE_ENDPOINT_REQUESTS_PER_HOUR == 40
+    assert PROPLINE_MAX_REQUESTS_PER_HOUR == 40
 
 
 def test_sports_pagination_follows_all_cursors_without_a_page_ceiling():

@@ -99,7 +99,8 @@ async def test_cs_does_not_use_singular_propline_history_enrichment():
     assert result.has_real_data is True
     assert result.total_games == 5
     assert result.n_supplemental_games == 5
-    primary_provider.fetch_results.assert_awaited_once()
+    # Existing complete shared history wins over another provider request.
+    primary_provider.fetch_results.assert_not_awaited()
 
 
 def test_propline_history_is_valid_delivery_evidence():

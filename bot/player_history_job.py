@@ -15,6 +15,7 @@ from engine.sport_policy import (
     canonical_sport_key,
     is_football_related_sport,
 )
+from providers.propline import PROPLINE_DEFAULT_REQUESTS_PER_HOUR
 
 logger = logging.getLogger(__name__)
 
@@ -87,12 +88,12 @@ _PLAYER_PROP_PROVIDERS = tuple(
     if enabled
 )
 _PRIORITY_TARGETS_KEY = "_player_history_priority_targets"
-# PropLine's Pro allowance is shared by every authenticated endpoint and
+# PropLine's operating allowance is shared by every authenticated endpoint and
 # client process.  The collector owns the history-target portion of that
 # allowance; the client limiter is the final admission gate for all endpoint
 # kinds.  At the default three-minute cadence this selects a quota-sized target
 # batch per cycle, rather than the old one-target throttle.
-_PROPLINE_REQUESTS_PER_HOUR = 1_020
+_PROPLINE_REQUESTS_PER_HOUR = PROPLINE_DEFAULT_REQUESTS_PER_HOUR
 _PLAYER_HISTORY_PROPLINE_TARGETS_PER_CYCLE = max(
     1,
     int(

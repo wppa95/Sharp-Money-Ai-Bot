@@ -73,7 +73,9 @@ _TERMINAL_GRADE_RESULTS = frozenset({
     "INJURY_VOID", "GAME_INTERRUPTED", "UNRESOLVED", "OUTLIER",
     "PLATFORM_DIFF",
 })
-_UNTRUSTED_PLAYER_RESULT_SOURCES = frozenset({"", "graded_prop", "manual", "unknown"})
+_UNTRUSTED_PLAYER_RESULT_SOURCES = frozenset({
+    "", "graded_prop", "manual", "unknown", "sleeper_stats_weekly",
+})
 _DB_WRITE_MAX_RETRIES = 4
 _DB_WRITE_RETRY_DELAYS = (1.0, 3.0, 7.0, 15.0)
 _PRIZEPICKS_EXTERNAL_PREFIX = "PrizePicks::"
@@ -7948,6 +7950,8 @@ class Database:
                     PlayerGameResult.player_name == player_name,
                     PlayerGameResult.sport       == sport,
                     PlayerGameResult.stat_type   == stat_type.lower().strip(),
+                    # Audit-only weekly totals are not individual games.
+                    PlayerGameResult.source != "sleeper_stats_weekly",
                 )
                 .order_by(desc(PlayerGameResult.game_date))
                 .limit(limit)
@@ -7984,6 +7988,7 @@ class Database:
                         PlayerGameResult.player_name.in_(player_chunk),
                         PlayerGameResult.sport.in_(sports),
                         PlayerGameResult.stat_type.in_(stats),
+                        PlayerGameResult.source != "sleeper_stats_weekly",
                     )
                 )
                 for record in result.scalars().all():

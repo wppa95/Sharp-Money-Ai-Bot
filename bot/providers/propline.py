@@ -238,8 +238,9 @@ class PropLineNotFoundError(PropLineError):
     """PropLine returned a 404 for an event that may have rotated."""
 
 
-PROPLINE_DAILY_REQUEST_LIMIT = 25_000
-PROPLINE_ENDPOINT_DAILY_REQUEST_LIMIT = 25_000
+PROPLINE_DAILY_REQUEST_LIMIT = 1_000
+PROPLINE_DAILY_REQUEST_TARGET = 960
+PROPLINE_ENDPOINT_DAILY_REQUEST_LIMIT = PROPLINE_DAILY_REQUEST_LIMIT
 
 
 class PropLineRequestBudget:
@@ -257,7 +258,7 @@ class PropLineRequestBudget:
         day_factory: Callable[[], Any] | None = None,
         ledger_path: Optional[str] = None,
     ) -> None:
-        self.limit = max(1, int(limit))
+        self.limit = min(PROPLINE_DAILY_REQUEST_LIMIT, max(1, int(limit)))
         self._day_factory = day_factory or (lambda: datetime.utcnow().date())
         self._day = self._day_factory()
         self._count = 0
@@ -337,12 +338,12 @@ class PropLineRequestBudget:
         self._count = 0
 
 
-# PropLine's hard provider allowance.  The limiter below is the only request
-# admission point, so separate client instances cannot burst independently.
-PROPLINE_RECOVERY_REQUESTS_PER_HOUR = 816
-PROPLINE_DEFAULT_REQUESTS_PER_HOUR = 1_020
-PROPLINE_MAX_REQUESTS_PER_HOUR = 1_020
-PROPLINE_ENDPOINT_REQUESTS_PER_HOUR = 1_020
+# Bot operating limits, independent of the provider's subscription allowance.
+# One admission point prevents separate clients from bursting independently.
+PROPLINE_RECOVERY_REQUESTS_PER_HOUR = 32
+PROPLINE_DEFAULT_REQUESTS_PER_HOUR = 40
+PROPLINE_MAX_REQUESTS_PER_HOUR = 40
+PROPLINE_ENDPOINT_REQUESTS_PER_HOUR = 40
 PROPLINE_RECOVERY_MIN_REQUEST_INTERVAL = (
     3600.0 / PROPLINE_RECOVERY_REQUESTS_PER_HOUR
 )
@@ -352,10 +353,10 @@ _DEFAULT_PROPLINE_BUDGET_LEDGER_PATH = os.getenv(
     os.path.join(os.path.dirname(__file__), "..", "data", "propline_quota.sqlite3"),
 )
 _DEFAULT_PROPLINE_REQUEST_BUDGET = PropLineRequestBudget(
-    PROPLINE_DAILY_REQUEST_LIMIT, ledger_path=_DEFAULT_PROPLINE_BUDGET_LEDGER_PATH
+    PROPLINE_DAILY_REQUEST_TARGET, ledger_path=_DEFAULT_PROPLINE_BUDGET_LEDGER_PATH
 )
 # Feed and endpoint calls spend one subscription quota, not two independent
-# 25,000-call pools.
+# daily pools. Normal operation leaves 40 calls below the hard maximum.
 _DEFAULT_PROPLINE_ENDPOINT_REQUEST_BUDGET = _DEFAULT_PROPLINE_REQUEST_BUDGET
 _DEFAULT_PROPLINE_EXPORT_REQUEST_BUDGET = PropLineRequestBudget(
     50,
@@ -526,7 +527,7 @@ class PropLineRequestLimiter:
         PropLine's ``RateLimit-*`` and ``X-Daily-*`` fields describe the
         subscription's calendar-day allowance.  They are intentionally not
         pacing inputs: a public endpoint may report the free daily limit while
-        the authenticated key has a separate 1,020/hour safety cap.
+        the authenticated key may have a larger allowance than this bot's limits.
         """
         if not headers:
             return
@@ -3573,7 +3574,9 @@ class PropLineClient:
 
     @daily_request_limit.setter
     def daily_request_limit(self, value: int) -> None:
-        self.request_budget.limit = max(1, int(value))
+        self.request_budget.limit = min(
+            PROPLINE_DAILY_REQUEST_LIMIT, max(1, int(value))
+        )
 
     def _reserve_request(self, *, endpoint: bool = False) -> bool:
         self._reset_daily_budget_if_needed()

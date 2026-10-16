@@ -130,7 +130,7 @@
 - [Adaptive learning policy](adaptive-learning-policy.md) — provider-aware weights are explicit, audited, bounded ranking adjustments and never qualification or delivery gates.
 - [Optional score reporting](optional-score-reporting.md) — diagnostic ranking output must tolerate missing scores without aborting the monitoring cycle.
 - [PropLine shared ingestion](propline-shared-ingestion.md) — schedule the shared wrapper and account for canonical deduplication when validating provider batch persistence.
-- [PropLine Pro quota boundary](propline-pro-quota.md) — all authenticated clients share persisted 1,020/hour and 25,000/day limits; Pro excludes webhooks and bulk odds-history.
+- [PropLine operating quota](propline-pro-quota.md) — all clients share a 960/day target, 1,000/day hard cap and 40/hour pace, regardless of advertised plan limits.
 - [PropLine market mapping](propline-market-mapping.md) — resolve sport-specific labels before generic aliases; soccer shots and CS2 map ranges must not be misrouted.
 - [PropLine read-only rotation](propline-readonly-rotation.md) — bounded discovery-backed endpoint rotation shares the persistent limiter and checkpoints family/target progress atomically.
 - [Test fixture contracts](test-fixture-contracts.md) — control current-season provider data, patch active-sport config for pacing, and include all six strict history windows.
