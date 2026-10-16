@@ -1,23 +1,28 @@
 ---
 name: Provider scope separation
-description: ACTIVE_SPORTS is the Underdog scanner universe; PropLine supplies internal evidence
+description: Underdog and PrizePicks are peer primary platforms with shared PropLine evidence
 ---
 
 `ACTIVE_SPORTS` may contain provider-specific identifiers such as CS, LOL, VAL,
 DOTA, PGA, FIFA, and TENNIS. Keep those identifiers in the Underdog namespace
 and do not parse them as a generic `models.Sport` enum.
 
-Apply the configured active-sport allowlist in current pick/slip queries before
-overfetch and sport balancing, while the scanner remains provider-wide.
-PropLine is an internal observation/evidence feed for Underdog picks in
-production, not an independent opportunity or Telegram provider. Persist its
-normalized observations, history, and event-result evidence for Underdog while
-preserving source and event identity for grading and reconciliation; do not
-create a duplicate delivery path.
+Underdog and PrizePicks are equal primary platforms. Keep the native Underdog
+feed and the PrizePicks feed through PropLine. PropLine is also a shared
+supplemental history/results provider for either platform, not a third pick
+platform. Never subordinate, suppress, or delay one platform for the other.
 
-**Why:** PropLine fills evidence and settlement gaps for Underdog without
-becoming a second user-facing book or changing the Underdog pick identity.
+Keep platform-owned picks and original lines distinct in the same central
+SQLite database. Supporting evidence keeps its provider provenance and may
+support both picks only after identity and market validation. Never infer
+settlements from recent-hit percentages.
 
-**How to apply:** Store PropLine data under its original provenance, and only
-grade a saved opportunity when player, sport, stat, and exact event identity
-match; keep no-result and incomplete feeds pending.
+The bot creates and sends individual picks only, not multi-pick slips or
+parlays. Existing journal history may remain readable and gradeable.
+
+**Why:** The user explicitly superseded the Underdog-only primary-platform
+policy with equal Underdog/PrizePicks status and shared PropLine evidence.
+
+**How to apply:** Prefer valid existing history, then originating-platform
+history, then matched PropLine evidence; otherwise mark insufficient. Retain
+one shared paced PropLine budget across ingestion, history, and settlement.

@@ -323,9 +323,8 @@ class Config:
     # Maximum PrizePicks A/B-tier alerts sent per calendar day (UTC).
     # S-tier always bypasses this cap.  Set to 0 to disable.
     DAILY_ALERT_LIMIT: int = int(os.environ.get("DAILY_ALERT_LIMIT", "20"))
-    # Maximum Underdog alerts sent per calendar day (UTC).  Set to 0 to disable.
-    # Default is 0 (unlimited) — the scoring layer is the primary quality gate.
-    # Set DAILY_UNDERDOG_LIMIT env var to a positive integer to re-enable.
+    # Legacy compatibility setting only. V4 primary-platform individual picks
+    # do not use a platform-specific delivery cap.
     DAILY_UNDERDOG_LIMIT: int = int(os.environ.get("DAILY_UNDERDOG_LIMIT", "0"))
     # ── Per-tier confidence minimums ─────────────────────────────────────────
     # Alerts for each tier only fire when decision.confidence ≥ the minimum

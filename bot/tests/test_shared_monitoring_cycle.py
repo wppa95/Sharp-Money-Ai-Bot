@@ -17,6 +17,80 @@ import market_engine
 
 
 @pytest.mark.asyncio
+async def test_prizepicks_evaluates_before_slow_underdog_finishes(monkeypatch):
+    release_ud = asyncio.Event()
+    pp_evaluated = asyncio.Event()
+    prop = SimpleNamespace(player_name="Peer Player")
+    monkeypatch.setattr(market_engine, "_propline_ingest_task", None)
+    monkeypatch.setattr(market_engine, "_prizepicks_cycle_task", None)
+    monkeypatch.setattr(market_engine, "_propline_pending_props", {})
+
+    async def ingestion(_context):
+        market_engine._propline_pending_props["peer"] = prop
+        return True
+
+    async def evaluate(_context, **kwargs):
+        assert kwargs["_fetched_props"] == [prop]
+        assert not release_ud.is_set()
+        pp_evaluated.set()
+
+    async def underdog(_context):
+        await release_ud.wait()
+
+    monkeypatch.setattr(market_engine, "propline_request_scan_job", ingestion)
+    monkeypatch.setattr(market_engine, "_run_prizepicks_independent_cycle", evaluate)
+    task = asyncio.create_task(
+        market_engine._shared_monitoring_cycle(underdog)(SimpleNamespace())
+    )
+    try:
+        await asyncio.wait_for(pp_evaluated.wait(), timeout=1)
+        assert not task.done()
+    finally:
+        release_ud.set()
+        await task
+
+
+@pytest.mark.asyncio
+async def test_busy_prizepicks_worker_retains_next_batch_without_extra_workers(monkeypatch):
+    release = asyncio.Event()
+    batches = []
+    fetched = []
+    monkeypatch.setattr(market_engine, "_propline_ingest_task", None)
+    monkeypatch.setattr(market_engine, "_prizepicks_cycle_task", None)
+    monkeypatch.setattr(market_engine, "_propline_pending_props", {})
+    monkeypatch.setattr(market_engine, "_PROPLINE_HANDOFF_GRACE_SECONDS", 0.001)
+
+    async def ingestion(_context):
+        prop = SimpleNamespace(player_name=f"Player {len(fetched)}")
+        fetched.append(prop)
+        market_engine._propline_pending_props[prop.player_name] = prop
+        return True
+
+    async def evaluate(_context, **kwargs):
+        batches.append(kwargs["_fetched_props"])
+        if len(batches) == 1:
+            await release.wait()
+
+    async def underdog(_context):
+        return None
+
+    monkeypatch.setattr(market_engine, "propline_request_scan_job", ingestion)
+    monkeypatch.setattr(market_engine, "_run_prizepicks_independent_cycle", evaluate)
+    cycle = market_engine._shared_monitoring_cycle(underdog)
+    await cycle(SimpleNamespace())
+    worker = market_engine._prizepicks_cycle_task
+    try:
+        await cycle(SimpleNamespace())
+        assert market_engine._prizepicks_cycle_task is worker
+        assert len(batches) == 1
+    finally:
+        release.set()
+        await worker
+    assert batches == [[fetched[0]], [fetched[1]]]
+    assert not market_engine._propline_pending_props
+
+
+@pytest.mark.asyncio
 async def test_shared_cycle_keeps_propline_internal_to_ingestion(monkeypatch):
     events = []
     underdog_release = asyncio.Event()

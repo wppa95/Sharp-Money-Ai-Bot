@@ -3192,7 +3192,7 @@ async def _cmd_slip_journal(
                 open_slip = history[0]
             else:
                 await update.message.reply_text(
-                    f"{EMOJI['warn']} No slip to grade. Create one: <code>/slip create</code>",
+                    f"{EMOJI['warn']} No slip to grade. New multi-pick slips are disabled.",
                     parse_mode=ParseMode.HTML,
                 )
                 return
@@ -3280,9 +3280,7 @@ async def _cmd_slip_journal(
             "",
             "No manual slips or gradeable auto-sent slips are available.",
             "",
-            "Create one: <code>/slip create [stake]</code>",
-            "Add picks:  <code>/slip add &lt;player&gt;</code>",
-            "Grade:      <code>/slip grade [payout]</code>",
+            "New multi-pick slips are disabled. Use /picks for individual picks.",
         ]
         if auto_stats.get("untracked_deliveries"):
             lines += [
@@ -3521,21 +3519,23 @@ def _auto_slip_evidence_status(
 
 
 async def cmd_slip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """/slip — Build correlation-aware prop slips (2–6 legs) from live market props.
-
-    Usage:
-      /slip             — show best 2-man through 6-man slips simultaneously
-      /slip 3           — show only the 3-man slip
-      /slip create [N]  — create a new betting journal slip ($N stake)
-      /slip add NAME    — add a pick to the open journal slip
-      /slip grade [N]   — grade open slip ($N payout)
-      /slip journal     — show slip journal history
-    """
+    """/slip — Read or grade existing journals; new multi-pick entries disabled."""
     if not _check_allowed(update):
         await update.message.reply_text("⛔ Unauthorized.")
         return
     if _db is None:
         await update.message.reply_text(f"{EMOJI['warn']} Database not ready.")
+        return
+
+    # Existing journals remain readable/gradeable, but V4 only produces
+    # individual picks. Do not build combinations or create/add journal legs.
+    args = context.args or []
+    if not args or args[0].lower() not in {"grade", "journal", "j", "history"}:
+        await update.message.reply_text(
+            "Multi-pick slips are disabled. Use /picks for individual "
+            "Underdog and PrizePicks picks. Existing records remain "
+            "available with /slip journal."
+        )
         return
 
     _slip_build_capture = getattr(context, "_slip_build_capture", None)
@@ -3983,7 +3983,9 @@ def _auto_slip_signature(size: int, slip: object) -> str:
 
 
 async def auto_slip_notifications_job(context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Send a newly qualifying two-leg slip after an Underdog scan."""
+    """Compatibility entry point: V4 never builds or delivers combinations."""
+    return
+
     if _db is None:
         return
     recipients = sorted(config.allowed_user_ids)

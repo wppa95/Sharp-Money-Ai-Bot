@@ -1,9 +1,9 @@
 - [CLV formula direction](clv-formula.md) — CLV% uses (fp_close/fp_bet - 1), NOT (fp_bet/fp_close - 1); higher fp_close = market tightened after your bet = positive CLV.
 - [Player prop picks/slip framework](picks-slip-framework.md) — /picks and /slip use PropPickAdapter wrapping PropLineHistory+PlayerPropMarketComparison; no PP edge data required; PropPickAdapter implements the slip optimizer interface.
-- [Auto-sent slip outcomes](auto-slip-outcomes.md) — settlements or exact/uniquely validated final player-game results grade saved legs; combos are not payout records.
+- [Historical slip outcomes](auto-slip-outcomes.md) — previously saved legs remain gradeable; new multi-pick generation/delivery is disabled; combos are not payout records.
 - [Async test event loop pattern](async-test-loop.md) — Python 3.11 aiosqlite tests must use module-level asyncio.new_event_loop(); never asyncio.get_event_loop() across test files.
-- [Provider and connector architecture](connector-architecture.md) — Underdog owns live pick'em evaluation; PropLine supplies supplemental observations while historical sportsbook identities remain read-only.
-- [Alert source priority](source-priority.md) — Underdog live evaluation → PropLine observations and evidence; retired sportsbook work is out of scope.
+- [Provider and connector architecture](connector-architecture.md) — native Underdog and PropLine-fed PrizePicks are peers; shared evidence never changes pick ownership.
+- [Alert source priority](source-priority.md) — Underdog and PrizePicks have equal priority; retired sportsbook work stays out of scope.
 - [Player Prop Validation + Bet Decision Layer](player-validation-layer.md) — validation gates immediate alerts (n≥5); bet decision (OVER/UNDER/PASS) uses market-proxy signals only; season/h2h always null; stored in 4 new DB columns; shown in every alert.
 - [Esports & Tennis stat providers](esports-tennis-providers.md) — DOTA=OpenDota (free), CS=PandaScore (needs PANDASCORE_API_KEY), Tennis=JeffSackmann CSV (free); multi-map stats scaled by map count; UD_ALERT_SPORTS now includes DOTA/TENNIS/CS.
 - [v1.3 Stability architecture](v13-stability.md) — HealthTracker JSON sidecar, PropLineHistory lifecycle_state, clamp_score, /health + /restarts; re-entry detection; PLAYER PROP MARKET ALERT is the active framework; pregame watch foundation added.
@@ -68,7 +68,7 @@
 - [Unified prop tracking](unified-prop-tracking.md) — persistent monitoring rows are independent of delivery; retired Watchlist/Near-Miss labels must not drive rotation or reports.
 - [Unified monitoring universe](unified-monitoring-universe.md) — every active prop line is continuously scannable; delivery eligibility never creates a rotation or tracking queue.
 - [Directional persistence policy](pass-watchlist-persistence.md) — PASS/no-direction/watchlist are transient scan results; only OVER/UNDER evaluations are persisted.
-- [Provider scope separation](provider-scope-separation.md) — ACTIVE_SPORTS is the Underdog universe; PropLine is internal Underdog evidence, not a user-facing provider.
+- [Primary platform scope](provider-scope-separation.md) — Underdog and PrizePicks are peers; PropLine supports both with shared evidence/budget; only individual picks are delivered.
 - [FPR scheduler starvation](fpr-scheduler-starvation.md) — when Underdog scans exceed the FPR interval, serialized deferrals can prevent live FPR execution without a post-scan handoff.
   - [Provider confirmation boundary](provider-confirmation-boundary.md) — confirmations are read-only PropLine/provider-neutral corroboration; historical sportsbook rows remain reporting-only.
 - [PropLine endpoint safety](propline-endpoint.md) — require an explicit authorized API URL; never send the credential to a guessed host.

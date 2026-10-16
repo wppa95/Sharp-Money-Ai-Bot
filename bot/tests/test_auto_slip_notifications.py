@@ -611,7 +611,7 @@ async def test_auto_slip_player_game_stats_require_saved_event_identity():
 
 
 @pytest.mark.asyncio
-async def test_auto_slips_send_once_and_reoffer_changed_combinations(monkeypatch):
+async def test_auto_slips_never_build_or_send_combinations(monkeypatch):
     from database import Database
     import commands
 
@@ -643,29 +643,13 @@ async def test_auto_slips_send_once_and_reoffer_changed_combinations(monkeypatch
 
     try:
         await commands.auto_slip_notifications_job(context)
-        first_message = bot.send_message.await_args.kwargs["text"]
-        assert bot.send_message.await_count == 1
-        assert "CS 2-leg section" in first_message
-        assert "TENNIS 2-leg section" not in first_message
-        assert "Today's qualifying two-pick slip" in first_message
-
         await commands.auto_slip_notifications_job(context)
-        assert bot.send_message.await_count == 2
-        second_message = bot.send_message.await_args.kwargs["text"]
-        assert "CS 2-leg section" not in second_message
-        assert "TENNIS 2-leg section" in second_message
-
         await commands.auto_slip_notifications_job(context)
-        assert bot.send_message.await_count == 2
-
         slips_by_sport["TENNIS"] = _slip(
             2, line=19.5, sport="TENNIS"
         )
         await commands.auto_slip_notifications_job(context)
-        assert bot.send_message.await_count == 3
-        changed_message = bot.send_message.await_args.kwargs["text"]
-        assert "TENNIS 2-leg section" in changed_message
-        assert "CS 2-leg section" not in changed_message
+        bot.send_message.assert_not_awaited()
     finally:
         await db.close()
 
@@ -701,7 +685,7 @@ def test_automatic_slips_require_a_known_start_within_two_hours(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_failed_telegram_send_releases_slip_claim_for_retry(monkeypatch):
+async def test_disabled_auto_slips_do_not_claim_or_retry_delivery(monkeypatch):
     from database import Database
     import commands
 
@@ -734,7 +718,7 @@ async def test_failed_telegram_send_releases_slip_claim_for_retry(monkeypatch):
     try:
         await commands.auto_slip_notifications_job(context)
         await commands.auto_slip_notifications_job(context)
-        assert bot.send_message.await_count == 2
+        bot.send_message.assert_not_awaited()
         signature = hashlib.sha256(
             f"777:{commands._auto_slip_signature(2, slips_by_sport['NBA'])}".encode(
                 "utf-8"
@@ -742,7 +726,7 @@ async def test_failed_telegram_send_releases_slip_claim_for_retry(monkeypatch):
         ).hexdigest()
         assert await db.claim_auto_slip_notification(
             signature, 2
-        ) is False
+        ) is True
     finally:
         await db.close()
 

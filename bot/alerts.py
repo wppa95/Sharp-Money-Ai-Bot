@@ -1849,7 +1849,7 @@ class AlertDelivery:
           0. normalize_underdog → AlertObject.
           1. Scope check.
           2. Game timing filter — skipped only for removals.
-          3. Daily Underdog cap check (disabled by default; set DAILY_UNDERDOG_LIMIT > 0).
+          3. No platform-specific delivery cap.
           4. Canonical direction-and-evidence gate.
           5. Format and broadcast only after an atomic claim.
         """
@@ -1944,17 +1944,8 @@ class AlertDelivery:
                 )
                 return DeliveryResult(sent=False, filtered=True, filtered_reason=timing_reason)
 
-        # 3. Daily Underdog cap (PrizePicks has its own source identity and
-        # must never consume or inherit the Underdog cap).
-        if source_upper == "UNDERDOG" and config.DAILY_UNDERDOG_LIMIT > 0:
-            today_ud = await self._db.count_today_underdog_alerts()
-            if today_ud >= config.DAILY_UNDERDOG_LIMIT:
-                reason = (
-                    f"Daily Underdog alert cap reached "
-                    f"({today_ud}/{config.DAILY_UNDERDOG_LIMIT})"
-                )
-                logger.info("Underdog alert capped: %s | %s | %s", player_name, stat_type, reason)
-                return DeliveryResult(sent=False, filtered=True, filtered_reason=reason)
+        # Both primary platforms attempt every eligible individual pick.
+        # Legacy Underdog-only caps must not weaken one primary platform.
 
         # Removal and market-movement records are monitoring observations,
         # never actionable betting picks.  Keep the low-level formatter

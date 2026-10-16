@@ -54,7 +54,6 @@ from commands import (
     cmd_ev,
     cmd_picks,
     cmd_slip,
-    auto_slip_notifications_job,
     cmd_dashboard,
     cmd_alerts,
     cmd_reconcile,
@@ -176,7 +175,7 @@ TELEGRAM_COMMAND_HANDLERS = (
 # remains the tested implementation behind each durable command identity.
 TELEGRAM_COMMAND_CATALOG = [
     {"command": "picks", "description": "Current directional player prop picks", "category": "Player Props", "usage": "5 · MLB · TENNIS 5", "sort_order": 10},
-    {"command": "slip", "description": "Build a prop slip from top picks", "category": "Player Props", "usage": "[N]", "sort_order": 20},
+    {"command": "slip", "description": "View existing slip journal (new slips disabled)", "category": "Player Props", "usage": "journal", "sort_order": 20},
     {"command": "dashboard", "description": "Player prop activity and provider status", "category": "Player Props", "sort_order": 30},
     {"command": "alerts", "description": "Recent actionable pick alert history", "category": "Player Props", "sort_order": 40},
     {"command": "funnel", "description": "Monitoring and delivery pipeline by provider", "category": "Player Props", "usage": "[hours]", "sort_order": 50},
@@ -706,13 +705,12 @@ async def post_init(application: Application) -> None:
     # ── Provider health monitor + PropLine feed ─────────────────────────────
     _health_monitor = init_health_monitor()
     from providers.propline import PropLinePrizePicksProvider
-    _propline_enabled = PropLinePrizePicksProvider(
-        bookmaker=config.PROPLINE_UNDERDOG_BOOKMAKER
-    ).is_available()
+    _propline_enabled = PropLinePrizePicksProvider().is_available()
     _health_monitor.register("Underdog", disabled=not config.UNDERDOG_ENABLED)
+    _health_monitor.register("PrizePicks", disabled=not _propline_enabled)
     logger.info(
         "Provider health monitor initialised "
-        "(Underdog + PropLine feed=%s; all configured sports enabled)",
+        "(Underdog + PrizePicks via PropLine=%s; all configured sports enabled)",
         "enabled" if _propline_enabled else "disabled",
     )
     if config.discord_configured:
@@ -1112,13 +1110,6 @@ _GRADE_CYCLE_HEADROOM_SECONDS = 15
 async def _underdog_monitor_cycle(context) -> None:
     """Run only the continuous Underdog monitoring cycle."""
     await underdog_job(context)
-    try:
-        # Build slips only after the feed scan has persisted its current cycle.
-        # Notification failures must not turn a completed market scan into a
-        # failed monitoring run.
-        await auto_slip_notifications_job(context)
-    except Exception:
-        logger.exception("auto_slip_notifications: post-scan check failed")
 
 
 # Keep the scheduler-facing callback name stable while retaining the shared
@@ -1294,7 +1285,7 @@ async def _grade_opportunities_job(context) -> None:
             if is_gradeable_player_result_for_event(
                 "Underdog", source, event_id, result_event_id
             ):
-                if source_key == "propline_player_games":
+                if source_key in {"propline_player_games", "propline_event_stats"}:
                     return True
                 if not is_official_underdog_settlement_source(source):
                     return False
@@ -1338,7 +1329,7 @@ async def _grade_opportunities_job(context) -> None:
                     composite_match == expected_composite_match
                 )
             if (
-                source_key == "propline_player_games"
+                source_key in {"propline_player_games", "propline_event_stats"}
                 and event_id
                 and result_event_id
                 and composite_match_valid

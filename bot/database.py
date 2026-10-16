@@ -100,11 +100,11 @@ def is_gradeable_player_result_for_event(
     expected_game_id: object,
     result_game_id: object,
 ) -> bool:
-    """Require an exact event ID for completed PropLine player-game stats."""
+    """Share verified PropLine stats across primary platforms, not pick lines."""
     source_key = str(source or "").strip().casefold()
     if source_key in _UNDERDOG_FINAL_PLAYER_GAME_RESULT_SOURCES:
         provider_key = str(provider or "").strip().casefold()
-        if provider_key not in {"", "underdog"}:
+        if provider_key not in {"", "underdog", "prizepicks"}:
             return False
         expected = str(expected_game_id or "").strip()
         actual = str(result_game_id or "").strip()

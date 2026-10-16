@@ -2538,7 +2538,7 @@ async def _run_prizepicks_independent_cycle(
     _processing_locked: bool = False,
     background_processing: bool = False,
 ) -> None:
-    """Evaluate PropLine observations through the shared Underdog pipeline.
+    """Evaluate PrizePicks observations through the shared Player Props pipeline.
 
     This is deliberately a companion coroutine of ``underdog_job`` rather than
     another scheduled job.  It owns no scoring, result, or delivery rules:
@@ -2968,8 +2968,6 @@ async def _run_prizepicks_independent_cycle(
 
     actionable: list[dict] = []
     _pp_candidate_rows: list[dict] = []
-    enrichment_budget = 250
-    enrichment_used = 0
     evaluated = 0
     directional = 0
 
@@ -3037,17 +3035,15 @@ async def _run_prizepicks_independent_cycle(
             history_snap=history_snap,
         )
 
-        # Keep the existing enrichment safety budget.  This makes a full
-        # multi-sport PropLine response harmless to the public stats providers.
-        hit_rates = None
-        if enrichment_used < enrichment_budget:
-            hit_rates = await _fetch_and_compute_hit_rates(
-                db, player, sport, stat, line,
-                allow_remote=False,
-                source_provider="PrizePicks",
-                opponent=getattr(prop, "opponent", None),
-            )
-            enrichment_used += 1
+        # This is a local-only evidence read, not a provider request. Every
+        # observed PP line gets the same evidence opportunity; API budgets
+        # remain exclusively in the bounded history/request workers.
+        hit_rates = await _fetch_and_compute_hit_rates(
+            db, player, sport, stat, line,
+            allow_remote=False,
+            source_provider="PrizePicks",
+            opponent=getattr(prop, "opponent", None),
+        )
         decision = None
         if hit_rates is not None:
             decision = make_ud_bet_decision(
@@ -4517,12 +4513,27 @@ _PROPLINE_HANDOFF_GRACE_SECONDS = 0.05
 
 
 def _shared_monitoring_cycle(cycle_branch):
-    """Run Underdog, then hand completed PropLine observations to its pipeline."""
+    """Run peer feeds without making either wait for the other's evaluation."""
 
     @wraps(cycle_branch)
     async def _run_shared_cycle(context, *args, **kwargs):
         global _prizepicks_cycle_task, _propline_pending_props
         global _propline_ingest_task
+
+        async def _drain_prizepicks_observations():
+            # One peer worker drains completed batches. If another ingestion
+            # finishes while evaluation is busy, retain its handoff rather
+            # than accumulating tasks waiting on the PP processing lock.
+            while _propline_pending_props:
+                pending_props = list(_propline_pending_props.values())
+                _propline_pending_props.clear()
+                await _run_prizepicks_independent_cycle(
+                    context,
+                    _fetched_props=pending_props,
+                    _fetched_sport="shared",
+                    _fetched_persisted=True,
+                    background_processing=False,
+                )
 
         # Provider-specific authorization and pacing remain inside PropLine,
         # but the fetch is owned by this shared cycle. Start the current-book
@@ -4549,7 +4560,7 @@ def _shared_monitoring_cycle(cycle_branch):
             )
 
             def _finish_propline_ingestion(task: asyncio.Task) -> None:
-                global _propline_ingest_task
+                global _propline_ingest_task, _prizepicks_cycle_task
                 if task.cancelled():
                     return
                 try:
@@ -4561,6 +4572,19 @@ def _shared_monitoring_cycle(cycle_branch):
                         "shared_monitoring_cycle: PropLine ingestion failed: %s",
                         error,
                     )
+                elif task.result():
+                    # Hand off as soon as ingestion completes, even while an
+                    # Underdog scan is still running. The PP processing lock
+                    # serializes only PP batches; identities remain per book.
+                    if _propline_pending_props and (
+                        _prizepicks_cycle_task is None
+                        or _prizepicks_cycle_task.done()
+                    ):
+                        _prizepicks_cycle_task = asyncio.create_task(
+                            _drain_prizepicks_observations(),
+                            name="shared_monitoring_prizepicks",
+                        )
+                        _track_prizepicks_processing_task(_prizepicks_cycle_task)
                 if _propline_ingest_task is task:
                     _propline_ingest_task = None
 
@@ -4620,20 +4644,16 @@ def _shared_monitoring_cycle(cycle_branch):
                         "while provider request remains active"
                     )
 
-            pending_props = list(_propline_pending_props.values())
-            _propline_pending_props.clear()
-            if ingestion_complete and pending_props:
-                logger.info(
-                    "shared_monitoring_cycle: handing off %d PropLine observations "
-                    "to the shared Underdog evaluator",
-                    len(pending_props),
-                )
-                await _run_prizepicks_independent_cycle(
-                    context,
-                    _fetched_props=pending_props,
-                    _fetched_sport="shared",
-                    _fetched_persisted=True,
-                    background_processing=False,
+            # Give a fast peer batch a bounded opportunity to finish, but
+            # never cancel a slow PP evaluation or couple its lifetime to UD.
+            await asyncio.sleep(0)  # run completed-ingestion callbacks first
+            if (
+                _prizepicks_cycle_task is not None
+                and not _prizepicks_cycle_task.done()
+            ):
+                await asyncio.wait(
+                    {_prizepicks_cycle_task},
+                    timeout=_PROPLINE_HANDOFF_GRACE_SECONDS,
                 )
 
             health = get_health_tracker()
@@ -4641,9 +4661,8 @@ def _shared_monitoring_cycle(cycle_branch):
                 health.record_monitoring_cycle_complete()
             logger.info(
                 "shared_monitoring_cycle: Underdog completed; "
-                "PropLine handoff complete=%s observations=%d",
+                "PropLine ingestion complete=%s",
                 ingestion_complete,
-                len(pending_props),
             )
             return result
         finally:

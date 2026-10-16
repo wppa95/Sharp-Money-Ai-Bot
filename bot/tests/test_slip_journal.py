@@ -382,8 +382,8 @@ class TestSlipSubcommandRouting:
         assert "No slip" in msg
 
     @pytest.mark.asyncio
-    async def test_numeric_slip_uses_source_aware_recommendation_identity(self):
-        """The live /slip path must not drop the Underdog source ID."""
+    async def test_numeric_slip_does_not_build_combinations(self):
+        """The live /slip route cannot generate multi-pick recommendations."""
         from commands import cmd_slip
 
         now = datetime.utcnow()
@@ -477,11 +477,12 @@ class TestSlipSubcommandRouting:
         ):
             await cmd_slip(update, ctx)
 
-        assert identities == [("Source A", "NBA", "Points", "projection-123")]
-        assert len(build_all_slips.call_args.args[0]) == 1
+        assert identities == []
+        build_all_slips.assert_not_called()
+        assert "Multi-pick slips are disabled" in update.message.reply_text.call_args[0][0]
 
     @pytest.mark.asyncio
-    async def test_canonical_direction_only_slip_needs_no_confidence_or_results(self):
+    async def test_canonical_picks_cannot_reenable_multi_pick_generation(self):
         from commands import _display_prop_from_opportunity, cmd_slip
 
         now = datetime.utcnow()
@@ -537,10 +538,9 @@ class TestSlipSubcommandRouting:
         ):
             await cmd_slip(update, ctx)
 
-        candidates = build_all_slips.call_args.args[0]
-        assert len(candidates) == 1
+        build_all_slips.assert_not_called()
         msg = update.message.reply_text.call_args[0][0]
-        assert "not enough" in msg.lower()
+        assert "multi-pick slips are disabled" in msg.lower()
 
         ctx._slip_build_capture = {}
         with (
@@ -559,7 +559,7 @@ class TestSlipSubcommandRouting:
         ):
             await cmd_slip(update, ctx)
 
-        assert ctx._slip_build_capture["candidate_count"] == 0
+        assert ctx._slip_build_capture == {}
 
         class CoveredSlipDB(SlipDB):
             async def get_player_results_bulk(self, requested, **kwargs):
@@ -592,7 +592,7 @@ class TestSlipSubcommandRouting:
         ):
             await cmd_slip(update, ctx)
 
-        assert ctx._slip_build_capture["candidate_count"] == 1
+        assert ctx._slip_build_capture == {}
 
 
 # ═══════════════════════════════════════════════════════════════════════════

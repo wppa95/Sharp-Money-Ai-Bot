@@ -224,11 +224,8 @@ async def test_pp_timing_filter_blocks_in_progress_game():
 # ── deliver_underdog: daily cap ───────────────────────────────────────────────
 
 @pytest.mark.asyncio
-async def test_underdog_blocked_when_daily_cap_configured_and_reached():
-    """
-    When DAILY_UNDERDOG_LIMIT is set to a positive value and the count equals
-    that limit, the alert is suppressed.  The cap is disabled by default (0).
-    """
+async def test_legacy_underdog_cap_is_not_a_delivery_gate():
+    """A legacy book-specific limit cannot favor the other primary platform."""
     from config import config
     with patch.object(config, "DAILY_UNDERDOG_LIMIT", 10):
         db = _make_db(ud_today=10)
@@ -248,15 +245,18 @@ async def test_underdog_blocked_when_daily_cap_configured_and_reached():
 
     assert result.sent is False
     assert result.filtered is True
-    assert "cap" in result.filtered_reason.lower() or "limit" in result.filtered_reason.lower()
+    assert "cap" not in result.filtered_reason.lower()
+    assert "limit" not in result.filtered_reason.lower()
+    db.count_today_underdog_alerts.assert_not_awaited()
 
 
 @pytest.mark.asyncio
-async def test_underdog_cap_disabled_when_limit_is_zero():
-    """When DAILY_UNDERDOG_LIMIT=0 (default), the cap is fully disabled and
-    alerts are never blocked by it regardless of how many have been sent."""
+@pytest.mark.parametrize("source", ["Underdog", "PrizePicks"])
+@pytest.mark.parametrize("legacy_limit", [0, 10])
+async def test_primary_platforms_have_no_legacy_daily_cap(source, legacy_limit):
+    """Every eligible individual pick is attempted for either platform."""
     from config import config
-    with patch.object(config, "DAILY_UNDERDOG_LIMIT", 0):
+    with patch.object(config, "DAILY_UNDERDOG_LIMIT", legacy_limit):
         db = _make_db(ud_today=9999)  # enormous count — must not block
         delivery = _make_delivery(db)
 
@@ -272,6 +272,7 @@ async def test_underdog_cap_disabled_when_limit_is_zero():
             result = await delivery.deliver_underdog(
                 "Test Player", "TeamA", "NBA", "Points",
                 25.5, 26.0,
+                source=source,
                 game_time=None,
                 score=MagicMock(total=75),
                 validation=SimpleNamespace(
@@ -287,6 +288,7 @@ async def test_underdog_cap_disabled_when_limit_is_zero():
 
     assert result.sent is True
     assert result.filtered is False
+    db.count_today_underdog_alerts.assert_not_awaited()
 
 
 @pytest.mark.asyncio
