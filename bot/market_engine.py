@@ -3264,6 +3264,7 @@ async def _run_prizepicks_independent_cycle(
                 "score": score,
                 "validation": validation,
                 "decision": decision,
+                "candidate_lifecycle_id": uuid.uuid4().hex,
             })
 
     try:
@@ -3301,6 +3302,70 @@ async def _run_prizepicks_independent_cycle(
             )
 
     chat_ids = list(config.allowed_user_ids)
+    _pp_lifecycle_updates: list[dict] = []
+    if actionable:
+        _pp_lifecycle_rows = []
+        for candidate_rank, candidate in enumerate(actionable, start=1):
+            prop = candidate["prop"]
+            decision = candidate["decision"]
+            validation = candidate["validation"]
+            _pp_lifecycle_rows.append({
+                "evaluation_id": candidate["candidate_lifecycle_id"],
+                "provider": "PrizePicks",
+                "source_id": str(candidate.get("external_id") or ""),
+                "event_id": str(
+                    getattr(prop, "event_id", "")
+                    or getattr(prop, "game_id", "")
+                    or ""
+                ),
+                "player_name": candidate["player"],
+                "sport": candidate["sport"],
+                "stat_type": candidate["stat"],
+                "line_variant": str(getattr(prop, "line_variant", "") or ""),
+                "line_value": float(candidate["line"]),
+                "direction": str(
+                    getattr(decision, "recommendation", "") or ""
+                ).upper(),
+                "delivery_path": "prizepicks",
+                "candidate_rank": candidate_rank,
+                "ranking_scope": (
+                    f"sport:{str(candidate['sport']).upper()}"
+                ),
+                "qualification_json": {
+                    "stage": "directional_candidate_collection",
+                    "passed_collection_gates": True,
+                    "passed_final_delivery_checks": False,
+                },
+                "evidence_snapshot_json": {
+                    "line": float(candidate["line"]),
+                    "line_variant": str(
+                        getattr(prop, "line_variant", "") or ""
+                    ),
+                    "direction": str(
+                        getattr(decision, "recommendation", "") or ""
+                    ).upper(),
+                    "validation": getattr(
+                        validation, "to_dict", lambda: {}
+                    )(),
+                    "decision": getattr(
+                        decision, "to_dict", lambda: {}
+                    )(),
+                    "evidence_timestamp": str(
+                        getattr(prop, "fetched_at", "") or ""
+                    ),
+                },
+            })
+        try:
+            lifecycle_writer = getattr(
+                db, "record_candidate_lifecycle_batch", None
+            )
+            if callable(lifecycle_writer):
+                await lifecycle_writer(_pp_lifecycle_rows)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "prizepicks_cycle: candidate lifecycle write failed: %s",
+                type(exc).__name__,
+            )
     if not chat_ids:
         logger.info(
             "prizepicks_cycle: provider=PrizePicks sport=%s fetch_succeeded=true "
@@ -3308,6 +3373,18 @@ async def _run_prizepicks_independent_cycle(
             "delivered=0 (no recipients)",
             sport, len(unique_props), len(unique_props), evaluated, directional, len(actionable),
         )
+        try:
+            await db.update_candidate_lifecycle_batch([
+                {
+                    "evaluation_id": candidate.get("candidate_lifecycle_id"),
+                    "disposition": "blocked",
+                    "final_reason": "no configured recipients",
+                }
+                for candidate in actionable
+                if candidate.get("candidate_lifecycle_id")
+            ])
+        except Exception:
+            logger.debug("prizepicks_cycle: could not record blocked lifecycle")
         return
 
     # Each candidate has already passed the PrizePicks collection gates.
@@ -3333,6 +3410,11 @@ async def _run_prizepicks_independent_cycle(
             ),
             direction=str(getattr(candidate["decision"], "recommendation", "") or ""),
         ):
+            _pp_lifecycle_updates.append({
+                "evaluation_id": candidate.get("candidate_lifecycle_id"),
+                "disposition": "rejected",
+                "final_reason": "delivery claim already held",
+            })
             continue
         try:
             result = await delivery.deliver_underdog(
@@ -3366,6 +3448,7 @@ async def _run_prizepicks_independent_cycle(
                 delivery_rank=candidate_rank,
                 delivery_total=len(actionable),
                 delivery_buffer=_pp_delivery_buffer,
+                candidate_lifecycle_id=candidate.get("candidate_lifecycle_id"),
             )
         except Exception as exc:  # noqa: BLE001
             _release_prop_delivery_claim(
@@ -3383,7 +3466,19 @@ async def _run_prizepicks_independent_cycle(
                 "prizepicks_cycle: delivery failed; claim released for %s/%s: %s",
                 player, stat, type(exc).__name__,
             )
+            _pp_lifecycle_updates.append({
+                "evaluation_id": candidate.get("candidate_lifecycle_id"),
+                "disposition": "rejected",
+                "final_reason": f"delivery exception: {type(exc).__name__}",
+            })
             continue
+        if getattr(result, "queued", False):
+            candidate["_queue_buffered"] = True
+            _pp_lifecycle_updates.append({
+                "evaluation_id": candidate.get("candidate_lifecycle_id"),
+                "disposition": "qualified",
+                "final_reason": None,
+            })
         if result.sent:
             delivered += 1
             try:
@@ -3432,17 +3527,52 @@ async def _run_prizepicks_independent_cycle(
                 getattr(result, "filtered_reason", None)
                 or ("deduped" if getattr(result, "deduped", False) else "not sent"),
             )
+            if not getattr(result, "queued", False):
+                _pp_lifecycle_updates.append({
+                    "evaluation_id": candidate.get("candidate_lifecycle_id"),
+                    "disposition": "rejected",
+                    "final_reason": str(
+                        getattr(result, "filtered_reason", None)
+                        or ("deduped" if getattr(result, "deduped", False)
+                            else "delivery did not reach durable queue")
+                    ),
+                })
 
     _pp_queued = 0
     if _pp_delivery_buffer:
         try:
-            await db.enqueue_telegram_pick_deliveries(_pp_delivery_buffer)
+            if _pp_lifecycle_updates:
+                await db.update_candidate_lifecycle_batch(_pp_lifecycle_updates)
+            _saved_queue_ids = await db.enqueue_telegram_pick_deliveries(
+                _pp_delivery_buffer
+            )
+            if len(_saved_queue_ids) != len(_pp_delivery_buffer):
+                raise RuntimeError(
+                    "durable delivery batch returned an incomplete identity set"
+                )
             _pp_queued = len(_pp_delivery_buffer)
         except Exception as exc:  # noqa: BLE001
             logger.error(
                 "prizepicks_cycle: durable delivery batch failed: %s",
                 type(exc).__name__,
             )
+            try:
+                await db.update_candidate_lifecycle_batch([
+                    {
+                        "evaluation_id": candidate.get("candidate_lifecycle_id"),
+                        "disposition": "queue_persist_failed",
+                        "final_reason": f"queue persistence failed: {type(exc).__name__}",
+                    }
+                    for candidate in actionable
+                    if candidate.get("_queue_buffered")
+                ])
+            except Exception:
+                logger.debug("prizepicks_cycle: lifecycle queue failure update unavailable")
+    elif _pp_lifecycle_updates:
+        try:
+            await db.update_candidate_lifecycle_batch(_pp_lifecycle_updates)
+        except Exception:
+            logger.debug("prizepicks_cycle: lifecycle disposition update unavailable")
 
     logger.info(
         "prizepicks_cycle: provider=PrizePicks sport=%s fetch_succeeded=true "
