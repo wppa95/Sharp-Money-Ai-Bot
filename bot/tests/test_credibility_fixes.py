@@ -328,7 +328,7 @@ class TestFunnelHTMLEscaping:
         assert "Scan Pipeline" in msg,   "Scan Pipeline section missing"
         assert "4,600"         in msg,   "Fetched count missing"
         assert "4,350"         in msg,   "Active count missing"
-        assert "Delivered to Telegram" in msg, "Delivery count missing"
+        assert "Immediate Telegram sends recorded during scans" in msg
         assert "Directional decisions" in msg
         assert "Fully qualified candidates" in msg
         assert "Durable queue admissions" in msg
