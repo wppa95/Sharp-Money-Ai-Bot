@@ -5201,7 +5201,7 @@ async def underdog_job(context) -> None:
     _sport_futures:       dict[str, int] = {}  # season-long/futures props (tracked, not scored)
     _sport_move_detected: dict[str, int] = {}  # significant line moves (≥MIN_LINE_CHANGE)
     _sport_gated:         dict[str, int] = {}  # passed full scoring gate (actionable)
-    _sport_actionable:    dict[str, int] = {}  # scan-qualified props by sport
+    _sport_actionable:    dict[str, int] = {}  # directional scan decisions by sport
     _sport_removed:       dict[str, int] = {}  # [REMOVED] feed entries by sport
     _cycle_timing.finish("active_pool")
     _cycle_timing.start("scoring_evidence")
@@ -6275,7 +6275,7 @@ async def underdog_job(context) -> None:
                         score is not None
                     )
                     if is_reentry_qualified:
-                        _n_qualified += 1
+                        _n_directional += 1
                         # Re-entry props must reach Telegram as new-prop alerts.
                         # should_alert defaults to False for non-lc paths; setting
                         # it True here causes the main delivery block to fire with
@@ -6300,7 +6300,7 @@ async def underdog_job(context) -> None:
                         and decision.recommendation in ("OVER", "UNDER")
                     )
                     if is_qualified and not is_reentry_qualified:
-                        _n_qualified += 1
+                        _n_directional += 1
                     if is_qualified:
                         _actionable_sport = (snap.sport or "UNKNOWN").upper()
                         _sport_actionable[_actionable_sport] = (
@@ -6536,9 +6536,8 @@ async def underdog_job(context) -> None:
             # Market first-alert time for delivered (non-removal) props is recorded
             # in the ranked delivery phase below after successful broadcast.
 
-            # Resolve alert_outcome for historical analysis.
-            # Queued candidates: "new_prop_queued"/"queued" initially — the delivery
-            # phase updates the record to "new_prop_sent"/"sent" if delivered.
+            # This is an observation-stage label only. Candidate collection is
+            # in-memory until the outbox transaction commits.
             if is_new_prop:
                 if _dq_collected:
                     _alert_outcome: Optional[str] = "new_prop_candidate_collected"
@@ -7012,6 +7011,72 @@ async def underdog_job(context) -> None:
         # All qualified candidates from new-prop, line-change, and standing paths
         # are attempted in priority order. Ranking does not impose a rolling send
         # limit; existing per-candidate delivery gates still apply.
+        _lifecycle_updates: list[dict] = []
+        if _delivery_queue and db:
+            _lifecycle_rows: list[dict] = []
+            for _candidate in _delivery_queue:
+                _candidate_snap = _candidate.get("snap")
+                _candidate_decision = _candidate.get("decision")
+                _candidate_validation = _candidate.get("validation")
+                _candidate_direction = str(
+                    getattr(_candidate_decision, "recommendation", "") or ""
+                ).upper()
+                _candidate_lifecycle_id = str(
+                    _candidate.get("candidate_lifecycle_id") or uuid.uuid4().hex
+                )
+                _candidate["candidate_lifecycle_id"] = _candidate_lifecycle_id
+                _candidate["pick_identity_key"] = None
+                _candidate_event_id = str(
+                    getattr(_candidate_snap, "event", "")
+                    or getattr(_candidate_snap, "game_id", "")
+                    or ""
+                )
+                _validation_payload = getattr(
+                    _candidate_validation, "to_dict", lambda: {}
+                )()
+                _decision_payload = getattr(
+                    _candidate_decision, "to_dict", lambda: {}
+                )()
+                _lifecycle_rows.append({
+                    "evaluation_id": _candidate_lifecycle_id,
+                    "provider": str(_candidate.get("provider") or "Underdog"),
+                    "source_id": str(_candidate.get("ext_id") or ""),
+                    "event_id": _candidate_event_id,
+                    "player_name": str(_candidate.get("player") or ""),
+                    "sport": str(_candidate.get("sport") or "UNKNOWN"),
+                    "stat_type": str(_candidate.get("stat_type") or ""),
+                    "line_variant": "",
+                    "line_value": float(_candidate.get("line_val") or 0.0),
+                    "direction": _candidate_direction,
+                    "delivery_path": str(_candidate.get("path") or "underdog"),
+                    "qualification_json": {
+                        "stage": "directional_candidate_collection",
+                        "passed_final_delivery_checks": False,
+                        "collection_path": str(_candidate.get("path") or "underdog"),
+                    },
+                    "evidence_snapshot_json": {
+                        "direction": _candidate_direction,
+                        "line": float(_candidate.get("line_val") or 0.0),
+                        "validation": _validation_payload,
+                        "decision": _decision_payload,
+                        "score_total": getattr(
+                            _candidate.get("score"), "total", None
+                        ),
+                    },
+                    "ranking_scope": f"sport:{str(_candidate.get('sport') or 'UNKNOWN').upper()}",
+                })
+            try:
+                _record_lifecycle = getattr(
+                    db, "record_candidate_lifecycle_batch", None
+                )
+                if callable(_record_lifecycle):
+                    await _record_lifecycle(_lifecycle_rows)
+            except Exception as _lifecycle_exc:
+                # Observability must not change which candidates qualify or send.
+                logger.warning(
+                    "underdog_job: candidate lifecycle write failed: %s",
+                    type(_lifecycle_exc).__name__,
+                )
         if chat_ids:
             logger.info(
                 "underdog_job: delivery queue before selection — candidates=%d",
