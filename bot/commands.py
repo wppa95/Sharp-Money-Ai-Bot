@@ -5885,7 +5885,7 @@ async def cmd_refinement(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
 
 async def cmd_funnel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """/funnel — Full pipeline: scanned → filtered → scored → qualified → delivered."""
+    """/funnel — Observations, directional decisions, qualification, queue admission, and confirmed delivery."""
     if not _check_allowed(update):
         await update.message.reply_text("⛔ Unauthorized.")
         return
@@ -6232,7 +6232,7 @@ async def cmd_funnel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                 f"<b>{int(scan_summary.get('fully_qualified', 0) or 0):,}</b>",
                 f"📥 Durable queue admissions (explicitly recorded): "
                 f"<b>{int(scan_summary.get('queue_admitted', 0) or 0):,}</b>",
-                f"📤 Delivered to Telegram — current-session scan sends: "
+                f"📤 Immediate Telegram sends recorded during scans: "
                 f"<b>{sc_delivered:,}</b>",
             ]
             if sc_enrichment_status != "complete" or sc_enrichment_deferred:

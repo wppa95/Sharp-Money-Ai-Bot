@@ -7569,11 +7569,12 @@ async def underdog_job(context) -> None:
                         if getattr(_dq_result, "authoritative_recorded", False):
                             _dq_record.alert_sent = True
                         _dq_record.alert_outcome = (
-                            "new_prop_sent"
-                            if _dq_path == "new"
-                            else "sent" if getattr(
+                            "sent_audit_unconfirmed"
+                            if not getattr(
                                 _dq_result, "authoritative_recorded", False
-                            ) else "sent_audit_unconfirmed"
+                            )
+                            else "new_prop_sent" if _dq_path == "new"
+                            else "sent"
                         )
                     # Per-path: counter, dedup update, lifecycle transition.
                     # Each path is handled inline so source-inspection tests can
