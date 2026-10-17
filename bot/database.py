@@ -5136,13 +5136,25 @@ class Database:
                             "delivery_unknown", "expired", "invalidated",
                         }
                     ):
-                        lifecycle.disposition = (
-                            "delivery_unknown"
-                            if row.status == "sent"
-                            and row.final_reason == "telegram_sent_audit_write_unconfirmed"
-                            else "delivered" if row.status == "sent"
-                            else "queue_admitted"
-                        )
+                        if row.status == "sent":
+                            lifecycle.disposition = (
+                                "delivery_unconfirmed"
+                                if row.final_reason
+                                == "telegram_sent_audit_write_unconfirmed"
+                                else "delivered"
+                            )
+                        elif row.status == "failed":
+                            lifecycle.disposition = (
+                                "delivery_unknown"
+                                if "unknown" in str(row.final_reason or "").casefold()
+                                else "delivery_failed"
+                            )
+                        elif row.status == "expired":
+                            lifecycle.disposition = "expired"
+                        elif row.status == "invalidated":
+                            lifecycle.disposition = "invalidated"
+                        else:
+                            lifecycle.disposition = "queue_admitted"
                         lifecycle.final_reason = row.final_reason
                         lifecycle.queue_delivery_id = int(row.id)
                         lifecycle.updated_at = now
