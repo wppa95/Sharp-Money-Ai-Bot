@@ -1,0 +1,231 @@
+Sharp Money V4 — Implement Safe Odds API Integration for the Free Plan
+
+This is an implementation task, not an audit-only task. Restore or implement only the Odds API capabilities supported by the documented V4 endpoints and the account's Free plan.
+
+The user has rotated the previously exposed API key. Use only the replacement key already stored in the project's environment secrets. Never print, expose, hardcode, or request the key in chat.
+
+Do not make live API requests during implementation or tests. Do not restart the bot, send Telegram messages, commit, push, or deploy.
+
+1. Inspect and reuse the existing integration
+
+Inspect the current and historical Odds API adapter, provider registry, request-budget controls, caches, scheduler, database models, and tests.
+
+Restore the existing intended integration where appropriate. Reuse the established provider interfaces, shared database, and quota controls. Avoid parallel pipelines or duplicate storage.
+
+Do not assume The Odds API provides player-game logs, player-level historical results, or exact player-prop settlement data. The supplied V4 documentation establishes sports, events, bookmaker odds, market availability, scores, and paid-plan historical odds endpoints. Implement only capabilities supported by actual documented response fields.
+
+2. Supported endpoint responsibilities
+
+A. Sports discovery — quota-free
+
+Endpoint:
+"GET /v4/sports"
+
+- Discover in-season sports and their provider sport keys.
+- Use the documented "all=true" parameter only when appropriate.
+- Cache the result and refresh it conservatively.
+- Do not charge this endpoint against the local paid-credit budget because the documentation says it is quota-free.
+
+B. Event discovery — quota-free
+
+Endpoint:
+"GET /v4/sports/{sport}/events"
+
+- Discover event IDs, participants, and commence times for supported sports.
+- Use these IDs to align events across sources when reliable matching fields are available.
+- Cache event data and avoid unnecessary repeat requests.
+- Do not charge this endpoint against the local paid-credit budget because the documentation says it is quota-free.
+
+C. Current event markets — one credit per request
+
+Endpoint:
+"GET /v4/sports/{sport}/events/{eventId}/markets"
+
+- Discover which bookmaker market keys are available for a specific event and region.
+- Use this information only for Odds API market discovery and planning.
+- Do not interpret market availability as evidence that PrizePicks or Underdog currently offers that market.
+
+D. Current event odds — actual documented market cost
+
+Endpoint:
+"GET /v4/sports/{sport}/events/{eventId}/odds"
+
+- Retrieve supported bookmaker odds, including player props where the endpoint and plan provide them.
+- Use current odds for supplementary bookmaker line/price context, where that context is relevant to an already qualified V4 pick.
+- Do not create picks solely because Odds API exposes a market.
+- Do not replace the primary feeds or exact-offering validation.
+- Calculate the documented credit cost from the unique markets actually returned multiplied by the number of regions.
+- Do not assume a multi-market or multi-event request costs only one credit.
+
+Use only the minimum relevant regions and markets needed for the intended feature. Avoid broad odds requests that waste the limited monthly allowance.
+
+E. Scores — one credit or two with daysFrom
+
+Endpoint:
+"GET /v4/sports/{sport}/scores"
+
+- Use scores for supported event-status and team-score reconciliation.
+- Follow the documented cost: one credit for live/upcoming scores, two credits when "daysFrom" is used.
+- Use score data only for facts the response actually establishes.
+- Do not use team scores to grade player props such as rebounds, assists, strikeouts, shots, goals, or other individual statistics.
+- Do not mark a player prop HIT/MISS/PUSH unless reliable player-level results are available from a suitable source.
+
+F. Historical endpoints
+
+The supplied documentation identifies historical endpoints as paid-plan-only. Do not assume they work on the Free plan.
+
+- Do not use historical odds as player-performance results.
+- Do not enable historical endpoints unless existing documented plan access explicitly supports them.
+- Do not spend credits on historical odds in this implementation.
+- Do not make live requests to test whether the account has access.
+
+3. Preserve player-history and settlement integrity
+
+The Odds API endpoints described above do not establish a source for actual player-game logs. Do not pretend they can supply L5/L10/L20/L30 or head-to-head player performance values.
+
+- Keep existing player-history and evidence requirements unchanged.
+- Do not fabricate history, derive player statistics from team scores, or substitute quoted odds for results.
+- Do not settle player props using an event score or bookmaker price alone.
+- Leave a pick ungraded if verified player-level results are unavailable.
+- Preserve existing HIT/MISS/PUSH rules, including push handling and duplicate-settlement prevention.
+- Report the exact limitations rather than claiming unsupported coverage.
+
+4. One shared monthly credit budget
+
+The account's confirmed plan is Free with 500 credits per month. Monthly plans reset on the first of each month at 00:00 UTC.
+
+Implement one shared budget manager for all quota-consuming Odds API requests across all sports and endpoints.
+
+- Hard monthly ceiling: 500 credits.
+- Working target: 450 credits per quota period, leaving approximately 50 credits of reserve.
+- Track actual credit costs by endpoint and parameters, not simply the number of HTTP requests.
+- Treat documented quota-free endpoints as zero-credit operations.
+- Do not assume all odds requests cost one credit.
+- Persist local usage across restarts using the existing architecture.
+- Reset the local monthly budget only at the documented UTC quota-period boundary.
+- Never reset the budget on process startup.
+- If actual response headers provide usage information, reconcile them carefully with local accounting without double-counting.
+- If a request's credit cost cannot be determined safely, defer it rather than risk exceeding the budget.
+- Stop quota-consuming requests when the working target is reached unless a clearly defined, budget-safe priority justifies using reserved credits.
+- Never exceed 500 credits intentionally.
+- Keep this budget separate from PropLine's and Underdog's budgets.
+
+5. Distribute paid calls across the full 24-hour day
+
+Schedule quota-consuming requests across all 24 hours rather than making requests in bursts.
+
+- Use a target of approximately 450 credits per monthly period.
+- Calculate the schedule from the remaining budget and time until the next monthly reset.
+- Use the provider's UTC reset boundary for accounting and Central Time for human-readable diagnostics.
+- A 450-credit target averages about 15 credits per day in a 30-day month, but the actual number of requests depends on each endpoint's cost.
+- Spread scheduled work evenly across the day and overnight.
+- Do not immediately spend the day's allocation at startup.
+- Preserve scheduling state and usage across restarts.
+- Respect HTTP 429 responses, documented retry-after values, cooldowns, timeouts, and provider errors.
+- Prevent retry storms and repeated calls for unchanged cached data.
+- Do not allow failed requests to trigger unbounded retries.
+
+Use the existing scheduler and job architecture. Do not change other providers' scheduling or request limits.
+
+6. Fair all-sports rotation
+
+Use the quota-free sports and events endpoints to discover supported coverage. Rotate quota-consuming work fairly across supported sports.
+
+- Do not hardcode a small preferred-sport list.
+- Use actual sport keys returned by the API.
+- Allocate paid requests across all supported sports, subject to actual endpoint/market availability.
+- Prioritize useful, relevant data needs, but prevent one sport from consuming the entire budget.
+- Avoid repeated requests when cached data is sufficiently fresh.
+- Use current event odds selectively when the result could provide meaningful bookmaker context for an existing qualified pick.
+- Use score reconciliation only where the score endpoint can establish the required event facts.
+- Make skipped or unavailable sports visible in diagnostics.
+- Do not claim that every sport or player-prop market is supported if the API does not provide it.
+
+If 450 credits cannot cover every sport frequently, implement a transparent rotation and report the expected coverage interval per sport.
+
+7. Keep primary platform offerings authoritative
+
+PrizePicks remains sourced through PropLine. Underdog remains sourced through its native feed.
+
+Odds API must never:
+
+- Supply or invent current PrizePicks or Underdog offerings.
+- Validate whether a specific platform offers a player, stat, line, direction, or variant.
+- Override the original platform line or PrizePicks Goblin/Demon classification.
+- Create a V4 pick just because an Odds API market exists.
+- Bypass exact-offering validation before queue admission or delivery.
+- Bypass provider/sport startup-readiness gates.
+
+Preserve the startup-readiness fix. Pending picks must remain pending until the relevant primary provider/sport feed is ready, and exact-offering validation must still run after readiness.
+
+8. Database integrity and existing V4 behavior
+
+- Reuse the existing database, provider abstractions, caches, and deduplication logic.
+- Preserve existing records and grades.
+- Do not reset, truncate, rebuild, or backfill the database.
+- Do not change database architecture or add a migration unless technically essential. If a migration is genuinely unavoidable, stop and explain why before applying it.
+- Preserve all existing qualification thresholds, evidence requirements, supported sports and markets, standard-line priority, duplicate prevention, Central Time rules, immediate qualified-pick notifications, two-hour reminders, and separate line-change notices.
+- Do not add slips, Strong Bet labels, stars, tiers, or unsupported confidence scores.
+- Continue sending individual qualified picks only.
+
+Preserve this exact footer:
+
+Monitoring player props across multiple sports. Not betting advice.
+
+9. Diagnostics
+
+Provide minimal useful diagnostics using the existing command or health-report architecture.
+
+Where available, show:
+
+- Current UTC quota period and next reset.
+- Credits used, estimated remaining, and working target.
+- Last quota-consuming request, endpoint type, and credit cost.
+- Next scheduled request time in Central Time.
+- Last request outcome and active cooldown.
+- Sports covered and the next sports in rotation.
+- Market/endpoint limitations that prevent coverage.
+
+Do not expose the API key or other secrets.
+
+10. Regression tests
+
+Use mocked API responses. No live provider calls.
+
+Test:
+
+- Quota-free sports and events discovery.
+- Correct cost accounting for scores, event markets, and event odds.
+- Shared budget enforcement across sports and endpoint types.
+- Monthly reset at 00:00 UTC on the first day of the month.
+- Usage persisting across process restarts.
+- Even scheduling across the 24-hour day without startup bursts.
+- Fair rotation across supported sports.
+- Cooldown, retry-after, failures, and safe deferral.
+- Cache hits avoiding unnecessary calls.
+- Current player-prop odds never being treated as actual player results.
+- Team scores never being used to settle player props.
+- Unsupported historical endpoints not being called.
+- Odds API never creating or validating a PrizePicks/Underdog offering.
+- Existing exact-offering validation and provider/sport startup-readiness remaining enforced.
+- Existing tests and all supported sports/markets retaining their behavior.
+
+11. Final verification and report
+
+Run focused tests, the full test suite, "python -m compileall -q bot", and "git diff --check". Fix regressions before reporting completion.
+
+Do not restart the live bot, send Telegram messages, change secrets, commit, push, or deploy.
+
+Report:
+
+1. Exact files changed.
+2. Which documented endpoints were implemented and why.
+3. The actual cost-accounting logic for each endpoint.
+4. The 450-credit working target and monthly hard limit.
+5. The scheduling interval and all-sports rotation design.
+6. Genuine supported data capabilities and limitations.
+7. Test results.
+8. Confirmation that primary provider offerings, exact-offering validation, and startup-readiness remain unchanged.
+9. Any unresolved issues or coverage tradeoffs.
+
+Stop after implementation and verification. I will review the final report before any push to Railway.
