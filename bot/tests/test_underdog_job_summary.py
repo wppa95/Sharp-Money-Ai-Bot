@@ -92,6 +92,9 @@ def _make_db(
     db.save_underdog_snapshot                = AsyncMock()
     db.save_underdog_snapshots_bulk          = AsyncMock()
     db.get_ud_prop_history                   = AsyncMock(return_value=prop_history or [])
+    db.log_prop_opportunity_bulk             = AsyncMock(return_value=1)
+    db.record_candidate_lifecycle_batch      = AsyncMock(return_value=1)
+    db.update_candidate_lifecycle_batch      = AsyncMock(return_value=1)
     return db
 
 
@@ -235,6 +238,8 @@ async def test_line_changed_qualifies(caplog):
     assert int(summary.message.split("evaluated=")[1].split()[0])  == 1
     assert int(summary.message.split("directional=")[1].split()[0]) == 1
     assert int(summary.message.split("fully-qualified=")[1].split()[0]) == 1
+    db.log_prop_opportunity_bulk.assert_awaited_once()
+    db.record_candidate_lifecycle_batch.assert_awaited_once()
 
 
 @pytest.mark.asyncio
