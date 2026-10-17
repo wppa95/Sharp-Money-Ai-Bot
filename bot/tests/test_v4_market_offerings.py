@@ -631,6 +631,83 @@ def test_standard_priority_does_not_duplicate_or_merge_platform_candidates():
     assert secondary == []
 
 
+@pytest.mark.asyncio
+async def test_durable_worker_rechecks_live_offered_direction_before_telegram(monkeypatch):
+    import alerts
+    from unittest.mock import MagicMock
+
+    source = prop(
+        provider="Underdog",
+        external_id="ud-durable-check",
+        line=0.5,
+        available_directions=("OVER",),
+    )
+    canonicalize_player_props("Underdog", [source])
+    fetched_at = datetime.utcnow()
+    qualification = {
+        "qualified": True,
+        "direction_and_evidence": {"passed": True},
+        # A permissive old snapshot must not overrule the current source feed.
+        "originating_platform_direction": {
+            "available_directions": ["OVER", "UNDER"]
+        },
+    }
+    item = {
+        "id": 44,
+        "attempt_id": "attempt-44",
+        "provider": "Underdog",
+        "source_id": source.external_id,
+        "event_id": source.game_id,
+        "player_name": source.player_name,
+        "sport": source.sport,
+        "stat_type": source.stat_type,
+        "line_value": source.line_value,
+        "line_variant": source.line_variant,
+        "direction": "UNDER",
+        "delivery_path": "underdog",
+        "game_time": source.game_time,
+        "game_status": "",
+        "source_fetched_at": fetched_at,
+        "qualification_json": __import__("json").dumps(qualification),
+        "evidence_snapshot_json": "{}",
+        "message_html": "synthetic fixture only",
+        "sent_recipient_keys": [],
+    }
+    db = MagicMock()
+    db.claim_next_telegram_pick_delivery = AsyncMock(return_value=item)
+    db.finish_telegram_pick_delivery = AsyncMock(return_value=True)
+    db.validate_telegram_pick_source = AsyncMock(return_value={
+        "valid": True,
+        "provider": "Underdog",
+        "source_id": source.external_id,
+        "event_id": source.game_id,
+        "player_name": source.player_name,
+        "sport": source.sport,
+        "stat_type": source.stat_type,
+        "line_value": source.line_value,
+        "line_variant": source.line_variant,
+        "game_time": source.game_time,
+        "game_status": "",
+        "fetched_at": fetched_at,
+    })
+    monkeypatch.setattr(alerts.config, "allowed_user_ids", [123])
+    monkeypatch.setattr(
+        "engine.timing.is_game_alertable", lambda *a, **k: (True, "")
+    )
+    monkeypatch.setattr("reporting.is_current_reporting_day", lambda *_a: True)
+    broadcaster = AsyncMock(return_value={"sent": 1, "failed": 0})
+    monkeypatch.setattr(alerts, "broadcast_alert_detailed", broadcaster)
+
+    context = NS(bot_data={"db": db}, bot=MagicMock())
+    await alerts.telegram_pick_delivery_job(context)
+
+    broadcaster.assert_not_awaited()
+    db.finish_telegram_pick_delivery.assert_awaited_once()
+    kwargs = db.finish_telegram_pick_delivery.await_args.kwargs
+    assert kwargs["status"] == "invalidated"
+    assert kwargs["reason"] == "DIRECTION_NOT_OFFERED"
+
+
 def test_pushes_cannot_satisfy_strict_under_quality_and_opponent_fragments_do_not_match():
     from engine.delivery_evidence import has_strong_directional_history
     from engine.player_results import _fuzzy_team_match
