@@ -257,7 +257,8 @@ async def test_successful_play_persists_exact_source_and_event_and_marks_opportu
         audit = (
             await session.execute(
                 select(TelegramDeliveryAudit).where(
-                    TelegramDeliveryAudit.external_id == "play-source-1"
+                    TelegramDeliveryAudit.external_id == "play-source-1",
+                    TelegramDeliveryAudit.alert_kind == "ACTIONABLE_PICK",
                 )
             )
         ).scalar_one()
