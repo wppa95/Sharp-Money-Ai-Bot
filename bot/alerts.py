@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import logging
 import inspect
+import math
 import re
 import time
 from threading import Lock
@@ -29,7 +30,7 @@ from typing import TYPE_CHECKING, Optional, Union
 
 from telegram import Bot, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.constants import ParseMode
-from telegram.error import TelegramError
+from telegram.error import RetryAfter, TelegramError
 
 from config import config
 from engine.delivery_gates import (
@@ -766,6 +767,44 @@ def _has_strong_underdog_evidence(
 
 # ── Low-level Telegram senders ────────────────────────────────────────────────
 
+_telegram_retry_after_lock = Lock()
+_telegram_retry_after_until: dict[str, float] = {}
+_telegram_clock = time.monotonic
+
+
+def _telegram_retry_after_seconds(exc: RetryAfter) -> float:
+    value = exc.retry_after
+    seconds = value.total_seconds() if isinstance(value, timedelta) else float(value)
+    return max(0.0, seconds) if math.isfinite(seconds) else 0.0
+
+
+def _telegram_retry_after_remaining(chat_id: Union[int, str]) -> float:
+    key = str(chat_id)
+    now = _telegram_clock()
+    with _telegram_retry_after_lock:
+        until = _telegram_retry_after_until.get(key)
+        if until is None:
+            return 0.0
+        remaining = until - now
+        if remaining <= 0:
+            _telegram_retry_after_until.pop(key, None)
+            return 0.0
+        return remaining
+
+
+def _record_telegram_retry_after(
+    chat_id: Union[int, str], seconds: float
+) -> None:
+    if seconds <= 0:
+        return
+    key = str(chat_id)
+    deadline = _telegram_clock() + seconds
+    with _telegram_retry_after_lock:
+        _telegram_retry_after_until[key] = max(
+            deadline, _telegram_retry_after_until.get(key, 0.0)
+        )
+
+
 async def send_alert(
     bot: Bot,
     chat_id: Union[int, str],
@@ -780,6 +819,14 @@ async def send_alert(
     # legacy/direct broadcast callers that do not use the current formatters.
     message = _sanitize_user_alert_message(message)
     markup = InlineKeyboardMarkup(keyboard) if keyboard else None
+    remaining = _telegram_retry_after_remaining(chat_id)
+    if remaining > 0:
+        logger.debug(
+            "Telegram send suppressed during recipient flood-control cooldown "
+            "(%.0f seconds remain)",
+            remaining,
+        )
+        return False
     try:
         await bot.send_message(
             chat_id=chat_id,
@@ -789,8 +836,17 @@ async def send_alert(
             disable_web_page_preview=True,
         )
         return True
+    except RetryAfter as exc:
+        retry_after = _telegram_retry_after_seconds(exc)
+        _record_telegram_retry_after(chat_id, retry_after)
+        logger.warning(
+            "Telegram flood control rejected a send; suppressing sends to that "
+            "recipient for %.0f seconds",
+            retry_after,
+        )
+        return False
     except TelegramError as exc:
-        logger.error("Failed to send alert to %s: %s", chat_id, exc)
+        logger.error("Failed to send Telegram alert: %s", exc)
         return False
 
 
