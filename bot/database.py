@@ -4759,6 +4759,50 @@ class Database:
                         _sqlite_insert(TelegramDeliveryAudit).values(**reminder)
                         .prefix_with("OR IGNORE")
                     )
+            lifecycle_id = (
+                evidence_snapshot.get("candidate_lifecycle_id")
+                if isinstance(evidence_snapshot, dict) else None
+            )
+            if lifecycle_id:
+                lifecycle_key = _candidate_lifecycle_identity_key(
+                    provider=provider,
+                    source_id=external_id,
+                    event_id=event_id,
+                    player_name=player_name,
+                    sport=sport,
+                    stat_type=stat_type,
+                    line_value=line_value,
+                    direction=direction,
+                    line_variant=line_variant,
+                )
+                lifecycle = await s.get(
+                    CandidateLifecycleRecord, str(lifecycle_id)
+                )
+                if (
+                    lifecycle is not None
+                    and lifecycle.pick_identity_key == lifecycle_key
+                    and lifecycle.disposition not in {
+                        "rejected", "blocked", "queue_persist_failed",
+                        "delivery_failed", "delivery_unknown", "expired",
+                        "invalidated",
+                    }
+                ):
+                    lifecycle.disposition = (
+                        "delivered" if effective_delivery_key
+                        else "delivery_unconfirmed"
+                    )
+                    lifecycle.final_reason = (
+                        None if effective_delivery_key
+                        else "Telegram accepted send but exact source identity was not verified"
+                    )
+                    lifecycle.updated_at = attempted_at or datetime.utcnow()
+                    lifecycle.qualified_at = (
+                        lifecycle.qualified_at or lifecycle.updated_at
+                    )
+                    lifecycle.delivered_at = (
+                        lifecycle.updated_at if effective_delivery_key else None
+                    )
+                    lifecycle.delivery_audit_key = effective_delivery_key
             await s.commit()
             if updated_count == 0:
                 logger.warning(
@@ -4935,12 +4979,14 @@ class Database:
                 required = (
                     "pick_key", "provider", "source_id", "event_id",
                     "player_name", "sport", "stat_type", "line_value",
-                    "line_variant", "direction", "delivery_path", "game_time",
+                    "direction", "delivery_path", "game_time",
                     "qualification_json", "evidence_snapshot_json",
                     "ranking_scope", "message_html",
                 )
                 if any(item.get(name) in (None, "") for name in required):
                     raise ValueError("Qualified delivery is missing stable identity or evidence")
+                if "line_variant" not in item or item["line_variant"] is None:
+                    raise ValueError("Qualified delivery is missing line-variant identity")
                 provider = str(item["provider"])
                 sport = str(item["sport"])
                 expected_pick_key = telegram_pick_queue_key(
