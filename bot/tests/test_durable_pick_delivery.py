@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from datetime import datetime, timedelta
 from types import SimpleNamespace
@@ -18,6 +19,7 @@ from database import (
     TelegramDeliveryAudit,
     TelegramPickDelivery,
     TelegramPickDeliveryAttempt,
+    TelegramPickDeliveryRuntime,
     UnderdogSnapshotRecord,
 )
 
@@ -153,6 +155,37 @@ async def _seed_opportunity(
         await session.commit()
 
 
+async def _seed_pp_history(db: Database, item: dict, *, line_variant=None):
+    variant = (
+        str(item.get("line_variant") or "")
+        if line_variant is None else str(line_variant or "")
+    )
+    async with db.session() as session:
+        session.add(
+            PropLineHistory(
+                provider="PrizePicks",
+                product="PLAYER_PROPS",
+                sport=item["sport"],
+                player_name=item["player_name"],
+                team="",
+                stat_type=item["stat_type"],
+                line_value=item["line_value"],
+                game_time=item["game_time"],
+                provider_status="scheduled",
+                external_id=item["source_id"],
+                game_id=item["event_id"],
+                line_variant=variant,
+                fetched_at=item["source_fetched_at"],
+                first_seen=item["source_fetched_at"],
+                last_seen=item["source_fetched_at"],
+                change_count=0,
+                removed=False,
+                lifecycle_state="ACTIVE",
+            )
+        )
+        await session.commit()
+
+
 class _FakeBot:
     def __init__(self, error=None):
         self.error = error
@@ -213,6 +246,42 @@ async def test_enqueue_is_idempotent_and_fair_across_platform_and_sport(tmp_path
 
 
 @pytest.mark.asyncio
+async def test_candidate_rank_ages_out_so_old_qualified_work_cannot_starve(tmp_path):
+    db = await _make_db(tmp_path)
+    try:
+        now = datetime.utcnow()
+        aged = _item(source_id="aged-rank-8", rank=8)
+        aged["qualified_at"] = now - timedelta(seconds=90)
+        fresh_best = _item(source_id="fresh-rank-1", rank=1)
+        fresh_best["qualified_at"] = now
+        fresh_next = _item(source_id="fresh-rank-2", rank=2)
+        fresh_next["qualified_at"] = now
+        await db.enqueue_telegram_pick_deliveries(
+            [aged, fresh_best, fresh_next]
+        )
+
+        first = await db.claim_next_telegram_pick_delivery(
+            now=now + timedelta(seconds=1),
+            pacing_seconds=0,
+        )
+        assert first["source_id"] == "aged-rank-8"
+        await db.finish_telegram_pick_delivery(
+            delivery_id=first["id"],
+            attempt_id=first["attempt_id"],
+            status="sent",
+            now=now + timedelta(seconds=1),
+        )
+
+        second = await db.claim_next_telegram_pick_delivery(
+            now=now + timedelta(seconds=2),
+            pacing_seconds=0,
+        )
+        assert second["source_id"] == "fresh-rank-1"
+    finally:
+        await _close_db(db)
+
+
+@pytest.mark.asyncio
 async def test_pending_delivery_survives_database_reopen(tmp_path):
     first_db = await _make_db(tmp_path, "restart.sqlite3")
     candidate = _item()
@@ -253,6 +322,8 @@ async def test_retry_after_is_persisted_and_not_retried_before_cooldown(tmp_path
             reason="server cooldown",
             now=now,
         )
+        await _close_db(db)
+        db = await _make_db(tmp_path)
         assert await db.claim_next_telegram_pick_delivery(
             now=now + timedelta(seconds=44), pacing_seconds=0
         ) is None
@@ -365,6 +436,321 @@ async def test_changed_directional_opportunity_invalidates_pending_pick(
             assert row.status == "invalidated"
             assert row.final_reason == "qualified_line_or_direction_changed"
             assert attempt.status == "invalidated"
+    finally:
+        await _close_db(db)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("prior_direction", "candidate_direction", "expected_valid"),
+    [
+        ("UNDER", "OVER", True),
+        ("OVER", "UNDER", True),
+        ("OVER", "OVER", False),
+    ],
+)
+async def test_prior_success_dedup_is_side_specific(
+    tmp_path, prior_direction, candidate_direction, expected_valid
+):
+    db = await _make_db(tmp_path)
+    try:
+        candidate = _item(direction=candidate_direction)
+        await _seed_underdog(db, candidate)
+        await _seed_opportunity(db, candidate)
+        await db.log_telegram_delivery(
+            provider="Underdog",
+            alert_kind="ACTIONABLE_PICK",
+            delivery_path="underdog",
+            player_name=candidate["player_name"],
+            sport=candidate["sport"],
+            stat_type=candidate["stat_type"],
+            external_id=candidate["source_id"],
+            event_id=candidate["event_id"],
+            line_value=candidate["line_value"],
+            direction=prior_direction,
+            line_variant="",
+            evidence_snapshot={
+                "direction": prior_direction,
+                "line_variant": "",
+            },
+            outcome="sent",
+            recipients_sent=1,
+        )
+
+        result = await db.validate_telegram_pick_source(candidate)
+        assert result["valid"] is expected_valid
+        if not expected_valid:
+            assert result["reason"] == "already_confirmed_delivered"
+    finally:
+        await _close_db(db)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("prior_variant", "expected_valid"),
+    [("alternate", True), ("standard", False)],
+)
+async def test_prizepicks_prior_success_dedup_matches_line_variant(
+    tmp_path, prior_variant, expected_valid
+):
+    db = await _make_db(tmp_path)
+    try:
+        candidate = _item(
+            provider="PrizePicks",
+            sport="NBA",
+            source_id="pp-source",
+            event_id="pp-event",
+            stat="Points",
+            line=19.5,
+        )
+        candidate["line_variant"] = "standard"
+        await _seed_pp_history(db, candidate)
+        await _seed_opportunity(db, candidate)
+        await db.log_telegram_delivery(
+            provider="PrizePicks",
+            alert_kind="ACTIONABLE_PICK",
+            delivery_path="prizepicks",
+            player_name=candidate["player_name"],
+            sport=candidate["sport"],
+            stat_type=candidate["stat_type"],
+            external_id=candidate["source_id"],
+            event_id=candidate["event_id"],
+            line_value=candidate["line_value"],
+            direction=candidate["direction"],
+            line_variant=prior_variant,
+            evidence_snapshot={
+                "direction": candidate["direction"],
+                "line_variant": prior_variant,
+            },
+            outcome="sent",
+            recipients_sent=1,
+        )
+
+        result = await db.validate_telegram_pick_source(candidate)
+        assert result["valid"] is expected_valid
+        if not expected_valid:
+            assert result["reason"] == "already_confirmed_delivered"
+    finally:
+        await _close_db(db)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("mismatch", "provider"),
+    [
+        ("player", "Underdog"),
+        ("line", "Underdog"),
+        ("direction", "Underdog"),
+        ("source", "Underdog"),
+        ("event", "Underdog"),
+        ("line_variant", "PrizePicks"),
+    ],
+)
+async def test_successful_audit_requires_complete_pick_identity(
+    tmp_path, mismatch, provider
+):
+    db = await _make_db(tmp_path)
+    try:
+        candidate = _item(provider=provider)
+        if provider == "PrizePicks":
+            candidate.update(
+                sport="NBA",
+                source_id="pp-source",
+                event_id="pp-event",
+                stat_type="Points",
+                line_value=19.5,
+                line_variant="standard",
+            )
+        await _seed_opportunity(db, candidate)
+        if provider == "PrizePicks":
+            await _seed_pp_history(db, candidate)
+
+        audit_player = candidate["player_name"]
+        audit_line = candidate["line_value"]
+        audit_direction = candidate["direction"]
+        audit_source = candidate["source_id"]
+        audit_event = candidate["event_id"]
+        audit_variant = candidate.get("line_variant", "")
+        if mismatch == "player":
+            audit_player = "Different Player"
+        elif mismatch == "line":
+            audit_line += 1.0
+        elif mismatch == "direction":
+            audit_direction = "UNDER"
+        elif mismatch == "source":
+            audit_source = "different-source"
+        elif mismatch == "event":
+            audit_event = "different-event"
+        elif mismatch == "line_variant":
+            audit_variant = "alternate"
+
+        await db.log_telegram_delivery(
+            provider=provider,
+            alert_kind="ACTIONABLE_PICK",
+            delivery_path=provider.casefold(),
+            player_name=audit_player,
+            sport=candidate["sport"],
+            stat_type=candidate["stat_type"],
+            external_id=audit_source,
+            event_id=audit_event,
+            line_value=audit_line,
+            direction=audit_direction,
+            line_variant=audit_variant,
+            evidence_snapshot={
+                "direction": audit_direction,
+                "line_variant": audit_variant,
+            },
+            outcome="sent",
+            recipients_sent=1,
+        )
+
+        assert await db.count_actionable_pick_records() == 0
+    finally:
+        await _close_db(db)
+
+
+@pytest.mark.asyncio
+async def test_exact_prizepicks_success_audit_matches_source_variant(tmp_path):
+    db = await _make_db(tmp_path)
+    try:
+        candidate = _item(
+            provider="PrizePicks",
+            sport="NBA",
+            source_id="pp-source",
+            event_id="pp-event",
+            stat="Points",
+            line=19.5,
+        )
+        candidate["line_variant"] = "standard"
+        await _seed_pp_history(db, candidate)
+        await _seed_opportunity(db, candidate)
+
+        recorded = await db.record_telegram_play_delivery(
+            provider="PrizePicks",
+            delivery_path="prizepicks",
+            player_name=candidate["player_name"],
+            sport=candidate["sport"],
+            stat_type=candidate["stat_type"],
+            external_id=candidate["source_id"],
+            event_id=candidate["event_id"],
+            line_value=candidate["line_value"],
+            recipients_sent=1,
+            recipients_failed=0,
+            evidence_snapshot={"direction": "OVER", "line_variant": "standard"},
+            direction="OVER",
+            line_variant="standard",
+        )
+
+        assert recorded is True
+        assert await db.count_actionable_pick_records() == 1
+    finally:
+        await _close_db(db)
+
+
+@pytest.mark.asyncio
+async def test_actionable_pick_reporting_deduplicates_exact_legacy_and_current_audits(
+    tmp_path,
+):
+    db = await _make_db(tmp_path)
+    try:
+        candidate = _item()
+        await _seed_opportunity(db, candidate)
+        async with db.session() as session:
+            session.add(
+                TelegramDeliveryAudit(
+                    provider=candidate["provider"],
+                    alert_kind="ACTIONABLE_PICK",
+                    delivery_path=candidate["delivery_path"],
+                    player_name=candidate["player_name"],
+                    sport=candidate["sport"],
+                    stat_type=candidate["stat_type"],
+                    external_id=candidate["source_id"],
+                    event_id=candidate["event_id"],
+                    line_value=candidate["line_value"],
+                    outcome="sent",
+                    recipients_sent=1,
+                    recipients_failed=0,
+                    attempted_at=datetime.utcnow(),
+                    evidence_snapshot_json=json.dumps(
+                        {"direction": candidate["direction"], "line_variant": ""}
+                    ),
+                )
+            )
+            await session.commit()
+
+        assert await db.record_telegram_play_delivery(
+            provider=candidate["provider"],
+            delivery_path=candidate["delivery_path"],
+            player_name=candidate["player_name"],
+            sport=candidate["sport"],
+            stat_type=candidate["stat_type"],
+            external_id=candidate["source_id"],
+            event_id=candidate["event_id"],
+            line_value=candidate["line_value"],
+            recipients_sent=1,
+            recipients_failed=0,
+            evidence_snapshot={"direction": candidate["direction"]},
+            direction=candidate["direction"],
+        )
+        assert await db.count_actionable_pick_records() == 1
+    finally:
+        await _close_db(db)
+
+
+@pytest.mark.asyncio
+async def test_actionable_reports_require_exact_audit_not_alert_sent_flag(tmp_path):
+    db = await _make_db(tmp_path)
+    try:
+        now = datetime.utcnow()
+        verified = _item(
+            source_id="verified-source",
+            event_id="verified-event",
+            game_time=now + timedelta(hours=2),
+            fetched_at=now,
+        )
+        flag_only = _item(
+            source_id="flag-only-source",
+            event_id="flag-only-event",
+            game_time=now + timedelta(hours=2),
+            fetched_at=now,
+        )
+        await _seed_opportunity(db, verified)
+        await _seed_opportunity(db, flag_only)
+        assert await db.record_telegram_play_delivery(
+            provider=verified["provider"],
+            delivery_path=verified["delivery_path"],
+            player_name=verified["player_name"],
+            sport=verified["sport"],
+            stat_type=verified["stat_type"],
+            external_id=verified["source_id"],
+            event_id=verified["event_id"],
+            line_value=verified["line_value"],
+            recipients_sent=1,
+            recipients_failed=0,
+            evidence_snapshot={"direction": verified["direction"]},
+            direction=verified["direction"],
+        )
+        async with db.session() as session:
+            await session.execute(
+                __import__("sqlalchemy").update(PropOpportunityLog)
+                .where(PropOpportunityLog.external_id == verified["source_id"])
+                .values(alert_sent=False, alert_sent_at=None)
+            )
+            await session.execute(
+                __import__("sqlalchemy").update(PropOpportunityLog)
+                .where(PropOpportunityLog.external_id == flag_only["source_id"])
+                .values(alert_sent=True, alert_sent_at=now)
+            )
+            await session.commit()
+
+        alerted = await db.get_alerted_opportunity_log(
+            start_at=now - timedelta(hours=1),
+            end_at=now + timedelta(minutes=1),
+            limit=20,
+        )
+        current = await db.get_current_actionable_opportunities(limit=20)
+        assert [row.external_id for row in alerted] == [verified["source_id"]]
+        assert [row.external_id for row in current] == [verified["source_id"]]
     finally:
         await _close_db(db)
 
@@ -485,6 +871,7 @@ async def test_confirmed_send_is_audited_and_never_sent_twice(tmp_path, monkeypa
             attempt = (
                 await session.execute(select(TelegramPickDeliveryAttempt))
             ).scalars().one()
+            runtime = await session.get(TelegramPickDeliveryRuntime, 1)
             audit = (
                 await session.execute(
                     select(TelegramDeliveryAudit).where(
@@ -500,8 +887,157 @@ async def test_confirmed_send_is_audited_and_never_sent_twice(tmp_path, monkeypa
             assert audit.outcome == "sent"
             assert audit.line_value == candidate["line_value"]
             assert json.loads(audit.evidence_snapshot_json)["direction"] == "OVER"
+            assert json.loads(audit.evidence_snapshot_json)["line_variant"] == ""
             assert opportunity.alert_sent is True
             assert opportunity.line_value == candidate["line_value"]
+            assert runtime.next_send_at <= (
+                attempt.attempted_at + timedelta(seconds=3.21)
+            )
+        assert await db.count_actionable_pick_records() == 1
+    finally:
+        await _close_db(db)
+
+
+@pytest.mark.asyncio
+async def test_partial_broadcast_persists_global_retry_after_across_restart(
+    tmp_path, monkeypatch
+):
+    db = await _make_db(tmp_path)
+    try:
+        now = datetime.utcnow()
+        first_pick = _item(
+            source_id="first-source",
+            event_id="first-event",
+            game_time=now + timedelta(hours=2),
+            fetched_at=now,
+        )
+        second_pick = _item(
+            source_id="second-source",
+            event_id="second-event",
+            game_time=now + timedelta(hours=2),
+            fetched_at=now,
+        )
+        await _seed_underdog(db, first_pick)
+        await _seed_opportunity(db, first_pick)
+        await db.enqueue_telegram_pick_deliveries([first_pick, second_pick])
+        monkeypatch.setenv("ALLOWED_USER_IDS", "101,202")
+
+        class PartialBot:
+            def __init__(self):
+                self.calls = []
+                self.failed_once = False
+
+            async def send_message(self, *, chat_id, **_kwargs):
+                self.calls.append(chat_id)
+                if chat_id == 202 and not self.failed_once:
+                    self.failed_once = True
+                    raise RetryAfter(1)
+                return SimpleNamespace(message_id=1)
+
+        bot = PartialBot()
+        context = SimpleNamespace(bot_data={"db": db}, bot=bot)
+        original_claim = db.claim_next_telegram_pick_delivery
+
+        async def claim_without_test_pacing(**kwargs):
+            return await original_claim(pacing_seconds=0, **kwargs)
+
+        monkeypatch.setattr(
+            db,
+            "claim_next_telegram_pick_delivery",
+            claim_without_test_pacing,
+        )
+        await alerts.telegram_pick_delivery_job(context)
+
+        assert bot.calls == [202, 101]
+        async with db.session() as session:
+            deliveries = (
+                await session.execute(select(TelegramPickDelivery))
+            ).scalars().all()
+            first_row = next(row for row in deliveries if row.source_id == "first-source")
+            second_row = next(row for row in deliveries if row.source_id == "second-source")
+            attempt = (
+                await session.execute(select(TelegramPickDeliveryAttempt))
+            ).scalars().one()
+            audit = (
+                await session.execute(
+                    select(TelegramDeliveryAudit).where(
+                        TelegramDeliveryAudit.alert_kind == "ACTIONABLE_PICK"
+                    )
+                )
+            ).scalars().one()
+            runtime = await session.get(TelegramPickDeliveryRuntime, 1)
+            assert first_row.status == "pending"
+            assert second_row.status == "pending"
+            assert attempt.status == "retry_scheduled"
+            assert attempt.exception_class == "RetryAfter"
+            assert attempt.retry_after_seconds == 1
+            assert attempt.recipients_sent == 1
+            assert attempt.recipients_failed == 1
+            assert "only recipients without" in attempt.reason
+            recipient_results = json.loads(attempt.recipient_results_json)
+            assert recipient_results["sent"] == [
+                alerts._telegram_recipient_delivery_key(101)
+            ]
+            assert recipient_results["failed"][0]["recipient_key"] == (
+                alerts._telegram_recipient_delivery_key(202)
+            )
+            assert json.loads(first_row.sent_recipient_keys_json) == [
+                alerts._telegram_recipient_delivery_key(101)
+            ]
+            assert audit.outcome == "sent"
+            assert audit.recipients_sent == 1
+            assert audit.recipients_failed == 1
+            completed_at = attempt.completed_at
+            assert runtime.next_send_at >= completed_at + timedelta(seconds=1)
+
+        await _close_db(db)
+        db = await _make_db(tmp_path)
+        assert await db.claim_next_telegram_pick_delivery(
+            now=completed_at + timedelta(milliseconds=900), pacing_seconds=0
+        ) is None
+        original_claim = db.claim_next_telegram_pick_delivery
+
+        async def reopened_claim_without_test_pacing(**kwargs):
+            return await original_claim(pacing_seconds=0, **kwargs)
+
+        monkeypatch.setattr(
+            db,
+            "claim_next_telegram_pick_delivery",
+            reopened_claim_without_test_pacing,
+        )
+        await asyncio.sleep(1.1)
+        await alerts.telegram_pick_delivery_job(
+            SimpleNamespace(bot_data={"db": db}, bot=bot)
+        )
+        assert bot.calls == [202, 101, 202]
+        async with db.session() as session:
+            first_row = (
+                await session.execute(
+                    select(TelegramPickDelivery).where(
+                        TelegramPickDelivery.source_id == "first-source"
+                    )
+                )
+            ).scalar_one()
+            attempts = (
+                await session.execute(
+                    select(TelegramPickDeliveryAttempt)
+                    .where(TelegramPickDeliveryAttempt.delivery_id == first_row.id)
+                    .order_by(TelegramPickDeliveryAttempt.attempted_at)
+                )
+            ).scalars().all()
+            assert first_row.status == "sent"
+            assert len(attempts) == 2
+            assert attempts[1].recipients_sent == 1
+            assert attempts[1].recipients_failed == 0
+            assert json.loads(attempts[1].recipient_results_json)["sent"] == [
+                alerts._telegram_recipient_delivery_key(202)
+            ]
+            assert json.loads(first_row.sent_recipient_keys_json) == sorted(
+                [
+                    alerts._telegram_recipient_delivery_key(101),
+                    alerts._telegram_recipient_delivery_key(202),
+                ]
+            )
     finally:
         await _close_db(db)
 
@@ -752,15 +1288,23 @@ def test_actionable_pick_audit_identity_includes_side():
         "delivery_path": "standing",
         "external_id": "source-1",
         "event_id": "event-1",
+        "player_name": "Sample Player",
+        "sport": "NHL",
         "stat_type": "Goals",
         "line_value": 1.5,
+        "line_variant": "",
     }
     over = _telegram_delivery_key(**identity, direction="OVER")
     under = _telegram_delivery_key(**identity, direction="UNDER")
     legacy = _telegram_delivery_key(**identity)
+    other_player = _telegram_delivery_key(
+        **{**identity, "player_name": "Other Player"},
+        direction="OVER",
+    )
 
     assert over is not None
     assert under is not None
     assert over != under
-    assert legacy is not None
-    assert legacy not in {over, under}
+    assert other_player is not None
+    assert other_player != over
+    assert legacy is None

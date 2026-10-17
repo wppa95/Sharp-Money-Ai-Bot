@@ -361,11 +361,12 @@ Implemented as part of the v1.3 freeze (Task #70). No new features — hardening
 
 ---
 
-## PrizePicks Reference System
+## Legacy PrizePicks Reference System (Advisory Only)
 
-Since the PrizePicks API is DataDome-protected, `engine/pp_reference.py` surfaces
-Underdog pick'em projections as PrizePicks *reference* data. Underdog lines are
-typically identical or within ±0.5 of PrizePicks for the same player/market.
+`engine/pp_reference.py` may surface a clearly labeled Underdog projection as
+PrizePicks reference data when an exact PrizePicks row is unavailable. This
+legacy fallback is advisory only: it is not a PrizePicks observation and must
+not replace or delay the PropLine-backed PrizePicks feed or evaluation.
 
 **Architecture:**
 - `PPReferenceMatch` dataclass — holds player, sport, stat, UD line, inferred PP line, confidence (0–100), match reason, and source label
@@ -391,17 +392,22 @@ typically identical or within ±0.5 of PrizePicks for the same player/market.
 - `📋 PP History Match` — a live PP row was found in PropLineHistory (from manual `/pp_import`)
 
 **Invariant:** `PPReferenceMatch` output is NEVER treated as confirmed PP data. The
-disclaimer ("Reference only — not confirmed PrizePicks data") is mandatory in every alert.
-The existing `PrizePicksManualProvider` and `/pp_import` flow remain the only authoritative
-source for confirmed PP data.
+disclaimer ("Reference only — not confirmed PrizePicks data") is mandatory in every
+reference alert. PropLine-backed PrizePicks observations are authoritative for
+PrizePicks-originated picks; `/pp_import` remains a separate compatibility path.
 
 ---
 
-## User preferences
+## V4 Platform Parity and Delivery Operations
 
-- Documentation changes do not require calling `markTaskInProgress`
-- Test suite is the source of truth for pipeline correctness — run before merging any engine changes
-- Sharp book list is configurable via `SHARP_BOOKS` env var; defaults cover the primary sharp/respected books
-- **Alert source priority: PrizePicks via PropLine and Underdog; no sportsbook-odds provider is configured**
-- Do not spend development effort optimising sportsbook alerts before PrizePicks analysis is complete
-- PrizePicks features ship first; Underdog enhancements second; sportsbook scope changes last
+- Underdog and PrizePicks are equal primary platforms; neither receives preference
+  in ingestion, evaluation, qualification, or delivery solely by platform label.
+- PropLine supplies PrizePicks observations and may provide shared supplemental
+  history or results for either platform without changing pick provenance.
+- Keep each pick's original platform, source ID, event, line, and direction.
+- The bot is single-process per Replit workspace. Startup holds a host-local OS
+  lock to reject a second bot process on that host. This lock does not coordinate
+  separate hosts; do not configure multiple bot replicas against the same queue.
+- Documentation changes do not require calling `markTaskInProgress`.
+- Run the test suite before merging engine or delivery changes.
+- The sharp-book list remains configurable through `SHARP_BOOKS`.

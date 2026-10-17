@@ -209,7 +209,8 @@ async def test_delivered_analysis_retains_audit_direction_and_line_after_current
         provider="PrizePicks",delivery_path="prizepicks",player_name="Example",
         sport="NHL",stat_type="goals",external_id="pp-source",event_id="game",
         line_value=0.5,recipients_sent=1,recipients_failed=0,
-        evidence_snapshot={"direction":"UNDER","line":0.5})
+        evidence_snapshot={"direction":"UNDER","line":0.5,"line_variant":""},
+        direction="UNDER",line_variant="")
     rows=await evidence_db.get_alerted_opportunity_log()
     assert len(rows)==1
     assert (rows[0].provider,rows[0].line_value,rows[0].recommendation,rows[0].result)==(

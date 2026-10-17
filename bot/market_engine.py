@@ -1959,9 +1959,9 @@ async def _init_state_from_db(db: "Database") -> None:
     * _MARKET_FIRST_ALERT    — re-populated from recently alerted props so the
       market availability window (detection → removal) is accurate.
 
-    * _prop_market_alerted   — rebuilt from PropOpportunityLog.alert_sent=True
-      records within the dedup window so the bot does not re-alert the same
-      prop shortly after a restart.
+    * _prop_market_alerted   — rebuilt from identity-matched successful Telegram
+      audits (with the legacy PropLineHistory fallback) so the bot does not
+      re-alert the same prop shortly after a restart.
 
     All restorations are non-fatal: any individual failure is logged at DEBUG
     and skipped so a DB error never prevents the bot from starting.
@@ -3356,6 +3356,9 @@ async def _run_prizepicks_independent_cycle(
                     or getattr(candidate["prop"], "game_id", "")
                     or ""
                 ),
+                line_variant=str(
+                    getattr(candidate["prop"], "line_variant", "") or ""
+                ),
                 fetched_at=getattr(candidate["prop"], "fetched_at", None),
                 delivery_path="prizepicks",
                 defer_delivery=True,
@@ -3385,7 +3388,12 @@ async def _run_prizepicks_independent_cycle(
             try:
                 if getattr(result, "authoritative_recorded", True):
                     await db.mark_opportunity_alert_sent(
-                        candidate["external_id"], stat, provider="PrizePicks"
+                        candidate["external_id"],
+                        stat,
+                        provider="PrizePicks",
+                        line_variant=str(
+                            getattr(candidate["prop"], "line_variant", "") or ""
+                        ),
                     )
                 await db.update_prop_lifecycle_state(
                     "PrizePicks", player, sport, stat, "ACTIVE_ALERTED",

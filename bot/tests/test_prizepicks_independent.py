@@ -16,7 +16,11 @@ from alerts_multiplatform import (
     format_underdog_change_alert,
 )
 from commands import PropPickAdapter
-from database import Database, PropLineObservation, PropOpportunityLog
+from database import (
+    Database,
+    PropLineObservation,
+    PropOpportunityLog,
+)
 import market_engine
 from engine.player_results import compute_hit_rates
 from providers.propline import PropLineFetchResult
@@ -886,14 +890,28 @@ class TestIndependentPrizePicks:
     async def test_alert_dedup_restore_keeps_provider_keys_separate(self, db):
         await db.log_prop_opportunity(**_opportunity("Underdog"))
         await db.log_prop_opportunity(**_opportunity("PrizePicks"))
-        await db.mark_opportunity_alert_sent(
-            "shared-event-prop", "Points", provider="Underdog"
-        )
-        await db.mark_opportunity_alert_sent(
-            "shared-event-prop", "Points", provider="PrizePicks"
+        await db.upsert_prop_line_history_batch(
+            "PrizePicks",
+            [
+                SimpleNamespace(
+                    provider="PrizePicks",
+                    player_name="LeBron James",
+                    team="LAL",
+                    sport="NBA",
+                    stat_type="Points",
+                    line_value=25.5,
+                    game_time=datetime.utcnow() + timedelta(hours=2),
+                    external_id="shared-event-prop",
+                    game_id="game-prizepicks",
+                    line_variant="",
+                    fetched_at=datetime.utcnow(),
+                    removed=False,
+                )
+            ],
+            append_snapshot=True,
         )
         for provider in ("Underdog", "PrizePicks"):
-            await db.log_telegram_delivery(
+            assert await db.record_telegram_play_delivery(
                 provider=provider,
                 delivery_path="standing",
                 player_name="LeBron James",
@@ -901,9 +919,15 @@ class TestIndependentPrizePicks:
                 stat_type="Points",
                 external_id="shared-event-prop",
                 event_id=f"game-{provider.lower()}",
-                line_value=24.5,
-                outcome="sent",
+                line_value=25.5,
                 recipients_sent=1,
+                recipients_failed=0,
+                evidence_snapshot={
+                    "direction": "OVER",
+                    **({"line_variant": ""} if provider == "PrizePicks" else {}),
+                },
+                direction="OVER",
+                line_variant="" if provider == "PrizePicks" else None,
             )
 
         restored = await db.get_recent_alerted_props_for_dedup(since_hours=1)

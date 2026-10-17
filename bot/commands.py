@@ -4266,10 +4266,9 @@ async def cmd_alerts(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         lines.append("")
 
     # ── Actionable pick alerts (PropOpportunityLog — canonical delivery source) ─
-    # PropOpportunityLog.alert_sent=True is set only when broadcast_alert()
-    # successfully delivers a 🎯 ACTIONABLE BET PICK to Telegram.  Using
-    # PropLineHistory.lifecycle_state was unreliable because new PropLineHistory
-    # rows written by subsequent scans reset that field to None/DISCOVERED.
+    # Confirmed delivery history comes from identity-complete successful
+    # Telegram audits. PropOpportunityLog.alert_sent is retained as compatibility
+    # bookkeeping, not used as proof of a delivered 🎯 ACTIONABLE BET PICK.
     lines.append("🎯 <b>Actionable Pick Alerts</b>")
     try:
         # Calendar-day window in the canonical reporting timezone; historical

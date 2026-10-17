@@ -7,9 +7,10 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from sqlalchemy import update
 
 from alerts import AlertDelivery
-from database import Database
+from database import Database, PropOpportunityLog
 
 
 @pytest.fixture()
@@ -93,10 +94,19 @@ async def _confirm_pick_delivery(db, external_id: str = "funnel-prop") -> None:
 
 @pytest.mark.asyncio
 async def test_delivery_state_requires_tracking_and_directional_opportunity(db):
+    identity = {
+        "event_id": "funnel-game",
+        "player_name": "Funnel Player",
+        "sport": "MLB",
+        "line_value": 0.5,
+        "direction": "OVER",
+        "line_variant": "",
+    }
     state = await db.get_telegram_delivery_state(
         provider="Underdog",
         external_id="funnel-prop",
         stat_type="Hits",
+        **identity,
     )
     assert state == {
         "tracked": False,
@@ -105,10 +115,18 @@ async def test_delivery_state_requires_tracking_and_directional_opportunity(db):
     }
 
     await _track_and_log(db)
+    async with db.session() as session:
+        await session.execute(
+            update(PropOpportunityLog)
+            .where(PropOpportunityLog.external_id == "funnel-prop")
+            .values(alert_sent=True)
+        )
+        await session.commit()
     state = await db.get_telegram_delivery_state(
         provider="Underdog",
         external_id="funnel-prop",
         stat_type="Hits",
+        **identity,
     )
     assert state["tracked"] is True
     assert state["directional"] is True
@@ -119,6 +137,7 @@ async def test_delivery_state_requires_tracking_and_directional_opportunity(db):
         provider="Underdog",
         external_id="funnel-prop",
         stat_type="Hits",
+        **identity,
     )
     assert state["already_delivered"] is True
 

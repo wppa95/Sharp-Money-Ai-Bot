@@ -165,6 +165,7 @@ async def test_funnel_evaluation_floor_covers_directional_and_delivered_rows(db)
                 line_value=1.5,
                 outcome="sent",
                 attempted_at=now,
+                    evidence_snapshot_json='{"direction":"OVER"}',
             )
         )
         session.add_all([

@@ -55,6 +55,81 @@ async def test_evidence_snapshot_column_exists_before_v2_reads_legacy_audit_rows
                 text("PRAGMA table_info(telegram_delivery_audit)")
             )
             column_names = {row[1] for row in columns.fetchall()}
+            historical = (
+                await connection.execute(
+                    text(
+                        "SELECT delivery_key FROM telegram_delivery_audit "
+                        "WHERE external_id = 'legacy-source'"
+                    )
+                )
+            ).scalar_one()
         assert "evidence_snapshot_json" in column_names
+        # Startup adds schema support but must not guess missing direction or
+        # rewrite historical audit rows into confirmed-delivery identities.
+        assert historical is None
+    finally:
+        await database.close()
+
+
+@pytest.mark.asyncio
+async def test_pick_delivery_recipient_upgrade_is_additive_for_legacy_queue_rows(
+    tmp_path,
+):
+    from sqlalchemy import text
+    from sqlalchemy.ext.asyncio import create_async_engine
+
+    from database import Database
+
+    database_url = f"sqlite+aiosqlite:///{tmp_path / 'legacy-queue.sqlite'}"
+    database = Database(database_url)
+    database._engine = create_async_engine(database_url)
+    try:
+        async with database._engine.begin() as connection:
+            await connection.execute(
+                text(
+                    "CREATE TABLE telegram_pick_deliveries "
+                    "(id INTEGER PRIMARY KEY, status VARCHAR(16) NOT NULL)"
+                )
+            )
+            await connection.execute(
+                text(
+                    "CREATE TABLE telegram_pick_delivery_attempts "
+                    "(attempt_id VARCHAR(32) PRIMARY KEY, status VARCHAR(24) NOT NULL)"
+                )
+            )
+            await connection.execute(
+                text(
+                    "INSERT INTO telegram_pick_deliveries (id,status) "
+                    "VALUES (7,'pending')"
+                )
+            )
+            await connection.execute(
+                text(
+                    "INSERT INTO telegram_pick_delivery_attempts "
+                    "(attempt_id,status) VALUES ('legacy-attempt','failed')"
+                )
+            )
+
+        await database._migrate_telegram_pick_delivery_v1()
+        async with database._engine.connect() as connection:
+            delivery = (
+                await connection.execute(
+                    text(
+                        "SELECT status,sent_recipient_keys_json "
+                        "FROM telegram_pick_deliveries WHERE id=7"
+                    )
+                )
+            ).one()
+            attempt = (
+                await connection.execute(
+                    text(
+                        "SELECT status,recipient_results_json "
+                        "FROM telegram_pick_delivery_attempts "
+                        "WHERE attempt_id='legacy-attempt'"
+                    )
+                )
+            ).one()
+        assert tuple(delivery) == ("pending", "[]")
+        assert tuple(attempt) == ("failed", "{}")
     finally:
         await database.close()

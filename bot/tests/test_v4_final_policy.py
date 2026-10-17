@@ -77,6 +77,23 @@ async def store_pick(db, q, *, sent_at, display_event=None):
     await db.log_prop_opportunity(
         **fields, recommendation="OVER", confidence=70, decision_tier="B",
     )
+    if q.provider == "PrizePicks":
+        async with db.session() as session:
+            session.add(database.PropLineHistory(
+                provider="PrizePicks",
+                player_name=q.player_name,
+                team=q.team,
+                sport=q.sport,
+                stat_type=q.stat_type,
+                line_value=q.line_value,
+                game_time=q.game_time,
+                external_id=q.external_id,
+                game_id=q.game_id,
+                line_variant=q.line_variant,
+                fetched_at=q.fetched_at,
+                removed=False,
+            ))
+            await session.commit()
     assert await db.record_telegram_play_delivery(
         provider=q.provider, delivery_path="new", player_name=q.player_name,
         sport=q.sport, stat_type=q.stat_type, external_id=q.external_id,
@@ -113,6 +130,23 @@ async def test_today_pick_immediate_without_wait(db, clock, monkeypatch, provide
         game_time=q.game_time, game_id=q.game_id,
         recommendation="OVER", confidence=70, decision_tier="B",
     )
+    if provider == "PrizePicks":
+        async with db.session() as session:
+            session.add(database.PropLineHistory(
+                provider="PrizePicks",
+                player_name=q.player_name,
+                team=q.team,
+                sport=q.sport,
+                stat_type=q.stat_type,
+                line_value=q.line_value,
+                game_time=q.game_time,
+                external_id=q.external_id,
+                game_id=q.game_id,
+                line_variant=q.line_variant,
+                fetched_at=q.fetched_at,
+                removed=False,
+            ))
+            await session.commit()
     send = AsyncMock(return_value={"sent": 1, "failed": 0})
     monkeypatch.setattr(alerts, "broadcast_alert", send)
     monkeypatch.setattr(alerts, "send_discord_alert", AsyncMock(return_value=False))
@@ -123,6 +157,7 @@ async def test_today_pick_immediate_without_wait(db, clock, monkeypatch, provide
         strict_pregame=True, fetched_at=q.fetched_at,
         decision=NS(recommendation="OVER"), source=q.provider,
         source_id=q.external_id, event_id=q.game_id,
+        line_variant=q.line_variant,
     )
     assert result.sent and send.await_count == 1
     records = await audit_rows(db)

@@ -23,7 +23,7 @@
 - [Market-only signals are non-actionable](market-signal-bypass.md) — movement alone never creates a pick; missing optional history is not a universal delivery blocker.
 - [V3.1 stability pass](v31-stability-pass.md) — OOM fix: _MARKET_FIRST_ALERT TTL eviction, known_keys 60d filter, gc.collect, VmRSS measurement; state recovery: _init_state_from_db on cold start; 3090 tests Aug 2026.
 - [V3.1 cleanup pass — 5 gate fixes](v31-cleanup-pass.md) — BQ≥85 gate (MLB/NFL); relaxed non-strict stars/conf; _is_game_live_or_past helper (all 3 paths); ET time format; max_instances=1 explicit; 3129 tests Aug 2026.
-- [Telegram pick/result semantics](telegram-pick-grading.md) — delivered-only stats filter alert_sent; opportunity HIT/MISS already reflect OVER/UNDER direction; neutral tracking results stay separate.
+- [Telegram pick/result semantics](telegram-pick-grading.md) — successful identity-matched audits define delivered picks; alert_sent is compatibility bookkeeping; results remain directional and pushes count separately.
 - [Pipeline bottleneck fix (standing path + esports HFS)](pipeline-bottleneck-fix.md) — two root causes: _HFS excluded esports stats; _processed_keys blocked standing path for sub-threshold movers; 3179 tests Aug 2026.
 - [Phase 2 Core fixes](phase2-core-fixes.md) — props=0 (#114), /restarts removed (#115), auto-grading fetch loop (#116), decision_tier clarity (#113); 3256 tests Aug 2026.
 - [Post-freeze bugs 117-120](bugs-117-120.md) — BQ gate 85→95 (#117); new-prop dedup gate (#118); funnel label + /status DB counter (#119); Tier 1 gate verified correct (#120); 3288 tests Aug 2026.
@@ -93,7 +93,7 @@
 - [Command reporting boundaries](command-reporting-boundaries.md) — reports separate populations; current picks require fresh future rows and persisted engine output, never synthetic display defaults.
 - [V4 evidence populations](v4-evidence-populations.md) — completed player results support PLAYs; exact PropLine event matches may corroborate source-less PrizePicks grades without changing provenance.
 - [Restart session isolation](restart-session-isolation.md) — reset runtime cursors, checkpoints, telemetry, and child tasks on restart; preserve SQLite evidence and delivery history.
-- [Telegram reconciliation identity](telegram-reconciliation-identity.md) — Underdog audits need source identity and delivery path; player/stat/line cannot deterministically join sends to picks.
+- [Telegram reconciliation identity](telegram-reconciliation-identity.md) — current delivery needs exact identity; history may retain the audit's old line/side only for the same source/event/player/market.
 - [Managed SQLite CANTOPEN contention](managed-sqlite-cantopen.md) — Absolute path, valid permissions, and isolated inserts can succeed while live concurrent bot scans still fail to open SQLite.
 - [Shared SQLite writer gate](sqlite-writer-gate.md) — Multiple Database pools for one SQLite URL must share a process-wide async session gate.
 - [SQLite pool backpressure](sqlite-pool-backpressure.md) — Separate async Database objects sharing SQLite need one bounded cross-pool session budget and explicit pool limits.

@@ -225,6 +225,87 @@ async def test_launcher_queues_overlapping_trigger_without_overlap():
 
 
 @pytest.mark.asyncio
+async def test_single_flight_delivery_drops_timer_triggers_while_busy():
+    from main import _ScheduledExecutionCoordinator
+
+    coordinator = _ScheduledExecutionCoordinator()
+    started = asyncio.Event()
+    release = asyncio.Event()
+    calls = 0
+
+    async def callback(_context):
+        nonlocal calls
+        calls += 1
+        started.set()
+        await release.wait()
+
+    launcher = coordinator.launch(
+        "telegram_pick_delivery",
+        callback,
+        single_flight=True,
+    )
+    first_launcher = asyncio.create_task(launcher(None))
+    await started.wait()
+    await first_launcher
+    assert len(coordinator._tasks) == 1
+
+    # Repeating one-second scheduler ticks do not accumulate lock waiters.
+    await asyncio.gather(launcher(None), launcher(None), launcher(None))
+    assert calls == 1
+    assert len(coordinator._tasks) == 1
+
+    release.set()
+    await asyncio.gather(*list(coordinator._tasks))
+    await asyncio.sleep(0)
+    assert not coordinator._single_flight_names
+    assert not coordinator._tasks
+
+    release.clear()
+    await launcher(None)
+    await started.wait()
+    release.set()
+    await asyncio.gather(*list(coordinator._tasks))
+    assert calls == 2
+
+
+def test_workspace_process_lock_rejects_a_second_process(tmp_path):
+    import os
+    import subprocess
+    import sys
+
+    import main
+
+    lock_path = tmp_path / "sharp-money.lock"
+    first_fd = main._acquire_bot_process_lock(str(lock_path))
+    script = """
+import sys
+sys.path.insert(0, sys.argv[1])
+from main import _acquire_bot_process_lock
+try:
+    _acquire_bot_process_lock(sys.argv[2])
+except RuntimeError:
+    raise SystemExit(0)
+raise SystemExit(1)
+"""
+    try:
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                script,
+                os.path.dirname(main.__file__),
+                str(lock_path),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        assert result.returncode == 0, result.stderr
+    finally:
+        os.close(first_fd)
+
+
+@pytest.mark.asyncio
 async def test_launcher_never_allows_same_job_overlap():
     from main import _ScheduledExecutionCoordinator
 

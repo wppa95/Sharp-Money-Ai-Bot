@@ -730,50 +730,21 @@ class DashboardEngine:
 
     @staticmethod
     async def _count_underdog_deliveries(db: "Database") -> int:
-        """Count delivered UD opportunities without scanning raw snapshots."""
-        from sqlalchemy import func, or_, select
-        from database import PropOpportunityLog
-
-        async with db.session() as s:
-            result = await s.execute(
-                select(func.count())
-                .select_from(PropOpportunityLog)
-                .where(
-                    or_(
-                        PropOpportunityLog.provider == "Underdog",
-                        PropOpportunityLog.provider.is_(None),
-                    ),
-                    PropOpportunityLog.alert_sent == True,  # noqa: E712
-                )
-            )
-            return int(result.scalar() or 0)
+        """Count Underdog deliveries from exact successful Telegram audits."""
+        counts = await db.get_confirmed_telegram_pick_counts(provider="Underdog")
+        return int(counts.get("total", 0))
 
     @staticmethod
     async def _count_today_underdog_deliveries(db: "Database") -> int:
-        from sqlalchemy import func, or_, select
-        from database import PropOpportunityLog
         from reporting import current_reporting_day_bounds
 
         day_start, day_end = current_reporting_day_bounds()
-        delivered_at = func.coalesce(
-            PropOpportunityLog.alert_sent_at,
-            PropOpportunityLog.detected_at,
+        counts = await db.get_confirmed_telegram_pick_counts(
+            start_at=day_start,
+            end_at=day_end,
+            provider="Underdog",
         )
-        async with db.session() as s:
-            result = await s.execute(
-                select(func.count())
-                .select_from(PropOpportunityLog)
-                .where(
-                    or_(
-                        PropOpportunityLog.provider == "Underdog",
-                        PropOpportunityLog.provider.is_(None),
-                    ),
-                    PropOpportunityLog.alert_sent == True,  # noqa: E712
-                    delivered_at >= day_start,
-                    delivered_at < day_end,
-                )
-            )
-            return int(result.scalar() or 0)
+        return int(counts.get("total", 0))
 
     @staticmethod
     async def _gather_ev_performance(db: "Database", r: DashboardReport) -> None:
@@ -872,7 +843,7 @@ class DashboardEngine:
     async def _gather_by_sport(db: "Database", r: DashboardReport) -> None:
         try:
             from sqlalchemy import select, func
-            from database import EVRecord, PPEdgeRecord, PropOpportunityLog
+            from database import EVRecord, PPEdgeRecord
             from sqlalchemy import or_
 
             sport_map: dict[str, SportPerf] = {}
@@ -895,21 +866,13 @@ class DashboardEngine:
                         sp.ev_count = cnt
                         sp.avg_ev   = round(avg_ev, 2) if avg_ev is not None else None
 
-                # UD alerts by sport
-                ud_res = await s.execute(
-                    select(PropOpportunityLog.sport, func.count())
-                    .where(
-                        or_(
-                            PropOpportunityLog.provider == "Underdog",
-                            PropOpportunityLog.provider.is_(None),
-                        ),
-                        PropOpportunityLog.alert_sent == True,  # noqa: E712
-                    )
-                    .group_by(PropOpportunityLog.sport)
-                )
-                for sport_val, cnt in ud_res.all():
-                    if sport_val:
-                        _get(sport_val).ud_count = cnt
+                # UD counts are based on exact successful PLAY audits, not the
+                # compatibility alert_sent flag.
+                for audit in await db._confirmed_telegram_play_audits(
+                    s, provider="Underdog"
+                ):
+                    if audit.sport:
+                        _get(audit.sport).ud_count += 1
 
                 # PP alerts by sport
                 pp_res = await s.execute(
@@ -986,7 +949,7 @@ class DashboardEngine:
         """
         try:
             from sqlalchemy import select, func
-            from database import EVRecord, PropOpportunityLog, SteamRecord, PPEdgeRecord
+            from database import EVRecord, SteamRecord, PPEdgeRecord
             from sqlalchemy import or_
 
             from reporting import current_reporting_day_bounds
@@ -1009,24 +972,14 @@ class DashboardEngine:
                 )
                 dt.ev_count = ev_res.scalar() or 0
 
-                delivered_at = func.coalesce(
-                    PropOpportunityLog.alert_sent_at,
-                    PropOpportunityLog.detected_at,
+                confirmed_ud_today = await db._confirmed_telegram_play_audits(
+                    s, since=day_start, provider="Underdog"
                 )
-                ud_res = await s.execute(
-                    select(func.count())
-                    .select_from(PropOpportunityLog)
-                    .where(
-                        or_(
-                            PropOpportunityLog.provider == "Underdog",
-                            PropOpportunityLog.provider.is_(None),
-                        ),
-                        PropOpportunityLog.alert_sent == True,  # noqa: E712
-                        delivered_at >= day_start,
-                        delivered_at < day_end,
-                    )
+                dt.ud_count = sum(
+                    1 for audit in confirmed_ud_today
+                    if audit.attempted_at is not None
+                    and audit.attempted_at < day_end
                 )
-                dt.ud_count = ud_res.scalar() or 0
 
                 st_res = await s.execute(
                     select(func.count())

@@ -11,11 +11,14 @@ post_shutdown lifecycle hooks — do NOT wrap run_polling() in asyncio.run().
 from __future__ import annotations
 
 import asyncio
+import fcntl
 from functools import wraps
+import hashlib
 import inspect
 import logging
 import os
 import sys
+import tempfile
 import time
 from collections import defaultdict
 from datetime import datetime, timedelta
@@ -336,6 +339,8 @@ class _ScheduledExecutionCoordinator:
         self._job_locks: dict[str, asyncio.Lock] = {}
         self._exclusive_waits = 0
         self._exclusive_wait_seconds = 0.0
+        self._single_flight_names: set[str] = set()
+        self._single_flight_tasks: dict[asyncio.Task, str] = {}
 
     async def _execute(self, name: str, callback, context, *args, **kwargs):
         # Track the scheduler-facing name, not only callback-internal aliases.
@@ -449,27 +454,38 @@ class _ScheduledExecutionCoordinator:
         *,
         exclusive_group: str | None = None,
         allow_overlap: bool = False,
+        single_flight: bool = False,
     ):
-        """Return a scheduler callback that tracks every real execution."""
+        """Return a scheduler callback with optional bounded single-flight."""
         @wraps(callback)
         async def _launcher(context, *args, **kwargs):
+            # This synchronous check/set runs on the event loop, so same-loop
+            # timer callbacks cannot reserve the same single-flight slot twice.
+            if single_flight and name in self._single_flight_names:
+                return None
+            if single_flight:
+                self._single_flight_names.add(name)
             self._active_counts[name] = 1
             self._running.add(name)
-            # The named lock serializes later triggers. Keep each trigger as a
-            # task so APScheduler cannot discard it while an earlier scan is
-            # finishing its database barrier.
-            task = asyncio.create_task(
-                self._run_reserved(
-                    name,
-                    callback,
-                    context,
-                    *args,
-                    exclusive_group=exclusive_group,
-                    **kwargs,
-                ),
-                name=f"scheduled:{name}",
-            )
+            try:
+                task = asyncio.create_task(
+                    self._run_reserved(
+                        name,
+                        callback,
+                        context,
+                        *args,
+                        exclusive_group=exclusive_group,
+                        **kwargs,
+                    ),
+                    name=f"scheduled:{name}",
+                )
+            except Exception:
+                if single_flight:
+                    self._single_flight_names.discard(name)
+                raise
             self._tasks.add(task)
+            if single_flight:
+                self._single_flight_tasks[task] = name
             task.add_done_callback(self._task_finished)
             await asyncio.sleep(0)
             return None
@@ -478,6 +494,9 @@ class _ScheduledExecutionCoordinator:
 
     def _task_finished(self, task: asyncio.Task) -> None:
         self._tasks.discard(task)
+        single_flight_name = self._single_flight_tasks.pop(task, None)
+        if single_flight_name is not None:
+            self._single_flight_names.discard(single_flight_name)
         if task.cancelled():
             return
         try:
@@ -505,6 +524,8 @@ class _ScheduledExecutionCoordinator:
         self._active_counts.clear()
         self._job_locks.clear()
         self._exclusive_locks.clear()
+        self._single_flight_names.clear()
+        self._single_flight_tasks.clear()
 
     def backpressure_metrics(self) -> dict[str, float]:
         """Return scheduler wait counters for runtime/load observations."""
@@ -553,6 +574,7 @@ def _coordinated_job(
     exclusive_group: str | None = None,
     allow_overlap: bool = False,
     use_exclusive_group: bool = True,
+    single_flight: bool = False,
 ):
     if not use_exclusive_group:
         exclusive_group = None
@@ -561,6 +583,7 @@ def _coordinated_job(
         callback,
         exclusive_group=exclusive_group,
         allow_overlap=allow_overlap,
+        single_flight=single_flight,
     )
 
 
@@ -777,6 +800,7 @@ async def post_init(application: Application) -> None:
                 "telegram_pick_delivery",
                 telegram_pick_delivery_job,
                 use_exclusive_group=False,
+                single_flight=True,
             ),
             interval=1,
             first=5,
@@ -2826,12 +2850,44 @@ def _install_excepthook() -> None:
     sys.excepthook = _crash_hook
 
 
+_BOT_PROCESS_LOCK_FD: Optional[int] = None
+
+
+def _acquire_bot_process_lock(lock_path: str | os.PathLike[str] | None = None) -> int:
+    """Enforce one bot process per workspace on this host with an OS file lock."""
+    if lock_path is None:
+        workspace = os.path.realpath(os.path.join(os.path.dirname(__file__), ".."))
+        workspace_key = hashlib.sha256(workspace.encode("utf-8")).hexdigest()[:20]
+        lock_path = os.path.join(
+            tempfile.gettempdir(),
+            f"sharp-money-bot-{workspace_key}.lock",
+        )
+    fd = os.open(os.fspath(lock_path), os.O_CREAT | os.O_RDWR, 0o600)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        os.close(fd)
+        raise RuntimeError(
+            "A Sharp Money Bot process is already running in this workspace"
+        ) from None
+    return fd
+
+
 def main() -> None:
+    global _BOT_PROCESS_LOCK_FD
     # Validate configuration before building the app
     try:
         config.validate()
     except ValueError as exc:
         logger.critical("Configuration error: %s", exc)
+        sys.exit(1)
+
+    try:
+        # This host-local lock prevents a second managed/manual workflow from
+        # claiming the same outbox. It does not coordinate separate hosts.
+        _BOT_PROCESS_LOCK_FD = _acquire_bot_process_lock()
+    except RuntimeError as exc:
+        logger.critical("%s", exc)
         sys.exit(1)
 
     # Install global exception hook first — captures crash details before atexit.

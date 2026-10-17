@@ -1071,6 +1071,11 @@ async def broadcast_alert(
     return {"sent": detailed["sent"], "failed": detailed["failed"]}
 
 
+def _telegram_recipient_delivery_key(chat_id: Union[int, str]) -> str:
+    """Persist a stable recipient key without storing the recipient identifier."""
+    return hashlib.sha256(str(chat_id).encode("utf-8")).hexdigest()
+
+
 async def broadcast_alert_detailed(
     bot: Bot,
     chat_ids: list[Union[int, str]],
@@ -1091,18 +1096,34 @@ async def broadcast_alert_detailed(
         return {
             "sent": 0, "failed": 0,
             "exception_class": None, "retry_after_seconds": None,
+            "sent_recipient_keys": [],
+            "failed_recipient_keys": [],
+            "recipient_results": {"sent": [], "failed": []},
         }
 
     message = _sanitize_user_alert_message(message)
     sent = failed = 0
     exceptions: list[str] = []
     retry_after_seconds: Optional[float] = None
+    sent_recipient_keys: list[str] = []
+    failed_recipient_keys: list[str] = []
+    failed_results: list[dict[str, object]] = []
     for cid in chat_ids:
         outcome = await send_alert_detailed(bot, cid, message, sport=sport)
         if outcome.sent:
             sent += 1
+            sent_recipient_keys.append(_telegram_recipient_delivery_key(cid))
         else:
             failed += 1
+            recipient_key = _telegram_recipient_delivery_key(cid)
+            failed_recipient_keys.append(recipient_key)
+            failed_results.append(
+                {
+                    "recipient_key": recipient_key,
+                    "exception_class": outcome.exception_class,
+                    "retry_after_seconds": outcome.retry_after_seconds,
+                }
+            )
             if outcome.exception_class:
                 exceptions.append(outcome.exception_class)
             if outcome.retry_after_seconds is not None:
@@ -1119,6 +1140,12 @@ async def broadcast_alert_detailed(
             else (exceptions[0] if exceptions else None)
         ),
         "retry_after_seconds": retry_after_seconds,
+        "sent_recipient_keys": sent_recipient_keys,
+        "failed_recipient_keys": failed_recipient_keys,
+        "recipient_results": {
+            "sent": sent_recipient_keys,
+            "failed": failed_results,
+        },
     }
 
 
@@ -1526,8 +1553,12 @@ class AlertDelivery:
         recipients_sent: int,
         recipients_failed: int,
         evidence_snapshot: Optional[dict] = None,
+        line_variant: Optional[str] = None,
     ) -> bool:
         """Persist delivery accounting and report authoritative PLAY success."""
+        if line_variant is None and isinstance(evidence_snapshot, dict):
+            if "line_variant" in evidence_snapshot:
+                line_variant = str(evidence_snapshot.get("line_variant") or "")
         if (
             str(alert_kind).upper() == "ACTIONABLE_PICK"
             and str(outcome).lower() == "sent"
@@ -1547,6 +1578,7 @@ class AlertDelivery:
                         recipients_sent=recipients_sent,
                         recipients_failed=recipients_failed,
                         evidence_snapshot=evidence_snapshot,
+                        line_variant=line_variant,
                         direction=str(
                             (evidence_snapshot or {}).get("direction") or ""
                         ) or None,
@@ -1575,6 +1607,11 @@ class AlertDelivery:
                 external_id=external_id,
                 event_id=event_id,
                 line_value=line_value,
+                direction=str(
+                    (evidence_snapshot or {}).get("direction") or ""
+                ) or None,
+                line_variant=line_variant,
+                evidence_snapshot=evidence_snapshot,
                 outcome=outcome,
                 recipients_sent=recipients_sent,
                 recipients_failed=recipients_failed,
@@ -1960,6 +1997,7 @@ class AlertDelivery:
             recipients_sent=counts["sent"],
             recipients_failed=counts["failed"],
             evidence_snapshot=_pp_evidence_snapshot,
+            line_variant=str(getattr(opp.pp_line, "line_variant", "") or ""),
         )
         if (
             alert_sent
@@ -2030,6 +2068,7 @@ class AlertDelivery:
         delivery_rank: Optional[int] = None,
         delivery_total: Optional[int] = None,
         evidence_snapshot: Optional[dict] = None,
+        line_variant: Optional[str] = None,
         defer_delivery: bool = False,
         delivery_buffer: Optional[list[dict]] = None,
     ) -> "DeliveryResult":
@@ -2168,12 +2207,36 @@ class AlertDelivery:
                 filtered_reason="Canonical direction/evidence gate",
             )
 
+        _ud_line_value = float(new_line or 0)
+        from engine.offering_coverage import coverage
+        _offering = coverage.match(
+            provider=source, player=player_name, sport=sport, stat=stat_type,
+            line=_ud_line_value, game_time=game_time,
+            source_id=str(source_id or ""),
+        )
+        if _offering is not None:
+            coverage.mark(_offering, "QUALIFIED")
+            if _offering.available_directions and _direction not in _offering.available_directions:
+                coverage.mark(_offering, "DELIVERY_BLOCKED", "direction unavailable on originating platform")
+                return DeliveryResult(
+                    sent=False, filtered=True,
+                    filtered_reason="Direction unavailable on originating platform",
+                )
+        _line_variant = str(
+            line_variant
+            or
+            getattr(_offering, "line_variant", "")
+            or (
+                evidence_snapshot.get("line_variant", "")
+                if isinstance(evidence_snapshot, dict) else ""
+            )
+            or ""
+        )
+
         # Telegram is the final edge of the durable tracking/grading funnel.
-        # The active scan may evaluate many observations, but only a prop
-        # already represented in both ledgers can become a user-facing pick.
-        # ``alert_sent`` is a persistent one-alert boundary across restarts and
-        # line re-evaluations; it is intentionally checked here, before any
-        # formatting or Telegram network call.
+        # A prior send suppresses this exact directional source line only when
+        # an identity-matched successful audit confirms it; alert_sent alone is
+        # compatibility bookkeeping, not delivery proof.
         _tracking_gate = getattr(self._db, "get_telegram_delivery_state", None)
         if _tracking_gate is not None:
             try:
@@ -2181,6 +2244,12 @@ class AlertDelivery:
                     provider=source,
                     external_id=source_id,
                     stat_type=stat_type,
+                    event_id=str(event_id or ""),
+                    player_name=player_name,
+                    sport=sport,
+                    line_value=_ud_line_value,
+                    direction=_direction,
+                    line_variant=_line_variant,
                 )
                 if inspect.isawaitable(_tracking_state):
                     _tracking_state = await _tracking_state
@@ -2221,21 +2290,6 @@ class AlertDelivery:
                         deduped=True,
                     )
 
-        _ud_line_value = float(new_line or 0)
-        from engine.offering_coverage import coverage
-        _offering = coverage.match(
-            provider=source, player=player_name, sport=sport, stat=stat_type,
-            line=_ud_line_value, game_time=game_time,
-            source_id=str(source_id or ""),
-        )
-        if _offering is not None:
-            coverage.mark(_offering, "QUALIFIED")
-            if _offering.available_directions and _direction not in _offering.available_directions:
-                coverage.mark(_offering, "DELIVERY_BLOCKED", "direction unavailable on originating platform")
-                return DeliveryResult(
-                    sent=False, filtered=True,
-                    filtered_reason="Direction unavailable on originating platform",
-                )
         if not self._try_claim_prop_delivery(
             provider=source,
             source=source,
@@ -2378,9 +2432,7 @@ class AlertDelivery:
                 "sport": str(sport).strip().upper(),
                 "stat_type": str(stat_type).strip().casefold(),
                 "line_variant": (
-                    str(getattr(_offering, "line_variant", "") or "")
-                    if source_upper == "PRIZEPICKS"
-                    else ""
+                    _line_variant if source_upper == "PRIZEPICKS" else ""
                 ),
                 "line_value": _ud_line_value,
                 "direction": _direction,
@@ -2583,12 +2635,14 @@ class AlertDelivery:
             recipients_failed=counts["failed"],
             evidence_snapshot={
                 **evidence_snapshot,
+                "line_variant": _line_variant,
                 **_reminder_snapshot(
                     game_time, _direction,
-                    getattr(_offering, "line_variant", ""),
+                    _line_variant,
                     getattr(_offering, "game_id", "") or event_id,
                 ),
             },
+            line_variant=_line_variant,
         )
         if (
             alert_sent
@@ -2780,9 +2834,24 @@ async def telegram_pick_delivery_job(context) -> None:
             )
             return
 
+        already_sent_keys = {
+            str(key) for key in (item.get("sent_recipient_keys") or []) if key
+        }
+        chat_ids = [
+            chat_id
+            for chat_id in config.allowed_user_ids
+            if _telegram_recipient_delivery_key(chat_id) not in already_sent_keys
+        ]
+        if not chat_ids:
+            await _finish(
+                "sent",
+                reason="all configured recipients already have confirmed delivery",
+            )
+            return
+
         counts = await broadcast_alert_detailed(
             context.bot,
-            list(config.allowed_user_ids),
+            chat_ids,
             str(item["message_html"]),
             sport=str(item["sport"]),
         )
@@ -2790,6 +2859,12 @@ async def telegram_pick_delivery_job(context) -> None:
         failed = int(counts.get("failed") or 0)
         error_class = counts.get("exception_class")
         retry_after = counts.get("retry_after_seconds")
+        successful_recipient_keys = [
+            str(key) for key in (counts.get("sent_recipient_keys") or []) if key
+        ]
+        recipient_results = counts.get("recipient_results")
+        if not isinstance(recipient_results, dict):
+            recipient_results = {"sent": successful_recipient_keys, "failed": []}
         delivery = AlertDelivery(db, context.bot, list(config.allowed_user_ids))
         audit_ok = await delivery._audit_telegram_attempt(
             provider=str(item["provider"]),
@@ -2805,16 +2880,67 @@ async def telegram_pick_delivery_job(context) -> None:
             recipients_sent=sent,
             recipients_failed=failed,
             evidence_snapshot=evidence_snapshot,
+            line_variant=str(item.get("line_variant") or ""),
         )
 
+        attempt_result = {
+            "recipients_sent": sent,
+            "recipients_failed": failed,
+            "successful_recipient_keys": successful_recipient_keys,
+            "recipient_results": recipient_results,
+        }
+        if retry_after is not None and failed > 0:
+            await _finish(
+                "retry_scheduled",
+                **attempt_result,
+                exception_class=str(error_class or "RetryAfter"),
+                retry_after_seconds=float(retry_after),
+                reason=(
+                    "Telegram RetryAfter; retry only recipients without "
+                    "confirmed delivery after the shared cooldown"
+                ),
+            )
+            return
+
+        if failed > 0:
+            await _finish(
+                "failed",
+                **attempt_result,
+                exception_class=str(error_class or "UnconfirmedSend"),
+                reason=(
+                    "Some recipients were not confirmed; automatic retries "
+                    "suppressed for non-rate-limit failures"
+                ),
+            )
+            if sent > 0:
+                try:
+                    await db.update_prop_lifecycle_state(
+                        str(item["provider"]),
+                        str(item["player_name"]),
+                        str(item["sport"]),
+                        str(item["stat_type"]),
+                        "ACTIVE_ALERTED",
+                        first_alert_sent_at=datetime.utcnow(),
+                        external_id=str(item["source_id"]),
+                        game_id=str(item["event_id"]),
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning(
+                        "Telegram partial pick sent; lifecycle update failed: %s",
+                        type(exc).__name__,
+                    )
+            return
+
         if sent > 0:
+            if not audit_ok:
+                finish_reason = "telegram_sent_audit_write_unconfirmed"
+            else:
+                finish_reason = None
             await _finish(
                 "sent",
-                recipients_sent=sent,
-                recipients_failed=failed,
+                **attempt_result,
                 exception_class=str(error_class) if error_class else None,
-                retry_after_seconds=retry_after,
-                reason=None if audit_ok else "telegram_sent_audit_write_unconfirmed",
+                reason=finish_reason,
             )
             try:
                 await db.update_prop_lifecycle_state(

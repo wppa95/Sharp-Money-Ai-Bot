@@ -94,6 +94,7 @@ async def test_reconciliation_separates_provider_and_recipient_counts(db):
         outcome="sent",
         recipients_sent=3,
         attempted_at=now,
+            evidence_snapshot={"direction": "OVER"},
     )
     await db.log_telegram_delivery(
         provider="PrizePicks",
@@ -299,7 +300,12 @@ async def test_failed_play_is_audited_but_not_marked_delivered(db):
     from alerts import AlertDelivery
     from sqlalchemy import select
 
-    await _log_actionable_opportunity(db, external_id="failed-play")
+    await _log_actionable_opportunity(
+        db,
+        external_id="failed-play",
+        game_id="failed-game",
+        line_value=1.5,
+    )
     delivery = AlertDelivery(db, MagicMock(), [123])
     with (
         patch("reporting.is_current_reporting_day", return_value=True),
@@ -472,6 +478,7 @@ async def test_reconciliation_flags_replayed_audit_identity(db):
             outcome="sent",
             recipients_sent=1,
             attempted_at=now,
+            evidence_snapshot={"direction": "OVER"},
         )
 
     report = await db.get_telegram_reconciliation(since_hours=24)
@@ -564,6 +571,7 @@ async def test_alert_history_is_newest_first_and_preserves_audit_line(db):
         outcome="sent",
         recipients_sent=1,
         attempted_at=now - timedelta(minutes=2),
+            evidence_snapshot={"direction": "OVER"},
     )
     await db.log_telegram_delivery(
         provider="Underdog",
@@ -577,6 +585,7 @@ async def test_alert_history_is_newest_first_and_preserves_audit_line(db):
         outcome="sent",
         recipients_sent=1,
         attempted_at=now,
+            evidence_snapshot={"direction": "OVER"},
     )
 
     rows = await db.get_alerted_opportunity_log(since_hours=24, limit=1)
