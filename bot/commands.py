@@ -6228,7 +6228,7 @@ async def cmd_funnel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                 f"<b>{int(scan_summary.get('directional_decisions', scan_summary.get('qualified', 0)) or 0):,}</b>",
                 f"   └─ Legacy directional decisions (qualification detail not stored): "
                 f"<b>{int(scan_summary.get('legacy_directional_decisions', 0) or 0):,}</b>",
-                f"✅ Fully qualified candidates (explicitly recorded): "
+                f"✅ Fully-qualified delivery candidates (pre-queue gates passed): "
                 f"<b>{int(scan_summary.get('fully_qualified', 0) or 0):,}</b>",
                 f"📥 Durable queue admissions (explicitly recorded): "
                 f"<b>{int(scan_summary.get('queue_admitted', 0) or 0):,}</b>",
