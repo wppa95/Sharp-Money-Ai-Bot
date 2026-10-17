@@ -9758,11 +9758,7 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                             "snap": _fpr_snap,
                             "pp_line": _fpr_pp_line,
                             "ext_id": _fpr_ext_id,
-                            "event_id": str(
-                                getattr(_fpr_snap, "event", "")
-                                or getattr(_fpr_snap, "game_id", "")
-                                or ""
-                            ),
+                            "event_id": _snapshot_event_id(_fpr_snap),
                         })
                         # The legacy inline branch below is retained for
                         # compatibility, but delivery now occurs after the
