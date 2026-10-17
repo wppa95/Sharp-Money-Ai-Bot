@@ -136,10 +136,118 @@ class OfferingCoverage:
             self.observations[key] += 1
         self.mark(prop, "NORMALIZED")
 
+    def clear_scope(self, provider: str, sport: str = "") -> None:
+        """Discard the prior in-memory offering snapshot for a successful feed."""
+        provider_key = str(provider or "").casefold()
+        sport_key = str(sport or "").upper()
+        for key, row in list(self.rows.items()):
+            if str(getattr(row, "provider", "")).casefold() != provider_key:
+                continue
+            if sport_key and str(getattr(row, "sport", "")).upper() != sport_key:
+                continue
+            self.rows.pop(key, None)
+            self.stages.pop(key, None)
+            self.observations.pop(key, None)
+            identity = self._identity(
+                row.provider, row.player_name, row.sport, row.stat_type,
+                row.line_value,
+            )
+            bucket = self.index.get(identity)
+            if bucket is not None:
+                bucket.discard(key)
+                if not bucket:
+                    self.index.pop(identity, None)
+
     def mark(self, prop: Any, stage: str, reason: str = "") -> None:
         key = offering_key(prop)
         if key in self.rows:
             self.stages.setdefault(key, {})[stage] = reason
+
+    def validate_selection(
+        self,
+        *,
+        provider: str,
+        source_id: str,
+        event_id: str,
+        player: str,
+        sport: str,
+        stat: str,
+        line: float,
+        direction: str,
+        line_variant: str | None,
+        game_time: datetime | None,
+        max_age_seconds: int = 900,
+    ) -> tuple[Any | None, str]:
+        """Fail closed unless the exact, fresh source offering supports a pick."""
+        direction = str(direction or "").strip().upper()
+        if direction not in {"OVER", "UNDER"}:
+            return None, "DIRECTION_UNVERIFIED"
+        if not all(
+            str(value or "").strip()
+            for value in (provider, source_id, event_id, player, sport, stat)
+        ) or game_time is None or line_variant is None and provider.casefold() == "prizepicks":
+            return None, "EXACT_OFFERING_IDENTITY_INCOMPLETE"
+        try:
+            line = float(line)
+        except (TypeError, ValueError):
+            return None, "EXACT_OFFERING_IDENTITY_INCOMPLETE"
+        if not math.isfinite(line):
+            return None, "EXACT_OFFERING_IDENTITY_INCOMPLETE"
+
+        same_source = []
+        for row in self.rows.values():
+            if str(getattr(row, "provider", "")).casefold() != provider.casefold():
+                continue
+            if str(getattr(row, "external_id", "") or "").strip() != str(source_id).strip():
+                continue
+            if str(getattr(row, "game_id", "") or "").strip() != str(event_id).strip():
+                continue
+            if str(getattr(row, "player_name", "") or "").strip().casefold() != player.strip().casefold():
+                continue
+            if str(getattr(row, "sport", "") or "").upper() != sport.upper():
+                continue
+            if market_identity(sport, str(getattr(row, "stat_type", "") or "")) != market_identity(sport, stat):
+                continue
+            if _utc(getattr(row, "game_time", None)) != _utc(game_time):
+                continue
+            same_source.append(row)
+
+        exact_line = [row for row in same_source if getattr(row, "line_value", None) == line]
+        if not exact_line:
+            return None, "EXACT_OFFERING_UNVERIFIED"
+
+        expected_variant = str(line_variant or "").strip().casefold()
+        if line_variant is not None:
+            exact_line = [
+                row for row in exact_line
+                if str(getattr(row, "line_variant", "") or "").strip().casefold()
+                == expected_variant
+            ]
+        if not exact_line:
+            return None, "LINE_VARIANT_NOT_OFFERED"
+        if len(exact_line) != 1:
+            return None, "EXACT_OFFERING_AMBIGUOUS"
+
+        row = exact_line[0]
+        if getattr(row, "removed", False):
+            return None, "OFFERING_REMOVED"
+        observed = _utc(getattr(row, "fetched_at", None))
+        age = (
+            (datetime.utcnow() - observed).total_seconds()
+            if observed is not None
+            else None
+        )
+        if age is None or age < 0 or age > max_age_seconds:
+            return None, "OFFERING_STALE"
+        available = directions_from(
+            getattr(row, "available_directions", ())
+            or getattr(row, "direction", "")
+        )
+        if not available:
+            return None, "OFFERING_DIRECTIONS_UNVERIFIED"
+        if direction not in available:
+            return None, "DIRECTION_NOT_OFFERED"
+        return row, ""
 
     def evaluation(self, *, provider: str, player: str, sport: str, stat: str,
                    line: float, event_id: str, decision: Any, hit_rates: Any) -> None:
@@ -309,6 +417,90 @@ class OfferingCoverage:
 
 
 coverage = OfferingCoverage()
+
+
+def _candidate_source(candidate: dict) -> tuple[Any, str, str, str, str, str, str]:
+    prop = candidate.get("prop") or candidate.get("snap")
+    provider = str(
+        candidate.get("provider")
+        or candidate.get("source")
+        or getattr(prop, "provider", "")
+        or getattr(prop, "sportsbook", "")
+    ).strip()
+    event_id = str(
+        candidate.get("event_id")
+        or getattr(prop, "game_id", "")
+        or getattr(prop, "event_id", "")
+        or getattr(prop, "match_id", "")
+        or getattr(prop, "event", "")
+        or ""
+    ).strip()
+    player = str(
+        candidate.get("player")
+        or candidate.get("player_name")
+        or getattr(prop, "player_name", "")
+        or getattr(prop, "player", "")
+    ).strip()
+    sport = str(candidate.get("sport") or getattr(prop, "sport", "") or "").upper()
+    stat = str(
+        candidate.get("stat")
+        or candidate.get("stat_type")
+        or getattr(prop, "stat_type", "")
+        or ""
+    ).strip()
+    direction = str(
+        getattr(candidate.get("decision"), "recommendation", "")
+        or candidate.get("direction")
+        or ""
+    ).upper()
+    variant = str(getattr(prop, "line_variant", "") or "").strip().casefold()
+    return prop, provider, event_id, player, sport, stat, direction, variant
+
+
+def _line_variant_kind(value: str) -> str:
+    tokens = set(re.findall(r"[a-z]+", str(value or "").casefold()))
+    if tokens & {"goblin", "demon"}:
+        return "special"
+    if tokens & {"standard", "normal", "regular"}:
+        return "standard"
+    return "unclassified"
+
+
+def prioritize_standard_line_candidates(
+    candidates: list[dict],
+) -> tuple[list[dict], list[dict]]:
+    """Prefer an eligible standard line over its same-source special variant.
+
+    The scope is intentionally provider-, event-, player-, sport-, market-, and
+    direction-specific. Cross-platform observations never displace one
+    platform's own candidate or establish its qualification.
+    """
+    standard_scopes = set()
+    parsed = []
+    for candidate in candidates:
+        prop, provider, event_id, player, sport, stat, direction, variant = (
+            _candidate_source(candidate)
+        )
+        scope = (
+            provider.casefold(),
+            event_id,
+            player.casefold(),
+            sport,
+            market_identity(sport, stat),
+            direction,
+        )
+        kind = _line_variant_kind(variant)
+        if event_id and kind == "standard":
+            standard_scopes.add(scope)
+        parsed.append((candidate, scope, kind))
+
+    kept, secondary = [], []
+    for candidate, scope, kind in parsed:
+        if kind == "special" and scope in standard_scopes:
+            secondary.append(candidate)
+        else:
+            kept.append(candidate)
+    return kept, secondary
 
 
 def trace_delivery(function):
