@@ -50,3 +50,17 @@ mtime_ms = 1792206809189
 storage_uri = "gcs://replit-rams-assets-spock/rams/assets/repl:0f126d34-12f4-4521-91c1-5cf2228d2bcd/38437c01-ba6d-469a-8304-e8b3df634d1d/4fb23d46-e1f0-4dce-b7a1-96fb1a922bd6"
 storage_version_token = "1792206838990335"
 content_type = "text/markdown"
+
+[[outputs]]
+id = "-3fyquIxgtPvNEfIPS-IF"
+uri = "file://docs/v4-equal-platform-followup.md"
+type = "text"
+title = "V4 equal-platform follow-up report"
+description = "Verified live PrizePicks persistence, equal-primary corrections, exact changed files, 5,409-test results, grading/history evidence, and remaining limitations."
+logical_id = "4810a666-6eca-420e-ad96-56c09b955b90"
+content_hash = "sha256:6ee0e4ea1c2bf8b3a2ed74fa80ab5662e98279c969bd9494059e93c7659f89bd"
+size = 13372
+mtime_ms = 1792208452957
+storage_uri = "gcs://replit-rams-assets-spock/rams/assets/repl:0f126d34-12f4-4521-91c1-5cf2228d2bcd/4810a666-6eca-420e-ad96-56c09b955b90/21866a3d-b197-4e90-85bb-9c45f88ad68a"
+storage_version_token = "1792208460370759"
+content_type = "text/markdown"

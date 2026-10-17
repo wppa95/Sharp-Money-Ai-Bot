@@ -15,7 +15,7 @@ from engine.sport_policy import canonical_sport_key
 def test_primary_provider_reporting_includes_both_distinct_sources():
     text = "\n".join(commands._primary_player_prop_provider_lines())
     assert "PrizePicks" in text and "primary" in text.lower()
-    assert "Underdog" in text and "secondary" in text.lower()
+    assert "Underdog: primary" in text and "secondary" not in text.lower()
 
 
 def test_dashboard_removes_requested_sections_and_preserves_provider_populations():

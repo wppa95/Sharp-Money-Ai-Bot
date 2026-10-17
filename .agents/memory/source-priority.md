@@ -1,16 +1,16 @@
 ---
 name: Alert source priority
-description: PrizePicks primary, Underdog secondary, and retired sportsbook boundary.
+description: Equal primary PrizePicks/Underdog and retired sportsbook boundary.
 ---
 
 ## Rule
-PrizePicks is primary; Underdog is secondary and remains active.
+PrizePicks and Underdog are equal primary platforms.
 
-**Why:** The latest comprehensive V4 audit/repair instructions explicitly
-supersede the earlier equal-primary policy.
+**Why:** The user explicitly corrected the unequal-priority audit interpretation.
 
 ## How to apply
 - Keep both feeds, original source lines, and independent eligible alerts.
+- Never prefer ingestion, qualification, evaluation, or delivery solely by platform.
 - Apply the [primary platform scope](provider-scope-separation.md) correction.
 - Retired sportsbook work is out of scope unless the user explicitly requests a
   new provider integration.

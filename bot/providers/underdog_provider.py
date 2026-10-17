@@ -6,12 +6,12 @@ PlayerProp model.  This lets Underdog data flow into the same PropLineHistory
 table and PropComparisonEngine as PrizePicks data.
 
 Role in the overall system:
-    PrizePicks (primary, daily use)  → PlayerProp → PropLineHistory
-    Underdog   (secondary/reference) → PlayerProp → PropLineHistory  ← this file
+    PrizePicks (equal primary) → PlayerProp → PropLineHistory
+    Underdog   (equal primary) → PlayerProp → PropLineHistory  ← this file
 
 Source priority rule:
-    PrizePicks remains primary when available.
-    Underdog is reference/fallback only.
+    Both platforms remain independently actionable; neither outranks the other.
+    Neither platform is reference-only or a fallback for the other.
     Do not assume PP and UD lines are identical.
     Every prop record stores its source via the `provider` field.
 """

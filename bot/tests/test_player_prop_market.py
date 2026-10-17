@@ -292,8 +292,8 @@ class TestBuildComparison:
             now         = NOW,
         )
         assert result is not None
-        assert result.best_provider == "PrizePicks"
-        assert result.best_line == 6.0
+        assert result.best_provider == "Underdog"
+        assert result.best_line == 5.5
 
     def test_legacy_dk_fd_args_do_not_create_unverified_book_rows(self):
         result = build_player_prop_market_comparison(
@@ -1074,7 +1074,7 @@ class TestRunCycleBPlus:
         assert call_count == 4
 
 
-# ── Provider ordering (PP > UD) ──────────────────────────────────────────────
+# ── Stable display ordering (not platform priority) ─────────────────────────
 
 class TestProviderPriority:
     def test_order_constant(self):

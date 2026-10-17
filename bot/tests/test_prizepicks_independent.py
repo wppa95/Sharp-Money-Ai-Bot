@@ -180,16 +180,16 @@ class TestIndependentPrizePicks:
         )
 
         assert complete is True
-        assert calls == [
+        assert sorted(calls) == sorted([
             (sport, bookmaker)
             for sport in ("NBA", "MLB", "NHL")
             for bookmaker in ("prizepicks", "underdog")
-        ]
-        assert [provider for provider, _ in db.saved] == [
+        ])
+        assert sorted(provider for provider, _ in db.saved) == sorted([
             provider
             for _sport in ("NBA", "MLB", "NHL")
             for provider in ("PrizePicks", "Underdog")
-        ]
+        ])
         assert {
             prop.sport
             for _provider, props in db.saved

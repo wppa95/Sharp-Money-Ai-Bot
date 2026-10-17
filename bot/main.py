@@ -704,8 +704,8 @@ async def post_init(application: Application) -> None:
 
     # ── Provider health monitor + PropLine feed ─────────────────────────────
     _health_monitor = init_health_monitor()
-    from providers.propline import PropLinePrizePicksProvider
-    _propline_enabled = PropLinePrizePicksProvider().is_available()
+    from market_engine import initialize_propline_provider
+    _propline_enabled = initialize_propline_provider().is_available()
     _health_monitor.register("Underdog", disabled=not config.UNDERDOG_ENABLED)
     _health_monitor.register("PrizePicks", disabled=not _propline_enabled)
     logger.info(

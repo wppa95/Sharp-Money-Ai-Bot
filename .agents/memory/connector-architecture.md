@@ -4,12 +4,12 @@ description: How active pick'em providers remain isolated from historical sports
 ---
 
 Underdog uses its public pick'em projections endpoint; PrizePicks uses the
-PropLine feed. PrizePicks is primary; Underdog is secondary. PropLine also supplies
+PropLine feed. PrizePicks and Underdog are equal primary platforms. PropLine also supplies
 shared supplemental evidence for either platform through the canonical
 pipeline, preserving each pick's platform and original line.
 
-**Why:** The user's latest comprehensive V4 audit/repair instructions replace
-the earlier equal-primary policy while preserving both active feeds.
+**Why:** The user explicitly corrected the previous audit's unequal-priority
+interpretation: neither platform is secondary or subordinate.
 
 **How to apply:** Follow [primary platform scope](provider-scope-separation.md)
 for evidence reuse and individual-pick-only delivery.

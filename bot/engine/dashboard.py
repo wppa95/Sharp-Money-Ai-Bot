@@ -290,7 +290,7 @@ class DashboardReport:
         parts += ["📡 <b>Provider Pipeline</b>",
                   "<i>Observed = stored snapshots; directional ≠ qualified; "
                   "delivered = confirmed picks, not recipients.</i>"]
-        for provider, role in (("PrizePicks", "primary"), ("Underdog", "secondary")):
+        for provider, role in (("PrizePicks", "primary"), ("Underdog", "primary")):
             values = self.provider_pipeline.get(provider) or {}
             observed = values.get("observed", self._normalized_activity(
                 provider, self.total_ud_alerts if provider == "Underdog" else 0))

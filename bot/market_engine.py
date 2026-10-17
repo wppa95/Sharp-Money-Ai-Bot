@@ -979,6 +979,15 @@ _registry: Optional[ConnectorRegistry] = None
 _confirmation_db: Optional[Database] = None
 _propline_provider: Optional[object] = None
 
+
+def initialize_propline_provider():
+    """Bind the configured adapter to the actual monitoring worker at startup."""
+    global _propline_provider
+    if _propline_provider is None:
+        from providers.propline import PropLinePrizePicksProvider
+        _propline_provider = PropLinePrizePicksProvider()
+    return _propline_provider
+
 def init_propline_confirmation(db: Optional[Database] = None) -> None:
     """Set the existing database used for read-only PropLine corroboration."""
     global _confirmation_db
@@ -1012,6 +1021,7 @@ _prizepicks_processing_lock: Optional[asyncio.Lock] = None
 _PRIZEPICKS_DEDUP_PREFIX = "PrizePicks::"
 _prizepicks_sport_cursor = 0
 _propline_request_cursor = 0
+_propline_bookmaker_cursor = 0
 _propline_pending_props: dict[tuple, object] = {}
 _propline_request_lock: Optional[asyncio.Lock] = None
 _propline_ingest_task: Optional[asyncio.Task] = None
@@ -1353,7 +1363,7 @@ async def reset_monitoring_runtime_state() -> None:
     global _cycle_sequence, _active_jobs, _registry, _player_stats_provider
     global _player_result_fetch_cache, _prizepicks_cycle_task
     global _prizepicks_processing_tasks, _prizepicks_processing_lock
-    global _prizepicks_sport_cursor, _propline_request_cursor
+    global _prizepicks_sport_cursor, _propline_request_cursor, _propline_bookmaker_cursor
     global _propline_pending_props, _propline_request_lock
     global _propline_ingest_task, _fpr_handoff_task
     global _MARKET_FIRST_ALERT, _priority_override_sent
@@ -1391,6 +1401,7 @@ async def reset_monitoring_runtime_state() -> None:
     _prizepicks_processing_lock = None
     _prizepicks_sport_cursor = 0
     _propline_request_cursor = 0
+    _propline_bookmaker_cursor = 0
     _propline_pending_props.clear()
     _propline_request_lock = None
     _propline_ingest_task = None
@@ -1509,7 +1520,7 @@ async def propline_request_scan_job(context) -> None:
     It is invoked by the shared Player Props monitoring cycle; evaluation and
     delivery happen after the observations enter the canonical universe.
     """
-    global _propline_request_cursor, _propline_request_lock
+    global _propline_request_cursor, _propline_request_lock, _propline_bookmaker_cursor
     provider = _propline_provider
     db = getattr(context, "bot_data", {}).get("db")
     if provider is None or not getattr(provider, "is_available", lambda: False)():
@@ -1558,7 +1569,11 @@ async def propline_request_scan_job(context) -> None:
             for bookmaker in getattr(config, "propline_bookmakers", [])
             if str(bookmaker).strip()
         ) or ("prizepicks",)
-        bookmakers = tuple(sorted(bookmakers, key=lambda name: name != "prizepicks"))
+        # Alternate the first shared-feed request rather than always preferring
+        # a platform when pacing or a cycle deadline postpones later requests.
+        first_bookmaker = _propline_bookmaker_cursor % len(bookmakers)
+        bookmakers = bookmakers[first_bookmaker:] + bookmakers[:first_bookmaker]
+        _propline_bookmaker_cursor += 1
         now = time.monotonic()
         eligible_indexes = [
             index

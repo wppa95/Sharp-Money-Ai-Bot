@@ -142,7 +142,7 @@ def test_canonical_provider_roles_are_exact():
     lines = commands._primary_player_prop_provider_lines(_health_monitor())
 
     assert lines == [
-        "  ⚪ <b>Player Props</b> — PrizePicks: primary (via PropLine); Underdog: secondary (enabled)",
+        "  ⚪ <b>Player Props</b> — PrizePicks: primary (via PropLine); Underdog: primary (enabled)",
     ]
 
 
@@ -155,7 +155,7 @@ def test_provider_roles_show_degraded_underdog_and_disabled_prizepicks():
     lines = commands._primary_player_prop_provider_lines(monitor)
     runtime = commands._primary_provider_runtime_lines(monitor)
 
-    assert lines[0] == "  🟡 <b>Player Props</b> — PrizePicks: primary (via PropLine); Underdog: secondary (enabled)"
+    assert lines[0] == "  🟡 <b>Player Props</b> — PrizePicks: primary (via PropLine); Underdog: primary (enabled)"
     assert "Fetch:" in runtime[0]
     assert "Underdog: degraded" in runtime[0]
     assert "1 failure" in runtime[0]
@@ -211,7 +211,7 @@ async def test_status_shows_provider_roles_and_separate_history_counts():
         await commands.cmd_status(update, context)
 
     message = update.message.reply_text.await_args.args[0]
-    assert "Player Props</b> — PrizePicks: primary (via PropLine); Underdog: secondary" in message
+    assert "Player Props</b> — PrizePicks: primary (via PropLine); Underdog: primary" in message
     assert "Market Providers" in message
     assert "DraftKings/FanDuel" not in message
     assert "Underdog: 20" in message
@@ -319,7 +319,7 @@ async def test_providers_command_includes_live_primary_provider_health():
         await commands.cmd_providers(update, context)
 
     message = update.message.reply_text.await_args.args[0]
-    assert "Player Props</b> — PrizePicks: primary (via PropLine); Underdog: secondary" in message
+    assert "Player Props</b> — PrizePicks: primary (via PropLine); Underdog: primary" in message
     assert "Fetch:" in message
     assert "Underdog: degraded" in message
     assert "PrizePicks" in message
@@ -691,13 +691,13 @@ async def test_real_underdog_registry_failure_and_recovery_reach_command_output(
     await run_job()
     degraded = await provider_message()
     assert monitor.get_health("Underdog").status == ProviderStatus.DEGRADED
-    assert "Player Props</b> — PrizePicks: primary (via PropLine); Underdog: secondary" in degraded
+    assert "Player Props</b> — PrizePicks: primary (via PropLine); Underdog: primary" in degraded
     assert "Underdog: degraded" in degraded
 
     await run_job()
     recovered = await provider_message()
     assert monitor.get_health("Underdog").status == ProviderStatus.OK
-    assert "Player Props</b> — PrizePicks: primary (via PropLine); Underdog: secondary" in recovered
+    assert "Player Props</b> — PrizePicks: primary (via PropLine); Underdog: primary" in recovered
     assert "Underdog: ok" in recovered
 
 

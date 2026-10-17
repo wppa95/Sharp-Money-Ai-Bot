@@ -27,11 +27,12 @@ logger = logging.getLogger(__name__)
 # This constant is the single source of truth for the provider priority policy.
 # Keep DK/FD limited to moneylines and totals; do not widen this to spreads or props.
 #
-# Provider order: native Underdog (PRIMARY) → PropLine sources (SUPPORTING)
+# PrizePicks and native Underdog are equal primary platforms; PropLine evidence
+# may supplement either without changing the originating pick.
 #
 SCOPE_RULES: dict[str, str] = {
     "PrizePicks": "ALLOW — player props, all sports (primary source)",
-    "Underdog":   "ALLOW — player props, all sports (secondary source)",
+    "Underdog":   "ALLOW — player props, all sports (primary source)",
     "DraftKings": "Moneyline (h2h) + totals for active sports only — other markets BLOCKED",
     "FanDuel":    "Moneyline (h2h) + totals for active sports only — other markets BLOCKED",
     "System":     "ALWAYS BLOCKED — multi-book steam, CLV, inefficiency alerts excluded",

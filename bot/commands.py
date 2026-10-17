@@ -410,7 +410,7 @@ def _primary_player_prop_provider_lines(
     )
     source_states = (
         "PrizePicks: primary (via PropLine); "
-        f"Underdog: secondary ({'enabled' if underdog_enabled else 'disabled'})"
+        f"Underdog: primary ({'enabled' if underdog_enabled else 'disabled'})"
     )
     return [
         f"  {overall_icon} <b>Player Props</b> — {source_states}",
@@ -695,7 +695,7 @@ async def cmd_health(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         lines.append("<b>📡 Market Providers</b>")
         _market_provider_labels = {
             "PrizePicks": "primary · via PropLine",
-            "Underdog": "secondary · native feed",
+            "Underdog": "primary · native feed",
         }
         _market_rows: list[str] = []
         for provider in ("PrizePicks", "Underdog"):

@@ -1,12 +1,19 @@
 # V4 audit, targeted repairs, and verification
 
+**Subsequent follow-up:** The startup ingestion defect has now been repaired and
+fresh PrizePicks rows were verified in both central ledgers. See
+`docs/v4-equal-platform-followup.md` for the current live findings and tests;
+the observations below describe the earlier audit window.
+
 ## Scope and conclusion
 
 Inspection and changes performed on October 17, 2026 UTC (October 16 in
 America/Chicago). This report covers the Replit workspace, not Railway.
 
-The latest uploaded specification explicitly makes **PrizePicks primary and
-Underdog secondary**. That supersedes the earlier equal-primary instruction.
+**Policy correction:** This report originally incorrectly designated Underdog
+secondary. The user's explicit requirement is **equal primary PrizePicks and
+Underdog**, with no designation-based ingestion or delivery preference.
+The follow-up implements that correction without undoing the repairs below.
 Both feeds, source-owned records, individual alerts, and shared evidence remain.
 
 Concrete reporting, command-selection, ingestion-handoff, history-identity,
@@ -21,7 +28,7 @@ provider result or recommendation was inserted to satisfy an acceptance check.
    intentionally ignored the PrizePicks argument. Both now retain independent
    platform rows, directions, source IDs, events, and original lines.
 2. Status, tracking, statistics, feed-count, and dashboard presentation hid
-   PrizePicks. Both platforms are visible, with primary/secondary roles and
+   PrizePicks. Both platforms are visible, with equal-primary roles and
    separately scoped populations. Configuration is not presented as proof of a
    successful provider fetch. Feed diagnostics distinguish ok, empty, and failed.
 3. `/analyst` required a current Underdog snapshot and filtered historical
@@ -193,7 +200,7 @@ runtime crash or a Railway failure.
 - `bot/engine/player_props_pipeline.py`: esports aliases at observation intake.
 - `bot/engine/player_results.py`: shared strict directional-window counts.
 - `bot/engine/sport_policy.py`: central esports aliases and legacy read aliases.
-- `bot/market_engine.py`: PrizePicks-first bookmaker traversal, complete-batch
+- `bot/market_engine.py`: bookmaker traversal (now alternating first platform), complete-batch
   retention, independent handoff after partial failure, provider diagnostics.
 - `bot/providers/propline.py`: retain map/game segments and only documented
   CS market equivalences.
@@ -207,7 +214,7 @@ runtime crash or a Railway failure.
   populations and separate failed/empty states.
 - `bot/tests/test_prizepicks_independent.py`: preserve good complete batches
   while withholding a failed batch.
-- `bot/tests/test_telegram_command_reliability_display.py`: primary/secondary
+- `bot/tests/test_telegram_command_reliability_display.py`: equal-primary
   roles and both provider populations, including timeout-resilient reports.
 - `bot/tests/test_v32_final_targeted_fix.py`: requested removed-panel contract.
 - `bot/tests/test_v35_cold_start_lifecycle.py`: same removed-panel contract.
@@ -219,8 +226,9 @@ runtime crash or a Railway failure.
 - `.agents/memory/provider-scope-separation.md`
 - `.agents/memory/source-priority.md`
 
-Those four files replace obsolete equal-primary instructions with the user's
-latest explicit policy. No private user profile was changed.
+Those four files now reflect the user's explicit equal-primary policy, correcting
+this report's original unequal-priority interpretation. No private user profile
+was changed. See `docs/v4-equal-platform-followup.md` for the follow-up findings.
 
 - `docs/v4-audit-repair-verification.md`: this report.
 

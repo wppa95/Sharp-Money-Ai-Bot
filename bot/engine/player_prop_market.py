@@ -5,9 +5,9 @@ This is the active alert framework for Sharp Money TeleBot. It replaces the
 earlier "PrizePicks Reference Alert" model with a multi-provider market view
 that surfaces the best available line across all data sources.
 
-Supported providers (in priority order):
+Supported providers (display order only; both pick'em platforms are primary):
     🟣 PrizePicks  — primary (authorized PropLine provider)
-    🐶 Underdog    — secondary (live via UnderdogConnector)
+    🐶 Underdog    — primary (live via UnderdogConnector)
 
 When a provider has no data for a given player/market, its line is shown as
 "Unavailable" in the alert. The system continues using available sources.
@@ -164,7 +164,7 @@ class PlayerPropMarketComparison:
     sport:                   str
     stat_type:               str              # canonical PP stat name
     lines:                   dict[str, ProviderLine]  # keyed by provider name
-    best_provider:           Optional[str]    # provider with the priority-ordered best line
+    best_provider:           Optional[str]    # lowest observed line (OVER context only)
     best_line:               Optional[float]
     market_consensus:        Optional[float]  # average of all available lines
     previous_line:           Optional[float]  # previous Underdog line
@@ -319,8 +319,8 @@ def build_player_prop_market_comparison(
         ),
     }
     # The current ledger may also contain configured PropLine book observations.
-    # Keep them informational: the
-    # Underdog line remains the only actionable selection.
+    # Keep those informational. This builder is anchored to one Underdog pick;
+    # PrizePicks-owned picks are independently evaluated in their own lane.
     for provider in ("DraftKings", "FanDuel"):
         matching = [
             row for row in (pp_rows or [])
@@ -356,12 +356,9 @@ def build_player_prop_market_comparison(
     best_provider: Optional[str] = None
     best_line:     Optional[float] = None
     if available_lines:
-        # Prefer PrizePicks over Underdog when both are available.
-        for p in PROVIDER_ORDER:
-            match = [(n, v) for n, v in available_lines if n == p]
-            if match:
-                best_provider, best_line = match[0]
-                break
+        # No platform-designation preference. This legacy directionless field
+        # describes the OVER-friendly line; UNDER context is separate below.
+        best_provider, best_line = min(available_lines, key=lambda item: item[1])
 
     consensus: Optional[float] = None
     if available_lines:
