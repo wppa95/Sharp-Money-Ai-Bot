@@ -5,7 +5,12 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from engine.offering_coverage import coverage, market_identity, directions_from
+from engine.offering_coverage import (
+    coverage,
+    market_identity,
+    directions_from,
+    prioritize_standard_line_candidates,
+)
 from engine.player_props_pipeline import canonicalize_player_props, persist_canonical_player_props
 from engine.player_results import compute_hit_rates
 from engine.ud_bet_decision import UDBetDecision
@@ -307,6 +312,7 @@ async def test_explicit_unavailable_direction_not_delivered_but_available_pick_i
     result = await delivery.deliver_underdog(
         source.player_name, source.team, source.sport, source.stat_type, 1.5, 1.5,
         game_time=source.game_time, source=provider, source_id=source.external_id,
+        event_id=source.game_id,
         line_variant=canonical.line_variant,
         decision=NS(recommendation="UNDER"), validation=NS(has_supporting_data=True),
     )
@@ -315,12 +321,313 @@ async def test_explicit_unavailable_direction_not_delivered_but_available_pick_i
     result = await delivery.deliver_underdog(
         source.player_name, source.team, source.sport, source.stat_type, 1.5, 1.5,
         game_time=source.game_time, source=provider, source_id=source.external_id,
+        event_id=source.game_id,
         line_variant=canonical.line_variant,
         decision=NS(recommendation="OVER"), validation=NS(has_supporting_data=True),
     )
     assert result.sent
     assert "TELEGRAM_SENT=1" in "\n".join(coverage.report())
     assert source.external_id in "\n".join(coverage.detail(source.external_id)) or "line 1.5" in "\n".join(coverage.detail(source.external_id))
+
+
+async def _attempt_queued_pick(monkeypatch, source, direction, *, line=None):
+    import alerts
+    import alert_scope_filter
+    import engine.timing
+    from unittest.mock import MagicMock
+    from alerts import AlertDelivery
+    from alert_scope_filter import FilterResult
+
+    monkeypatch.setattr(
+        alert_scope_filter, "check", lambda *a, **k: FilterResult(allowed=True)
+    )
+    monkeypatch.setattr(
+        engine.timing, "is_game_alertable", lambda *a, **k: (True, "")
+    )
+    monkeypatch.setattr(
+        "reporting.is_current_reporting_day", lambda *_a, **_k: True
+    )
+    monkeypatch.setattr(alerts, "_has_strong_underdog_evidence", lambda **_k: True)
+    monkeypatch.setattr(alerts, "broadcast_alert", AsyncMock())
+    monkeypatch.setattr(alerts, "send_discord_alert", AsyncMock(return_value=False))
+
+    db = MagicMock()
+    db.get_telegram_delivery_state = AsyncMock(
+        return_value={"tracked": True, "directional": True}
+    )
+    delivery = AlertDelivery(db, MagicMock(), [123])
+    delivery._audit_telegram_attempt = AsyncMock(return_value=True)
+    buffer = []
+    canonical = canonicalize_player_props(source.provider, [source])[0]
+    candidate_line = source.line_value if line is None else line
+    result = await delivery.deliver_underdog(
+        source.player_name,
+        source.team,
+        source.sport,
+        source.stat_type,
+        candidate_line,
+        candidate_line,
+        game_time=source.game_time,
+        source=source.provider,
+        source_id=source.external_id,
+        event_id=source.game_id,
+        line_variant=canonical.line_variant,
+        fetched_at=source.fetched_at,
+        standing=True,
+        strict_pregame=True,
+        decision=NS(recommendation=direction),
+        validation=NS(has_supporting_data=True),
+        defer_delivery=True,
+        delivery_buffer=buffer,
+    )
+    return result, buffer, delivery, db
+
+
+@pytest.mark.asyncio
+async def test_reported_underdog_line_and_under_selection_fail_closed(monkeypatch):
+    source = prop(
+        provider="Underdog",
+        sport="MLB",
+        stat="Batter Strikeouts",
+        line=0.5,
+        external_id="ud-caminero-strikeouts",
+        available_directions=("OVER",),
+    )
+    canonicalize_player_props("Underdog", [source])
+
+    wrong_line, queue, delivery, db = await _attempt_queued_pick(
+        monkeypatch, source, "UNDER", line=1.5
+    )
+    assert wrong_line.filtered
+    assert wrong_line.filtered_reason == "EXACT_OFFERING_UNVERIFIED"
+    assert queue == []
+    delivery._audit_telegram_attempt.assert_not_awaited()
+    db.mark_opportunity_alert_sent.assert_not_awaited()
+
+    unavailable_side, queue, delivery, db = await _attempt_queued_pick(
+        monkeypatch, source, "UNDER"
+    )
+    assert unavailable_side.filtered
+    assert unavailable_side.filtered_reason == "DIRECTION_NOT_OFFERED"
+    assert queue == []
+    delivery._audit_telegram_attempt.assert_not_awaited()
+    db.mark_opportunity_alert_sent.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_prizepicks_goblin_and_demon_offers_never_validate_under(monkeypatch):
+    sources = [
+        prop(
+            provider="PrizePicks",
+            sport="MLB",
+            stat="Batter Strikeouts",
+            line=line,
+            external_id=f"pp-{variant}-{line}",
+            line_variant=variant,
+            available_directions=("OVER",),
+        )
+        for line, variant in ((0.5, "goblin"), (1.5, "demon"), (2.5, "demon"))
+    ]
+    canonicalize_player_props("PrizePicks", sources)
+    for source in sources:
+        result, queue, delivery, db = await _attempt_queued_pick(
+            monkeypatch, source, "UNDER"
+        )
+        assert result.filtered_reason == "DIRECTION_NOT_OFFERED"
+        assert queue == []
+        delivery._audit_telegram_attempt.assert_not_awaited()
+        db.mark_opportunity_alert_sent.assert_not_awaited()
+
+
+def test_exact_offering_identity_rejects_alternate_source_line_and_variant():
+    source = prop(
+        provider="PrizePicks",
+        sport="MLB",
+        stat="Batter Strikeouts",
+        line=1.5,
+        external_id="pp-exact",
+        line_variant="demon",
+        available_directions=("OVER",),
+    )
+    row = canonicalize_player_props("PrizePicks", [source])[0]
+    base = dict(
+        provider="PrizePicks",
+        source_id="pp-exact",
+        event_id="event",
+        player="Alex Example",
+        sport="MLB",
+        stat="Batter Strikeouts",
+        line=1.5,
+        direction="OVER",
+        line_variant="demon",
+        game_time=row.game_time,
+    )
+    current, reason = coverage.validate_selection(**base)
+    assert current is row and reason == ""
+
+    for field, value in (
+        ("source_id", "other-source"),
+        ("event_id", "other-event"),
+        ("player", "Other Player"),
+        ("sport", "NBA"),
+        ("stat", "Hits"),
+        ("line", 0.5),
+    ):
+        changed = dict(base)
+        changed[field] = value
+        current, reason = coverage.validate_selection(**changed)
+        assert current is None and reason == "EXACT_OFFERING_UNVERIFIED"
+
+    changed = dict(base, line_variant="goblin")
+    current, reason = coverage.validate_selection(**changed)
+    assert current is None and reason == "LINE_VARIANT_NOT_OFFERED"
+    changed = dict(base, direction="UNDER")
+    current, reason = coverage.validate_selection(**changed)
+    assert current is None and reason == "DIRECTION_NOT_OFFERED"
+
+
+@pytest.mark.parametrize(
+    "mutate,expected",
+    [
+        (lambda row: setattr(row, "fetched_at", datetime.utcnow() - timedelta(seconds=901)),
+         "OFFERING_STALE"),
+        (lambda row: setattr(row, "removed", True), "OFFERING_REMOVED"),
+        (lambda row: setattr(row, "available_directions", ()),
+         "OFFERING_DIRECTIONS_UNVERIFIED"),
+    ],
+)
+def test_stale_removed_and_unknown_direction_offers_are_unverified(mutate, expected):
+    source = prop(
+        provider="Underdog",
+        external_id="ud-safety",
+        available_directions=("OVER",),
+    )
+    row = canonicalize_player_props("Underdog", [source])[0]
+    mutate(row)
+    current, reason = coverage.validate_selection(
+        provider="Underdog",
+        source_id=row.external_id,
+        event_id=row.game_id,
+        player=row.player_name,
+        sport=row.sport,
+        stat=row.stat_type,
+        line=row.line_value,
+        direction="OVER",
+        line_variant=None,
+        game_time=row.game_time,
+    )
+    assert current is None and reason == expected
+
+
+def test_successful_feed_replacement_discards_removed_old_lines():
+    old = prop(provider="Underdog", line=1.5, external_id="ud-moving")
+    canonicalize_player_props("Underdog", [old])
+    coverage.clear_scope("Underdog")
+    current = prop(
+        provider="Underdog",
+        line=0.5,
+        external_id="ud-moving",
+        available_directions=("OVER",),
+    )
+    canonicalize_player_props("Underdog", [current])
+    match, reason = coverage.validate_selection(
+        provider="Underdog",
+        source_id="ud-moving",
+        event_id="event",
+        player="Alex Example",
+        sport="MLB",
+        stat="Hits",
+        line=1.5,
+        direction="UNDER",
+        line_variant=None,
+        game_time=current.game_time,
+    )
+    assert match is None and reason == "EXACT_OFFERING_UNVERIFIED"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("provider", ["Underdog", "PrizePicks"])
+async def test_exact_over_selection_is_queued_with_original_source_identity(provider, monkeypatch):
+    source = prop(
+        provider=provider,
+        external_id=f"{provider}-source",
+        line=0.5,
+        line_variant="standard",
+        available_directions=("OVER",),
+    )
+    canonicalize_player_props(provider, [source])
+    result, queue, delivery, db = await _attempt_queued_pick(
+        monkeypatch, source, "OVER"
+    )
+    assert result.queued
+    assert len(queue) == 1
+    assert queue[0]["provider"] == provider
+    assert queue[0]["source_id"] == source.external_id
+    assert queue[0]["event_id"] == source.game_id
+    assert queue[0]["line_value"] == source.line_value
+    assert queue[0]["direction"] == "OVER"
+    assert queue[0]["line_variant"] == "standard"
+    delivery._audit_telegram_attempt.assert_not_awaited()
+    db.mark_opportunity_alert_sent.assert_not_awaited()
+
+
+def test_standard_priority_is_equal_across_platforms_and_drops_only_same_source_alternatives():
+    ud_standard = {
+        "provider": "Underdog",
+        "prop": prop(provider="Underdog", line_variant="standard"),
+        "decision": NS(recommendation="OVER"),
+    }
+    pp_standard = {
+        "provider": "PrizePicks",
+        "prop": prop(provider="PrizePicks", line_variant="standard"),
+        "decision": NS(recommendation="OVER"),
+    }
+    kept, secondary = prioritize_standard_line_candidates(
+        [ud_standard, pp_standard]
+    )
+    assert kept == [ud_standard, pp_standard]
+    assert secondary == []
+
+    pp_goblin = {
+        "provider": "PrizePicks",
+        "prop": prop(provider="PrizePicks", line=0.5, line_variant="goblin"),
+        "decision": NS(recommendation="OVER"),
+    }
+    pp_demon = {
+        "provider": "PrizePicks",
+        "prop": prop(provider="PrizePicks", line=2.5, line_variant="demon"),
+        "decision": NS(recommendation="OVER"),
+    }
+    kept, secondary = prioritize_standard_line_candidates(
+        [pp_goblin, pp_standard, pp_demon]
+    )
+    assert kept == [pp_standard]
+    assert secondary == [pp_goblin, pp_demon]
+
+    # With no same-source standard candidate, special lines remain explicitly
+    # classified secondary options rather than being relabeled or discarded.
+    kept, secondary = prioritize_standard_line_candidates([pp_goblin, pp_demon])
+    assert kept == [pp_goblin, pp_demon]
+    assert secondary == []
+    assert {item["prop"].line_variant for item in kept} == {"goblin", "demon"}
+
+
+def test_standard_priority_does_not_duplicate_or_merge_platform_candidates():
+    pp_standard = {
+        "provider": "PrizePicks",
+        "prop": prop(provider="PrizePicks", line_variant="standard"),
+        "decision": NS(recommendation="OVER"),
+    }
+    ud_special = {
+        "provider": "Underdog",
+        "prop": prop(provider="Underdog", line_variant="demon"),
+        "decision": NS(recommendation="OVER"),
+    }
+    kept, secondary = prioritize_standard_line_candidates(
+        [pp_standard, ud_special]
+    )
+    assert kept == [pp_standard, ud_special]
+    assert secondary == []
 
 
 def test_pushes_cannot_satisfy_strict_under_quality_and_opponent_fragments_do_not_match():
