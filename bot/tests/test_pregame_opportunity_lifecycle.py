@@ -10,7 +10,10 @@ import pytest
 
 from alerts import AlertDelivery
 from commands import _is_upcoming_game
-from engine.player_props_pipeline import CanonicalPlayerProp
+from engine.player_props_pipeline import (
+    CanonicalPlayerProp,
+    canonicalize_player_props,
+)
 from engine.offering_coverage import coverage
 from engine.timing import is_game_alertable
 from prizepicks import PPEdgeOpportunity, PrizePicksLine
@@ -81,7 +84,7 @@ def _seed_underdog_offer(
     source_id = f"pregame:{sport}:{player}:{stat}"
     event_id = f"pregame-event:{sport}:{player}"
     coverage.clear_scope("Underdog", sport)
-    coverage.canonicalize_player_props("Underdog", [
+    canonicalize_player_props("Underdog", [
         CanonicalPlayerProp(
             provider="Underdog",
             external_id=source_id,
