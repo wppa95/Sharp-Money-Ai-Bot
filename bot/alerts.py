@@ -2457,9 +2457,7 @@ class AlertDelivery:
                 telegram_pick_queue_key,
             )
 
-            normalized_line_variant = (
-                _line_variant if source_upper == "PRIZEPICKS" else ""
-            )
+            normalized_line_variant = _line_variant
             pick_key = telegram_pick_queue_key(
                 provider=source,
                 source_id=source_id_value,
@@ -2870,6 +2868,36 @@ async def telegram_pick_delivery_job(context) -> None:
             await _finish(
                 "expired",
                 reason="game is no longer on the current Central reporting day",
+            )
+            return
+
+        from engine.offering_coverage import coverage
+        current_offering, offering_error = coverage.validate_selection(
+            provider=str(item.get("provider") or ""),
+            source_id=str(item.get("source_id") or ""),
+            event_id=str(item.get("event_id") or ""),
+            player=str(item.get("player_name") or ""),
+            sport=str(item.get("sport") or ""),
+            stat=str(item.get("stat_type") or ""),
+            line=float(item.get("line_value")),
+            direction=direction,
+            line_variant=str(item.get("line_variant") or ""),
+            game_time=game_time,
+        )
+        if offering_error:
+            await _finish(
+                "invalidated",
+                reason=offering_error,
+            )
+            return
+        # A variant change is a different source offering even if all other
+        # identifiers happen to remain the same.
+        if str(getattr(current_offering, "line_variant", "") or "").strip().casefold() != str(
+            item.get("line_variant") or ""
+        ).strip().casefold():
+            await _finish(
+                "invalidated",
+                reason="LINE_VARIANT_NOT_OFFERED",
             )
             return
 
