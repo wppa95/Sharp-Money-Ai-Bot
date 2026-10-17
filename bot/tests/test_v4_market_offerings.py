@@ -330,7 +330,9 @@ async def test_explicit_unavailable_direction_not_delivered_but_available_pick_i
     assert source.external_id in "\n".join(coverage.detail(source.external_id)) or "line 1.5" in "\n".join(coverage.detail(source.external_id))
 
 
-async def _attempt_queued_pick(monkeypatch, source, direction, *, line=None):
+async def _attempt_queued_pick(
+    monkeypatch, source, direction, *, line=None, use_delivery_buffer=True
+):
     import alerts
     import alert_scope_filter
     import engine.timing
@@ -356,9 +358,10 @@ async def _attempt_queued_pick(monkeypatch, source, direction, *, line=None):
         return_value={"tracked": True, "directional": True}
     )
     db.mark_opportunity_alert_sent = AsyncMock()
+    db.enqueue_telegram_pick_deliveries = AsyncMock(return_value=[])
     delivery = AlertDelivery(db, MagicMock(), [123])
     delivery._audit_telegram_attempt = AsyncMock(return_value=True)
-    buffer = []
+    buffer = [] if use_delivery_buffer else None
     canonical = canonicalize_player_props(source.provider, [source])[0]
     candidate_line = source.line_value if line is None else line
     result = await delivery.deliver_underdog(
@@ -404,6 +407,7 @@ async def test_reported_underdog_line_and_under_selection_fail_closed(monkeypatc
     assert queue == []
     delivery._audit_telegram_attempt.assert_not_awaited()
     db.mark_opportunity_alert_sent.assert_not_awaited()
+    db.enqueue_telegram_pick_deliveries.assert_not_awaited()
 
     unavailable_side, queue, delivery, db = await _attempt_queued_pick(
         monkeypatch, source, "UNDER"
@@ -413,6 +417,14 @@ async def test_reported_underdog_line_and_under_selection_fail_closed(monkeypatc
     assert queue == []
     delivery._audit_telegram_attempt.assert_not_awaited()
     db.mark_opportunity_alert_sent.assert_not_awaited()
+    db.enqueue_telegram_pick_deliveries.assert_not_awaited()
+    persisted_path, no_buffer, delivery, db = await _attempt_queued_pick(
+        monkeypatch, source, "UNDER", use_delivery_buffer=False
+    )
+    assert persisted_path.filtered_reason == "DIRECTION_NOT_OFFERED"
+    assert no_buffer is None
+    db.enqueue_telegram_pick_deliveries.assert_not_awaited()
+    delivery._audit_telegram_attempt.assert_not_awaited()
 
 
 @pytest.mark.asyncio
