@@ -36,6 +36,7 @@ import inspect
 import json
 import logging
 import time
+import uuid
 from collections import defaultdict
 from dataclasses import replace
 from datetime import datetime, timedelta
@@ -5143,7 +5144,9 @@ async def underdog_job(context) -> None:
     # Monitoring reports counts and neutral evaluation metrics; score tiers are
     # scoring metadata, not monitoring states.
     _n_scored:        int       = 0
-    _n_qualified:     int       = 0   # line-change props that passed the scoring gate
+    _n_directional: int        = 0   # scoring produced OVER or UNDER; not a final qualification
+    _n_fully_qualified: int     = 0   # candidate passed the complete pre-queue delivery checks
+    _n_queue_admitted: int     = 0   # candidate committed to the durable outbox
     _n_removed:       int       = 0   # props with [REMOVED] marker
     _n_new_prop:      int       = 0   # first-appearance props detected this cycle
     _n_new_prop_evaluated: int  = 0   # first-appearance props that used scoring budget
@@ -6008,6 +6011,7 @@ async def underdog_job(context) -> None:
                             "ext_id":             _np_ext_id,
                             "record":             None,   # linked after record construction
                             "sport":              snap.sport or "UNKNOWN",
+                            "candidate_lifecycle_id": uuid.uuid4().hex,
                             "is_meaningful_change": False,  # new props have no prev line
                             "_sent":              False,
                         })
@@ -6502,6 +6506,7 @@ async def underdog_job(context) -> None:
                             "ext_id":             _lc_ext_id_q,
                             "record":             None,   # linked after record construction
                             "sport":              snap.sport or "UNKNOWN",
+                            "candidate_lifecycle_id": uuid.uuid4().hex,
                             "is_meaningful_change": _lc_is_mc,
                             "_sent":              False,
                         })
@@ -6536,7 +6541,7 @@ async def underdog_job(context) -> None:
             # phase updates the record to "new_prop_sent"/"sent" if delivered.
             if is_new_prop:
                 if _dq_collected:
-                    _alert_outcome: Optional[str] = "new_prop_queued"
+                    _alert_outcome: Optional[str] = "new_prop_candidate_collected"
                 elif ud_result.sent:
                     _alert_outcome = "new_prop_sent"
                 elif ud_result.filtered:
@@ -6551,7 +6556,7 @@ async def underdog_job(context) -> None:
                 else:
                     _alert_outcome = "evaluated"
             elif _dq_collected:
-                _alert_outcome = "queued"
+                _alert_outcome = "candidate_collected"
             elif ud_result.sent:
                 _alert_outcome = "removal_sent" if is_removed else "sent"
             elif ud_result.filtered:
@@ -6935,6 +6940,7 @@ async def underdog_job(context) -> None:
                     "ext_id":             _s_ext_id_q,
                     "record":             None,   # standing path has no new snapshot record
                     "sport":              _ssport,
+                    "candidate_lifecycle_id": uuid.uuid4().hex,
                     "is_meaningful_change": False,  # standing = stable line
                     "_sent":              False,
                 })
