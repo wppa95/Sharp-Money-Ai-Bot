@@ -19,12 +19,14 @@ def seed_current_offering(
     game_time: datetime,
     line_variant: str = "",
     fetched_at: datetime | None = None,
+    replace_scope: bool = True,
 ):
     """Seed one exact, fresh source offer; never use this in live-provider tests."""
     from engine.offering_coverage import coverage
     from engine.player_props_pipeline import CanonicalPlayerProp
 
-    coverage.clear_scope(provider, sport)
+    if replace_scope:
+        coverage.clear_scope(provider, sport)
     prop = CanonicalPlayerProp(
         provider=provider,
         external_id=source_id,

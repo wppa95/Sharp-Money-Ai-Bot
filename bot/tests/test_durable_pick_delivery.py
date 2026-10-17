@@ -12,6 +12,7 @@ from telegram.error import BadRequest, RetryAfter
 from sqlalchemy import select
 
 import alerts
+from tests.offering_fixtures import seed_current_offering
 from database import (
     CandidateLifecycleRecord,
     Database,
@@ -130,6 +131,21 @@ async def _seed_underdog(db: Database, item: dict, *, line: float | None = None)
             )
         )
         await session.commit()
+    seed_current_offering(
+        provider="Underdog",
+        source_id=item["source_id"],
+        event_id=item["event_id"],
+        player_name=item["player_name"],
+        sport=item["sport"],
+        team="",
+        stat_type=item["stat_type"],
+        line_value=item["line_value"] if line is None else line,
+        direction=item["direction"],
+        game_time=item["game_time"],
+        line_variant=item.get("line_variant", ""),
+        fetched_at=item["source_fetched_at"],
+        replace_scope=False,
+    )
 
 
 async def _seed_opportunity(
@@ -194,6 +210,21 @@ async def _seed_pp_history(db: Database, item: dict, *, line_variant=None):
             )
         )
         await session.commit()
+    seed_current_offering(
+        provider="PrizePicks",
+        source_id=item["source_id"],
+        event_id=item["event_id"],
+        player_name=item["player_name"],
+        sport=item["sport"],
+        team="",
+        stat_type=item["stat_type"],
+        line_value=item["line_value"],
+        direction=item["direction"],
+        game_time=item["game_time"],
+        line_variant=variant,
+        fetched_at=item["source_fetched_at"],
+        replace_scope=False,
+    )
 
 
 @pytest.mark.asyncio
@@ -1134,6 +1165,8 @@ async def test_partial_broadcast_persists_global_retry_after_across_restart(
         )
         await _seed_underdog(db, first_pick)
         await _seed_opportunity(db, first_pick)
+        await _seed_underdog(db, second_pick)
+        await _seed_opportunity(db, second_pick)
         await db.enqueue_telegram_pick_deliveries([first_pick, second_pick])
         monkeypatch.setenv("ALLOWED_USER_IDS", "101,202")
 
