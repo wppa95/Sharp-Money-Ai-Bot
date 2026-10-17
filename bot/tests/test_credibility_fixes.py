@@ -330,7 +330,7 @@ class TestFunnelHTMLEscaping:
         assert "4,350"         in msg,   "Active count missing"
         assert "Immediate Telegram sends recorded during scans" in msg
         assert "Directional decisions" in msg
-        assert "Fully qualified candidates" in msg
+        assert "Fully-qualified delivery candidates (pre-queue gates passed)" in msg
         assert "Durable queue admissions" in msg
 
 

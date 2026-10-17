@@ -188,13 +188,15 @@ async def test_line_changed_scores_pass(caplog):
 
 
 @pytest.mark.asyncio
-async def test_line_changed_qualifies(caplog):
-    from alerts import DeliveryResult
+async def test_line_changed_direction_without_recipient_is_not_fully_qualified(
+    caplog, monkeypatch
+):
     from engine.player_results import PlayerHitRates, WindowStats
 
     # Large move (4 units) + rich consistent history → A/S tier.
-    # _fetch_and_compute_hit_rates is patched to return real-looking hit_rates
-    # so the decision engine can produce an OVER pick (required to qualify).
+    # With no configured recipient, a direction is not a deliverable candidate.
+    monkeypatch.delenv("ALLOWED_USER_IDS", raising=False)
+    monkeypatch.delenv("TELEGRAM_CHAT_ID", raising=False)
     snap = _make_snap("Player A", "Hits", 7.0, sport="MLB")
     history = [
         _make_db_record(
@@ -226,10 +228,7 @@ async def test_line_changed_qualifies(caplog):
     with caplog.at_level(logging.INFO, logger="market_engine"):
         with patch("market_engine._fetch_and_compute_hit_rates",
                    new=AsyncMock(return_value=fake_hit_rates)):
-            await _run_job(
-                [snap], db,
-                deliver_result=DeliveryResult(sent=True, recipients_sent=1),
-            )
+            await _run_job([snap], db)
 
     summary = next(r for r in caplog.records if "underdog_job: fetched=" in r.message)
     assert "fetched=1" in summary.message
@@ -237,9 +236,17 @@ async def test_line_changed_qualifies(caplog):
     assert "removed=0" in summary.message
     assert int(summary.message.split("evaluated=")[1].split()[0])  == 1
     assert int(summary.message.split("directional=")[1].split()[0]) == 1
-    assert int(summary.message.split("fully-qualified=")[1].split()[0]) == 1
+    assert int(summary.message.split("fully-qualified=")[1].split()[0]) == 0
+    assert int(summary.message.split("queue-admitted=")[1].split()[0]) == 0
+    assert int(summary.message.split("new_sent=")[1].split()[0]) == 0
     db.log_prop_opportunity_bulk.assert_awaited_once()
     db.record_candidate_lifecycle_batch.assert_awaited_once()
+    lifecycle_row = db.record_candidate_lifecycle_batch.await_args.args[0][0]
+    assert lifecycle_row["qualification_json"]["passed_collection_gates"] is False
+    lifecycle_update = db.update_candidate_lifecycle_batch.await_args.args[0][0]
+    assert lifecycle_update["evaluation_id"] == lifecycle_row["evaluation_id"]
+    assert lifecycle_update["disposition"] == "blocked"
+    assert lifecycle_update["final_reason"] == "no configured recipients"
 
 
 @pytest.mark.asyncio
