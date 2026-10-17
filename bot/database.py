@@ -774,6 +774,74 @@ def _telegram_pick_identity(
     )
 
 
+def _candidate_lifecycle_identity_key(
+    *,
+    provider: Optional[str],
+    source_id: Optional[str],
+    event_id: Optional[str],
+    player_name: Optional[str],
+    sport: Optional[str],
+    stat_type: Optional[str],
+    line_value: Optional[float],
+    direction: Optional[str],
+    line_variant: Optional[str],
+) -> Optional[str]:
+    """Hash the complete immutable identity shared by queue, audit, and lifecycle."""
+    identity = _telegram_pick_identity(
+        provider=provider,
+        external_id=source_id,
+        event_id=event_id,
+        player_name=player_name,
+        sport=sport,
+        stat_type=stat_type,
+        line_value=line_value,
+        direction=direction,
+        line_variant=line_variant,
+    )
+    if identity is None:
+        return None
+    return hashlib.sha256(
+        json.dumps(identity, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    ).hexdigest()
+
+
+def telegram_pick_queue_key(
+    *,
+    provider: str,
+    source_id: str,
+    event_id: str,
+    player_name: str,
+    sport: str,
+    stat_type: str,
+    line_variant: str,
+    line_value: float,
+    direction: str,
+) -> str:
+    """Return the v1 outbox key for one exact platform-specific pick."""
+    normalized_identity = {
+        "provider": str(provider or "").strip(),
+        "source_id": str(source_id or "").strip(),
+        "event_id": str(event_id or "").strip(),
+        "player_name": str(player_name or "").strip().casefold(),
+        "sport": str(sport or "").strip().upper(),
+        "stat_type": str(stat_type or "").strip().casefold(),
+        "line_variant": (
+            str(line_variant or "").strip()
+            if str(provider or "").strip().casefold() == "prizepicks"
+            else ""
+        ),
+        "line_value": float(line_value),
+        "direction": str(direction or "").strip().upper(),
+    }
+    return hashlib.sha256(
+        json.dumps(
+            normalized_identity,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+
+
 def _telegram_delivery_key(
     *,
     provider: Optional[str],
