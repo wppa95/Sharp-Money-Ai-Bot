@@ -7234,8 +7234,7 @@ async def underdog_job(context) -> None:
                 _queue_key = _lifecycle_identity(
                     getattr(_candidate_snap, "provider", None) or "Underdog",
                     _candidate.get("ext_id"),
-                    getattr(_candidate_snap, "event", "")
-                    or getattr(_candidate_snap, "game_id", ""),
+                    _snapshot_event_id(_candidate_snap),
                     _candidate.get("player"),
                     _candidate.get("sport"),
                     _candidate.get("stat_type"),
@@ -7342,9 +7341,7 @@ async def underdog_job(context) -> None:
                         ),
                         "source_id": str(_candidate.get("ext_id") or ""),
                         "event_id": str(
-                            getattr(_candidate_snap, "event", "")
-                            or getattr(_candidate_snap, "game_id", "")
-                            or ""
+                            _snapshot_event_id(_candidate_snap)
                         ),
                         "player_name": str(_candidate.get("player") or ""),
                         "sport": str(_candidate.get("sport") or "UNKNOWN"),
