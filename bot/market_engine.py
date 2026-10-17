@@ -3324,6 +3324,20 @@ async def _run_prizepicks_independent_cycle(
                 ),
             })
 
+    from engine.offering_coverage import prioritize_standard_line_candidates
+    actionable, _pp_secondary_candidates = prioritize_standard_line_candidates(
+        actionable
+    )
+    for _secondary in _pp_secondary_candidates:
+        _pp_lifecycle_rejections.append({
+            "evaluation_id": _secondary.get("candidate_lifecycle_id"),
+            "disposition": "rejected",
+            "final_reason": (
+                "STANDARD_LINE_PRIORITY: eligible standard offering takes "
+                "priority within the same PrizePicks event/player/market/direction"
+            ),
+        })
+
     try:
         lifecycle_writer = getattr(
             db, "record_candidate_lifecycle_batch", None
