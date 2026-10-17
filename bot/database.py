@@ -4930,6 +4930,11 @@ class Database:
         allowed = terminal | {
             "directional_decision", "qualified", "queue_admitted",
         }
+        progression = {
+            "directional_decision": 0,
+            "qualified": 1,
+            "queue_admitted": 2,
+        }
         updated = 0
         async with self.session() as s:
             for change in changes:
@@ -4944,6 +4949,12 @@ class Database:
                 if row is None:
                     continue
                 if row.disposition in terminal:
+                    continue
+                if (
+                    row.disposition in progression
+                    and disposition in progression
+                    and progression[disposition] < progression[row.disposition]
+                ):
                     continue
                 now = change.get("updated_at") or datetime.utcnow()
                 row.disposition = disposition

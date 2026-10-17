@@ -7094,7 +7094,7 @@ async def underdog_job(context) -> None:
         if _new_props_batch:
             logger.info(
                 "underdog_job: current-book evaluation complete — new_props=%d "
-                "evaluated=%d directional=%d fully_qualified=%d delivered=%d "
+                "evaluated=%d directional=%d fully-qualified=%d delivered=%d "
                 "(Telegram qualification policy unchanged)",
                 _n_new_prop,
                 _n_new_prop_evaluated,
@@ -7922,7 +7922,7 @@ async def underdog_job(context) -> None:
 
         logger.info(
             "underdog_job: fetched=%d evaluated=%d observation_only=%d "
-            "directional=%d fully_qualified=%d queue_admitted=%d "
+            "directional=%d fully-qualified=%d queue-admitted=%d "
             "removed=%d new=%d new_sent=%d budget=%d "
             "deadline_reached=%s elapsed=%.1fs",
             len(ud_snaps),
