@@ -7094,11 +7094,12 @@ async def underdog_job(context) -> None:
         if _new_props_batch:
             logger.info(
                 "underdog_job: current-book evaluation complete — new_props=%d "
-                "evaluated=%d qualified=%d delivered=%d "
+                "evaluated=%d directional=%d fully_qualified=%d delivered=%d "
                 "(Telegram qualification policy unchanged)",
                 _n_new_prop,
                 _n_new_prop_evaluated,
-                _n_qualified,
+                _n_directional,
+                _n_fully_qualified,
                 _n_new_prop_sent,
             )
 
@@ -7810,12 +7811,15 @@ async def underdog_job(context) -> None:
 
         logger.info(
             "underdog_job: fetched=%d evaluated=%d observation_only=%d "
-            "actionable=%d removed=%d new=%d new_sent=%d budget=%d "
+            "directional=%d fully_qualified=%d queue_admitted=%d "
+            "removed=%d new=%d new_sent=%d budget=%d "
             "deadline_reached=%s elapsed=%.1fs",
             len(ud_snaps),
             _n_new_prop_evaluated + _n_scored,
             _n_observation_only,
-            _n_qualified,
+            _n_directional,
+            _n_fully_qualified,
+            _n_queue_admitted,
             _n_removed,
             _n_new_prop,
             _n_new_prop_sent,
@@ -8020,7 +8024,10 @@ async def underdog_job(context) -> None:
                     new_props       = _n_new_prop,
                     line_changed    = _n_scored,
                     analyzed        = _n_new_prop + _n_scored,
-                    qualified       = _n_qualified,
+                    qualified       = _n_directional,
+                    directional_decisions = _n_directional,
+                    fully_qualified = _n_fully_qualified,
+                    queue_admitted  = _n_queue_admitted,
                     alert_delivered = _n_new_prop_sent + _n_lc_sent + _n_standing_sent,
                     actionable_by_sport = dict(_sport_actionable),
                     removed_by_sport    = dict(_sport_removed),
