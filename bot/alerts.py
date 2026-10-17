@@ -2210,9 +2210,7 @@ class AlertDelivery:
 
         _ud_line_value = float(new_line or 0)
         from engine.offering_coverage import coverage
-        _is_actionable_pick = bool(
-            (standing or new_prop) and not market_move_only and not removed
-        )
+        _is_actionable_pick = not market_move_only and not removed
         if _is_actionable_pick:
             _offering, _offering_error = coverage.validate_selection(
                 provider=source,
