@@ -1177,6 +1177,8 @@ async def test_queue_claim_skips_provider_sports_without_ready_snapshots(tmp_pat
             sport="NBA",
             source_id="PrizePicks::pp-ready-test",
         )
+        await _seed_pp_history(db, pp)
+        await _seed_opportunity(db, pp)
         await db.enqueue_telegram_pick_deliveries([ud, pp])
         now = datetime.utcnow() + timedelta(seconds=1)
 
