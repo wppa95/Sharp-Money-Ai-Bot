@@ -838,7 +838,7 @@ def telegram_pick_queue_key(
         "sport": str(sport or "").strip().upper(),
         "stat_type": str(stat_type or "").strip().casefold(),
         "line_variant": (
-            str(line_variant or "").strip()
+            str(line_variant or "")
             if str(provider or "").strip().casefold() == "prizepicks"
             else ""
         ),
