@@ -107,7 +107,7 @@ class TestProcessedKeysGate:
         """
         src = self._get_engine_source()
         stage4_pos    = src.find("Stage 4: gated count")
-        processed_pos = src.find("_processed_keys.add((player, stat_type))",
+        processed_pos = src.find("_processed_keys.add((player, stat_type, snap.external_id, snap.line))",
                                   stage4_pos)
         assert stage4_pos != -1, "Stage 4 gated count comment not found in market_engine.py"
         assert processed_pos != -1, (
@@ -205,7 +205,7 @@ class TestProcessedKeysGate:
         """
         src = self._get_engine_source()
         new_prop_pos = src.find("if is_new_prop:")
-        add_pos      = src.find("_processed_keys.add((player, stat_type))", new_prop_pos)
+        add_pos      = src.find("_processed_keys.add((player, stat_type, snap.external_id, snap.line))", new_prop_pos)
         assert new_prop_pos != -1, "'if is_new_prop:' not found in market_engine.py"
         assert add_pos != -1, (
             "_processed_keys.add() not found after 'if is_new_prop:' — "
@@ -225,13 +225,12 @@ class TestStandingPathGatesIntact:
         path = pathlib.Path(__file__).parent.parent / "market_engine.py"
         return path.read_text()
 
-    def test_hfs_filter_still_in_standing_path(self):
-        """Standing path must still filter by _HFS (only high-floor stat types)."""
+    def test_standing_path_does_not_restrict_discovery_to_preferred_stats(self):
+        """Observe/evaluate all markets; evidence still governs delivery."""
         src = self._get_engine_source()
-        assert "_st not in _HFS" in src, (
-            "Standing path _HFS filter was removed — "
-            "could allow volatile single-event stats into standing alerts."
-        )
+        assert "_st not in _HFS" not in src
+        assert "_sp_grp[:3]" not in src
+        assert "_standing_ordered = list(_standing_candidates)" in src
 
     def test_score_tier_gate_still_in_standing_path(self):
         """Standing path must use the canonical directional evidence gate."""

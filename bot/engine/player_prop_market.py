@@ -559,6 +559,18 @@ def _conf_bar(confidence: int) -> str:
 
 # ── Alert dedup helpers ───────────────────────────────────────────────────────
 
+def _live_delivery_key(key: tuple, line: float) -> tuple:
+    """Add confirmed line/class identity without changing legacy dedup keys."""
+    if len(key) < 7 or not key[3] or not key[4]:
+        return key
+    from engine.offering_coverage import coverage
+    row = coverage.match(
+        provider=key[3], player=key[0], sport=key[1], stat=key[2],
+        line=line, source_id=key[4], event_id=key[5],
+    )
+    return (*key, row.line_value, row.line_variant) if row is not None else key
+
+
 def _is_prop_deduped(
     alerted_set:          dict,
     player:               str,
@@ -598,6 +610,7 @@ def _is_prop_deduped(
         if any(identity)
         else (player, sport, stat_type)
     )
+    key = _live_delivery_key(key, line)
     ts            = now_ts if now_ts is not None else time.time()
 
     def _matches_recent(value: object) -> bool:
@@ -645,6 +658,14 @@ def _is_prop_deduped(
             if str(stored_key[6]).strip().upper() != normalized_direction:
                 continue
             try:
+                from engine.offering_coverage import coverage
+                if coverage.simultaneous_alternatives(
+                    provider=str(provider or ""), player=player, sport=sport, stat=stat_type,
+                    line_a=line, source_a=str(source_id or ""), event_a=str(event_id or ""),
+                    line_b=float(stored_value[1]), source_b=str(stored_key[4]),
+                    event_b=str(stored_key[5]),
+                ):
+                    continue
                 last_ts = float(stored_value[0])
                 if (ts - last_ts) < dedup_window_seconds:
                     return True
@@ -678,7 +699,7 @@ def _record_prop_alerted(
         if any(identity)
         else (player, sport, stat_type)
     )
-    alerted_set[key] = (
+    alerted_set[_live_delivery_key(key, line)] = (
         now_ts if now_ts is not None else time.time(),
         line,
     )
@@ -707,6 +728,7 @@ def _release_prop_delivery_claim(
         if any(identity)
         else (player, sport, stat_type)
     )
+    key = _live_delivery_key(key, line)
     current = alerted_set.get(key)
 
     if current is not None:

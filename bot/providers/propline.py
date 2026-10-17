@@ -18,6 +18,7 @@ import hashlib
 import io
 import json
 import logging
+import math
 import os
 import re
 import sqlite3
@@ -32,6 +33,7 @@ from pathlib import Path
 import aiohttp
 
 from providers.prop_provider import PlayerProp, PropProviderBase
+from engine.offering_coverage import coverage, directions_from
 
 logger = logging.getLogger(__name__)
 
@@ -2024,10 +2026,22 @@ def normalize_propline_prizepicks_record(
     different provider, moneyline, or game-total data into this pipeline.
     """
     provider_label = provider_name_for_bookmaker(provider)
+    if isinstance(raw_record, dict):
+        _raw_sport = _normalize_sport(_first(raw_record, "sport", "league", "sport_key", "league_name"))
+        _raw_market = _clean(_first(raw_record, "stat_type", "stat", "market_name", "market_key", "prop_type", "category"))
+        _raw_id = _clean(_first(raw_record, "external_id", "source_id", "id"))
+        coverage.raw(provider_label, _raw_sport, _raw_market, _raw_id)
+
+    def reject(reason: str) -> None:
+        coverage.failures[(provider_label, reason)] += 1
+        if isinstance(raw_record, dict):
+            coverage.raw_rejections[(provider_label, _raw_sport, _raw_market, _raw_id)] = reason
+
     if not isinstance(raw_record, dict) or not _is_prizepicks_player_prop(
         raw_record,
         expected_provider=provider_label,
     ):
+        reject("not a matching provider player market")
         return None
 
     player = _first(raw_record, "player_name", "player", "athlete", "name")
@@ -2038,6 +2052,7 @@ def normalize_propline_prizepicks_record(
         player_id = _clean(_first(raw_record, "player_id", "athlete_id"))
         player_name = _clean(player)
     if not player_name:
+        reject("missing player")
         return None
 
     sport = _normalize_sport(
@@ -2047,12 +2062,25 @@ def normalize_propline_prizepicks_record(
         _first(raw_record, "stat_type", "stat", "market_name", "prop_type", "category")
     )
     if not sport or not stat_type:
+        reject("missing sport or statistical market")
         return None
+    # Preserve period/map-range definitions that the generic historical alias
+    # table intentionally collapses. Offered markets must remain distinct.
+    raw_stat = _clean(_first(raw_record, "stat_type", "stat", "market_name", "prop_type", "category"))
+    scoped_stat = re.sub(r"\s+", " ", raw_stat.lower().replace("_", " ")).strip()
+    if re.search(r"\b(?:on maps?|in games?)\b", scoped_stat):
+        stat_type = scoped_stat
+    if sport in {"SOCCER", "FIFA"} and scoped_stat == "shots":
+        stat_type = "shots"
 
     raw_line = _first(raw_record, "line_value", "line", "point", "threshold", "value")
     try:
         line_value = float(raw_line)
     except (TypeError, ValueError):
+        reject("invalid line")
+        return None
+    if not math.isfinite(line_value) or line_value < 0:
+        reject("non-finite or negative line")
         return None
 
     event = _first(raw_record, "event", "game", "match", "game_description")
@@ -2148,6 +2176,12 @@ def normalize_propline_prizepicks_record(
         ).lower(),
         supplemental_source="PropLine",
         opponent=opponent,
+        available_directions=directions_from(raw_record.get("available_directions") or raw_direction),
+        original_stat_type=_clean(_first(
+            raw_record, "stat_type", "stat", "market_name", "prop_type", "category"
+        )),
+        market_id=_clean(_first(raw_record, "market_key", "market_type", "market")),
+        event_teams=tuple(("", name) for name in (event_home, event_away) if name),
     )
 
 
@@ -3186,6 +3220,8 @@ def _official_odds_records(
             "id": event_id,
             "name": event_label,
             "start_time": event.get("commence_time"),
+            "home_team": home,
+            "away_team": away,
         }
         for bookmaker in event.get("bookmakers") or []:
             if not isinstance(bookmaker, dict):
@@ -3207,7 +3243,6 @@ def _official_odds_records(
                         continue
                     odds_type = (
                         _clean(outcome.get("dfs_odds_type")).lower()
-                        or "standard"
                     )
                     records.append(
                         {
@@ -3216,6 +3251,7 @@ def _official_odds_records(
                             "sport": _canonical_discovered_sport(sport_key),
                             "player": outcome.get("description"),
                             "player_id": outcome.get("player_id"),
+                            "team": outcome.get("team") or outcome.get("player_team"),
                             "stat": stat_key,
                             "line": outcome.get("point"),
                             "direction": outcome.get("name"),

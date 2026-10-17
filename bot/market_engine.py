@@ -113,7 +113,7 @@ from engine.provider_confirmation import (
 
 def _snapshot_event_id(snapshot) -> str:
     """Return the provider event identity from any supported snapshot shape."""
-    for attr in ("event", "game_id", "event_id", "match_id"):
+    for attr in ("game_id", "event_id", "match_id", "event"):
         value = getattr(snapshot, attr, None)
         # Provider event identifiers are strings or numeric IDs. Reject
         # arbitrary mock/object attributes so a test double's repr cannot
@@ -141,6 +141,11 @@ def _analyst_payload(
     line_movement_context=None,
 ) -> dict:
     """Create advisory AI output without affecting any delivery decision."""
+    from engine.offering_coverage import coverage
+    coverage.evaluation(
+        provider=provider, player=player_name, sport=sport, stat=stat_type,
+        line=line, event_id=event_id, decision=decision, hit_rates=hit_rates,
+    )
     try:
         return _build_ai_analyst(
             player_name=player_name,
@@ -5154,6 +5159,15 @@ async def underdog_job(context) -> None:
         _snapshot_records[-1].event_teams = tuple(
             getattr(_snapshot, "event_teams", ()) or ()
         )
+        # Additive feed metadata, kept outside the legacy snapshot schema.
+        for _metadata_name in (
+            "available_directions", "line_variant", "opponent", "event",
+            "original_stat_type", "market_id",
+        ):
+            setattr(
+                _snapshot_records[-1], _metadata_name,
+                getattr(_snapshot, _metadata_name, ""),
+            )
 
     # Live scans consume the evidence already collected by the independent
     # history job. Load it once for the complete feed rather than opening a
@@ -5581,7 +5595,7 @@ async def underdog_job(context) -> None:
                     int(getattr(market_quality, "score", 0)),
                     float(score.total if score else 0),
                 )
-                _processed_keys.add((player, stat_type))
+                _processed_keys.add((player, stat_type, snap.external_id, snap.line))
                 # Validation is evidence context for evaluation and delivery.
                 # First-seen props must still be evaluated and tracked; the
                 # canonical Telegram gate below decides whether they can be sent.
@@ -6138,7 +6152,7 @@ async def underdog_job(context) -> None:
                         int(getattr(market_quality, "score", 0)),
                         float(score.total if score else 0),
                     )
-                    _processed_keys.add((player, stat_type))
+                    _processed_keys.add((player, stat_type, snap.external_id, snap.line))
                     validation = validate_player_prop(
                         player_name  = player,
                         stat_type    = stat_type,
@@ -6231,7 +6245,7 @@ async def underdog_job(context) -> None:
                     # Props with sub-threshold line movement (should_alert=False) are intentionally
                     # left out of _processed_keys so the standing path can evaluate them.
                     # NOTE: _processed_keys is NOT set here for sub-threshold movement.
-                    _processed_keys.add((player, stat_type))
+                    _processed_keys.add((player, stat_type, snap.external_id, snap.line))
 
                 # Market movement data is stored in UnderdogSnapshotRecord + PropCandidateLog.
                 # No Telegram delivery for market moves — only 🎯 ACTIONABLE BET PICK alerts
@@ -6513,22 +6527,17 @@ async def underdog_job(context) -> None:
         #  alert_sent=True is reflected in the saved records for delivered candidates.)
 
         # ── 4A: Standing opportunity scan ─────────────────────────────────────────
-        # Re-evaluate stable HIGH_FLOOR props that had no line
+        # Re-evaluate every stable offering that had no line
         # change and are not new this cycle.  Allows evidence-driven (hit-rate-
         # based) alerts without requiring a line-change event.
         #
-        # Constraints to prevent alert spam:
-        #   • Only HIGH_FLOOR stat types in the betting-alert whitelist
-        #   • Must have previously scored A or S tier (from prior cycles)
-        #   • No Underdog alert sent for this player/stat in the last 24 h
-        #   • Top 5 candidates per cycle (avoids hammering the stats API)
-        #   • Full scoring + validation + decision gate — same standard as live alerts
+        # Discovery/rotation must not be selected by stat, score, or sport.
+        # Existing evidence, freshness, qualification, and dedup gates still apply.
         #
         if chat_ids:
             from engine.ud_scoring import (  # already imported above but local scope
                 compute_market_quality as _cmq,
                 detect_market_pressure as _dmp,
-                _HIGH_FLOOR_STATS as _HFS,
             )
             _standing_candidates: list = []
             for _snap in ud_snaps:
@@ -6542,9 +6551,7 @@ async def underdog_job(context) -> None:
                 if _is_futures_stat(_st):
                     continue
 
-                if _st not in _HFS:
-                    continue
-                if (_sp, _st) in _processed_keys:
+                if (_sp, _st, _snap.external_id, _snap.line) in _processed_keys:
                     continue  # already handled in the main loop this cycle
     
                 _prev = recent_by_key.get((_sp, _st))
@@ -6555,14 +6562,9 @@ async def underdog_job(context) -> None:
                 # not create a hidden S/A/B allowlist for the standing path.
                 _standing_candidates.append((_snap, _sp, _st, _sport, _prev))
     
-            # Sort within each sport (top 3 per sport) — never compare across sports
-            _by_sport: dict = {}
-            for _sc in _standing_candidates:
-                _by_sport.setdefault(_sc[3], []).append(_sc)
-            _standing_ordered: list = []
-            for _sp_grp in _by_sport.values():
-                _sp_grp.sort(key=lambda x: x[4].score_total or 0, reverse=True)
-                _standing_ordered.extend(_sp_grp[:3])
+            # Preserve source order and every eligible offering. Optional
+            # diagnostic scores must neither select nor abort discovery.
+            _standing_ordered = list(_standing_candidates)
 
             logger.info(
                 "underdog_job: standing evaluation — eligible=%d selected=%d "

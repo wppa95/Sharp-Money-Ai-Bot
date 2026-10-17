@@ -5811,6 +5811,32 @@ async def cmd_funnel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     if not _check_allowed(update):
         await update.message.reply_text("⛔ Unauthorized.")
         return
+    if context.args and str(context.args[0]).lower() in {"markets", "offering"}:
+        from engine.offering_coverage import coverage
+        if str(context.args[0]).lower() == "offering":
+            lines = coverage.detail(str(context.args[1]) if len(context.args) > 1 else "")
+        else:
+            lines = coverage.report(
+                sport=str(context.args[1]) if len(context.args) > 1 else "",
+                platform=str(context.args[2]) if len(context.args) > 2 else "",
+            )
+        try:
+            page = max(1, int(context.args[3])) if len(context.args) > 3 else 1
+        except ValueError:
+            page = 1
+        total_pages = max(1, (len(lines) + 19) // 20)
+        page = min(page, total_pages)
+        lines = lines[(page - 1) * 20:page * 20]
+        lines.append(f"Page {page}/{total_pages}")
+        chunk = ""
+        for line in lines:
+            if len(chunk) + len(line) > 3500:
+                await update.message.reply_text(chunk, parse_mode="HTML")
+                chunk = ""
+            chunk += line + "\n"
+        if chunk:
+            await update.message.reply_text(chunk, parse_mode="HTML")
+        return
     if _db is None:
         await update.message.reply_text(f"{EMOJI['warn']} Database not ready.")
         return

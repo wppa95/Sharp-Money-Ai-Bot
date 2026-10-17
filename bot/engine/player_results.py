@@ -16,9 +16,9 @@ Public API
 from __future__ import annotations
 
 import logging
+import math
 from dataclasses import dataclass
 from datetime import date
-from difflib import SequenceMatcher
 from typing import TYPE_CHECKING, Optional
 
 if TYPE_CHECKING:
@@ -37,14 +37,15 @@ class WindowStats:
     """
     Summary statistics for one rolling window (L5, L10, season, etc.).
 
-    hit_rate is over_count / games.  A push (actual == line) is counted as
-    UNDER so that OVER hit-rates are conservative.
+    hit_rate is over_count / games. Pushes are completed games, but are not
+    hits for either direction; strict UNDER counts are stored independently.
     """
     games:     int
     over_count: int
     under_count: int
     hit_rate:  float   # over_count / games;  0.0–1.0
     average:   float   # mean actual_value across games in this window
+    push_count: int = 0
 
     def over_display(self) -> str:
         """e.g. '4/5 (80%)  avg 2.8'"""
@@ -130,7 +131,22 @@ def compute_hit_rates(
     -------
     PlayerHitRates with all available windows populated.
     """
-    if not results:
+    # Remove invalid/DNP/non-final rows before slicing rolling windows. A
+    # missing recent result must not hide an older valid completed game.
+    valid_results = []
+    for row in results:
+        value = getattr(row, "actual_value", None)
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+            continue
+        if getattr(row, "is_dnp", False) is True or getattr(row, "did_play", None) is False:
+            continue
+        state = str(getattr(row, "status", "") or getattr(row, "game_status", "") or "").lower()
+        if state in {"dnp", "scheduled", "live", "in_progress", "cancelled", "postponed", "void"}:
+            continue
+        if not getattr(row, "game_date", None):
+            continue
+        valid_results.append(row)
+    if not valid_results:
         return PlayerHitRates(
             player_name  = "",
             stat_type    = "",
@@ -148,7 +164,7 @@ def compute_hit_rates(
 
     # Sort newest first (already expected to be sorted, but enforce)
     sorted_results = sorted(
-        results,
+        valid_results,
         key=lambda r: r.game_date if isinstance(r.game_date, str) else r.game_date.isoformat(),
         reverse=True,
     )
@@ -162,9 +178,9 @@ def compute_hit_rates(
         if len(values) < required_games:
             return None
         n   = len(values)
-        # Push (actual == line exactly) counted as UNDER
+        # A push must never become an UNDER win by subtraction.
         oc  = sum(1 for v in values if v > current_line)
-        uc  = n - oc
+        uc  = sum(1 for v in values if v < current_line)
         avg = sum(values) / n
         return WindowStats(
             games       = n,
@@ -172,6 +188,7 @@ def compute_hit_rates(
             under_count = uc,
             hit_rate    = oc / n,
             average     = round(avg, 2),
+            push_count  = n - oc - uc,
         )
 
     def _window_values(
@@ -300,15 +317,17 @@ def _fuzzy_team_match(stored: str, query: str, threshold: float = 0.6) -> bool:
     """
     s = stored.strip().lower()
     q = query.strip().lower()
+    s = " ".join("state" if token.rstrip(".") == "st" else token for token in s.split())
+    q = " ".join("state" if token.rstrip(".") == "st" else token for token in q.split())
 
     # Exact or abbreviation match
     if s == q:
         return True
 
-    # One is a substring of the other (e.g. "bos" in "boston red sox")
-    if s in q or q in s:
-        return True
-
-    # Fuzzy ratio for partial-name matches
-    ratio = SequenceMatcher(None, s, q).ratio()
-    return ratio >= threshold
+    # Short city/team fragments and fuzzy similarity can join opponents such
+    # as New York and New Jersey. Only unambiguous token-prefix abbreviations
+    # remain supported; source aliases must otherwise resolve upstream.
+    short, long = sorted((s, q), key=len)
+    if len(short) >= 3 and len(short) <= 4:
+        return any(token.startswith(short) for token in long.split())
+    return False

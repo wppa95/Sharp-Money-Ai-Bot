@@ -332,6 +332,11 @@ def has_strict_directional_history(
             return False
         if recommendation == "UNDER" and over_rate > under_max_over_rate:
             return False
+        # Current game-level histories distinguish strict UNDERs and pushes.
+        # A low OVER rate caused by pushes is not strong UNDER evidence.
+        if recommendation == "UNDER" and isinstance(under_count, (int, float)):
+            if under_count / games < 1.0 - under_max_over_rate:
+                return False
 
     return True
 
@@ -391,7 +396,7 @@ def has_strong_directional_history(
         if over_count is None and isinstance(games, (int, float)):
             if isinstance(under_count, (int, float)):
                 over_count = games - under_count
-        payload[prefix] = {"g": games, "o": over_count}
+        payload[prefix] = {"g": games, "o": over_count, "u": under_count}
 
     return has_strict_directional_history(
         payload,

@@ -599,7 +599,6 @@ def _format_history_block(
     windows = (
         ("L5", "l5", "l5_hit_rate", "l5_games", "l5_over"),
         ("L10", "l10", "l10_hit_rate", "l10_games", "l10_over"),
-        ("L15", "l15", "l15_hit_rate", "l15_games", "l15_over"),
         ("L20", "l20", "l20_hit_rate", "l20_games", "l20_over"),
         ("L30", "l30", "l30_hit_rate", "l30_games", "l30_over"),
         ("Season", "season", "season_hit_rate", "season_games", "season_over"),
@@ -654,14 +653,31 @@ def _format_history_block(
         sample_values = {}
 
     sample_values_rendered = False
+    direction = _decision_recommendation(decision)
     for label, values_key, rate_name, games_name, over_name in windows:
         rate = _numeric_attr(decision, rate_name)
         games = _numeric_attr(decision, games_name)
         over = _numeric_attr(decision, over_name)
+        if direction == "UNDER":
+            under = _numeric_attr(decision, over_name.replace("_over", "_under"))
+            if under is not None and games:
+                over = under
+                rate = under / games
+            else:
+                # Without strict UNDER counts, pushes cannot be distinguished
+                # from losses. Never report 1 - OVER as verified UNDER history.
+                over = None
+                rate = None
         shown_label = _history_window_label(label, games, l30_games)
         if rate is None or games is None or games <= 0:
-            if label in {"L5", "L20", "L30"}:
-                rows.append(f"   <b>{shown_label}:</b> N/A")
+            if label in {"L5", "L10", "L20", "L30"}:
+                sample_size = _numeric_attr(decision, "season_games")
+                detail = (
+                    f" — {int(sample_size)} valid games available"
+                    if sample_size is not None and 0 < sample_size < int(label[1:])
+                    else ""
+                )
+                rows.append(f"   <b>{shown_label}:</b> N/A{detail}")
             continue
         if over is not None:
             value = f"{rate:.0%} ({int(over)}/{int(games)})"
@@ -673,7 +689,7 @@ def _format_history_block(
         if actuals:
             value = f"{', '.join(actuals)} · {value}"
             sample_values_rendered = True
-        rows.append(f"   <b>{shown_label}:</b> {value}")
+        rows.append(f"   <b>{shown_label}:</b> {value} ({direction})" if direction in {"OVER", "UNDER"} else f"   <b>{shown_label}:</b> {value}")
         if label == "H2H":
             h2h_rendered = True
 
@@ -1067,6 +1083,9 @@ def _format_simple_prop_alert(
     game_time: Optional[datetime],
     decision: Optional[object],
     validation: Optional[object],
+    source: str = "Underdog",
+    opponent: Optional[str] = None,
+    offering_context: Optional[object] = None,
 ) -> str:
     """Render the minimal user-facing player-prop alert."""
     sport_icon = {
@@ -1083,7 +1102,48 @@ def _format_simple_prop_alert(
     if history:
         history = history.lstrip("\n")
     else:
-        history = "📈 <b>History:</b>\n   N/A"
+        history = "📈 <b>History:</b>\n" + "\n".join(
+            f"   <b>{window}:</b> N/A"
+            for window in ("L5", "L10", "L20", "L30", "H2H")
+        )
+    from engine.offering_coverage import coverage
+    offering = offering_context or coverage.match(
+        provider=source, player=player_name, sport=sport, stat=stat_type,
+        line=line, game_time=game_time,
+    )
+    variant = str(getattr(offering, "line_variant", "") or "classification unavailable")
+    comparison = []
+    if offering is not None:
+        counterparts = coverage.comparisons(offering)
+        # Display one verified reference to keep Telegram messages bounded;
+        # every alternate offering remains in discovery/evaluation/inventory.
+        counterparts.sort(key=lambda row: (
+            row.line_variant != offering.line_variant,
+            -row.line_value if recommendation == "OVER" else row.line_value,
+        ))
+        for other in counterparts[:1]:
+            other_variant = str(other.line_variant or "classification unavailable")
+            difference = abs(line - other.line_value)
+            favorable = (
+                recommendation == "OVER" and line < other.line_value
+                or recommendation == "UNDER" and line > other.line_value
+            )
+            comparison.append(
+                f"This line is set at {line:g} on {escape(source)} ({escape(variant)}) "
+                f"for a fixed payout, but {escape(other.provider)} has "
+                f"{escape(stat_type)} at {other.line_value:g} ({escape(other_variant)}). "
+                f"Taking the {recommendation} on {escape(source)} at {line:g} "
+                + ("may offer a line advantage" if favorable else "does not show a directional line advantage")
+                + "; a line difference alone does not establish profitable value. "
+                "Verify available alt lines and player statistics."
+                + (
+                    " Different line classifications may have different payout or settlement terms."
+                    if variant != other_variant else ""
+                )
+                + f"\n<b>Diff:</b> {difference:g}"
+                f"\n<b>Other directions:</b> {', '.join(other.available_directions)}"
+            )
+    game = str(getattr(offering, "event", "") or opponent or "N/A — matchup unavailable")
 
     return "\n".join(
         [
@@ -1093,13 +1153,18 @@ def _format_simple_prop_alert(
             f"👤 <b>Player:</b> {escape(str(player_name))}",
             f"📊 <b>Stat:</b> {escape(str(stat_type))}",
             f"🎯 <b>Line:</b> <code>{line_text}</code>",
+            f"<b>Platform:</b> {escape(source)} · fixed payout · {escape(variant)}",
+            f"<b>Game:</b> {escape(game)}",
             (
                 f"🕐 <b>Game starts:</b> {_format_game_time_et(game_time)}"
                 if game_time is not None
                 else "🕐 <b>Game starts:</b> N/A"
             ),
             "",
+            "\n\n".join(comparison) if comparison else "Cross-platform comparison: unavailable or not verified.",
             history,
+            "",
+            "Monitoring player props across multiple sports. Not betting advice.",
         ]
     )
 
@@ -1129,6 +1194,7 @@ def format_underdog_change_alert(
     opening_line: Optional[float] = None,     # First ever line from PropLineHistory
     market_confirmation: Optional[dict] = None,  # optional market confirmation data
     source: str = "Underdog",
+    offering_context: Optional[object] = None,
 ) -> str:
     """Format a compact player-prop alert with only the actionable details."""
     if removed:
@@ -1151,6 +1217,9 @@ def format_underdog_change_alert(
         game_time=game_time,
         decision=decision,
         validation=validation,
+        source=source,
+        opponent=opponent,
+        offering_context=offering_context,
     )
 
 
@@ -1231,6 +1300,7 @@ def format_underdog_new_prop_alert(
     intelligence_trace: Optional[dict] = None, # prop_intelligence trace from decision_trace
     market_confirmation: Optional[dict] = None,  # optional market confirmation data
     source: str = "Underdog",
+    offering_context: Optional[object] = None,
 ) -> str:
     """Format a compact first-appearance player-prop alert."""
     return _format_simple_prop_alert(
@@ -1241,6 +1311,9 @@ def format_underdog_new_prop_alert(
         game_time=game_time,
         decision=decision,
         validation=validation,
+        source=source,
+        opponent=opponent,
+        offering_context=offering_context,
     )
 
 

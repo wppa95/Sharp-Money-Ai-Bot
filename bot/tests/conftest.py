@@ -49,6 +49,8 @@ def reset_delivery_claims():
        and causing lifecycle / alert-sent assertions to fail.
     """
     try:
+        from engine.offering_coverage import coverage
+        coverage.__init__()
         import market_engine as _me
         _me._prop_market_alerted.clear()
     except Exception:

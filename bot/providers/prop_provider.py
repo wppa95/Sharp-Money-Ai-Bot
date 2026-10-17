@@ -78,6 +78,10 @@ class PlayerProp:
     # Opponent for H2H evidence. Providers may leave this blank when the feed
     # does not expose enough event/team context to determine it safely.
     opponent: str = ""
+    available_directions: tuple[str, ...] = ()
+    original_stat_type: str = ""
+    market_id: str = ""
+    event_teams: tuple[tuple[str, str], ...] = ()
 
     # ── Identity helpers ──────────────────────────────────────────────────────
 

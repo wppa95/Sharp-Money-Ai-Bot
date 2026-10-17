@@ -443,7 +443,7 @@ def make_ud_bet_decision(
     _b = _B_RATE
     if rate >= _b:
         direction = "OVER"
-    elif rate <= (1.0 - _b):
+    elif rate <= (1.0 - _b) and primary.under_count / primary.games >= _b:
         direction = "UNDER"
     else:
         return _historical_fallback(
@@ -576,12 +576,12 @@ def _determine_tier(
         else:
             return "B"
     else:
-        if rate <= (1.0 - _S_RATE):
+        if rate <= (1.0 - _S_RATE) and primary.under_count / primary.games >= _S_RATE:
             required = _required_strong_windows(hit_rates)
-            if required and all(w.hit_rate <= _STRONG_UNDER_RATE for w in required):
+            if required and all(w.under_count / w.games >= 1.0 - _STRONG_UNDER_RATE for w in required):
                 return "S"
             return "A"
-        elif rate <= (1.0 - _A_RATE):
+        elif rate <= (1.0 - _A_RATE) and primary.under_count / primary.games >= _A_RATE:
             return "A"
         else:
             return "B"
@@ -668,7 +668,7 @@ def _compute_confidence(
         total_wt += wt
         if direction == "OVER" and w.hit_rate >= 0.55:
             agreeing_wt += wt
-        elif direction == "UNDER" and w.hit_rate <= 0.45:
+        elif direction == "UNDER" and w.under_count / w.games >= 0.55:
             agreeing_wt += wt
 
     # Scale weighted agreement to a 0–12 bonus (same cap as old flat version)
@@ -684,7 +684,7 @@ def _compute_confidence(
     if h is not None and h.games >= 3:
         if direction == "OVER" and h.hit_rate >= 0.60:
             h2h_bonus = 3
-        elif direction == "UNDER" and h.hit_rate <= 0.40:
+        elif direction == "UNDER" and h.under_count / h.games >= 0.60:
             h2h_bonus = 3
 
     raw = base + tier_bonus + sample_bonus + agreement_bonus + h2h_bonus
@@ -704,15 +704,16 @@ def _build_reason(
 
     # Primary window summary
     parts.append(
-        f"L{primary.games}: {primary.hit_rate:.0%} "
-        f"({primary.over_count}/{primary.games})"
+        f"L{primary.games}: {(primary.over_count if direction == 'OVER' else primary.under_count) / primary.games:.0%} "
+        f"({primary.over_count if direction == 'OVER' else primary.under_count}/{primary.games})"
     )
 
     # Season
     s = hit_rates.season
     if s is not None and s.games >= _MIN_GAMES_PRIMARY:
         parts.append(
-            f"Season: {s.hit_rate:.0%} ({s.over_count}/{s.games})"
+            f"Season: {(s.over_count if direction == 'OVER' else s.under_count) / s.games:.0%} "
+            f"({s.over_count if direction == 'OVER' else s.under_count}/{s.games})"
         )
         if s.average is not None:
             avg_diff = s.average - current_line
@@ -723,7 +724,7 @@ def _build_reason(
     h = hit_rates.h2h
     if h is not None and h.games >= 3:
         parts.append(
-            f"H2H: {h.hit_rate:.0%} ({h.games} matchups)"
+            f"H2H: {(h.over_count if direction == 'OVER' else h.under_count) / h.games:.0%} ({h.games} matchups)"
         )
 
     # Market supplement

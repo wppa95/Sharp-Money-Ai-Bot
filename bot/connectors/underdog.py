@@ -17,7 +17,9 @@ API notes:
 from __future__ import annotations
 
 import logging
+import math
 import re
+from engine.offering_coverage import coverage, directions_from
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Optional
@@ -391,6 +393,9 @@ class UnderdogProjection:
     # Explicit event participant ID/name pairs from Underdog's event payload.
     # IDs remain separate from labels so downstream identity keys stay stable.
     event_teams: tuple[tuple[str, str], ...] = ()
+    available_directions: tuple[str, ...] = ()
+    line_variant: str = ""
+    market_id: str = ""
 
 
 class UnderdogConnector(BaseConnector):
@@ -499,6 +504,11 @@ class UnderdogConnector(BaseConnector):
              is_game_market = proj.is_game_market,
              opponent    = getattr(proj, "opponent", None) or None,
             event_teams = proj.event_teams,
+            available_directions = proj.available_directions,
+            line_variant = proj.line_variant,
+            game_id = proj.game_id,
+            original_stat_type = proj.stat_type,
+            market_id = proj.market_id,
             )
             # Stash notes for downstream consumers via a convention attr
             object.__setattr__(snaps, "_notes", notes) if False else None
@@ -628,10 +638,20 @@ class UnderdogConnector(BaseConnector):
         team_names_by_id = _build_team_name_index(data, event_lookup)
 
         for line in _records(data.get("over_under_lines", [])):
+            raw_stat = (line.get("over_under") or {}).get("appearance_stat") or {}
+            raw_app = appearances.get(raw_stat.get("appearance_id", ""), {})
+            raw_player = players.get(raw_app.get("player_id", ""), {})
+            raw_sport = str(raw_player.get("sport_id", "")).upper()
+            raw_market = str(raw_stat.get("display_stat", "Unknown"))
+            coverage.raw("Underdog", raw_sport, raw_market, str(line.get("id", "")))
             try:
                 stat_value = line.get("stat_value")
                 if stat_value is None:
+                    coverage.failures[("Underdog", "missing line")] += 1
+                    coverage.raw_rejections[("Underdog", raw_sport, raw_market, str(line.get("id", "")))] = "missing line"
                     continue
+                if not math.isfinite(float(stat_value)) or float(stat_value) < 0:
+                    raise ValueError("non-finite or negative line")
 
                 # v1: appearance_stat is nested inside the embedded over_under object
                 over_under      = line.get("over_under") or {}
@@ -698,8 +718,13 @@ class UnderdogConnector(BaseConnector):
                         {"id": away_team[0], "name": away_team[1]},
                     ),
                     event_teams = event_teams,
+                    available_directions = directions_from(line.get("options") or line.get("available_directions") or ()),
+                    line_variant = str(line.get("line_variant") or line.get("odds_type") or ""),
+                    market_id = str(appearance_stat.get("id") or ""),
                 ))
             except (KeyError, TypeError, ValueError) as exc:
+                coverage.failures[("Underdog", "invalid provider record")] += 1
+                coverage.raw_rejections[("Underdog", raw_sport, raw_market, str(line.get("id", "")))] = str(exc)
                 logger.debug("Underdog parse error: %s", exc)
                 continue
 

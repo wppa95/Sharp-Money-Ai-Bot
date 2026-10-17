@@ -86,9 +86,10 @@ def _prop_claim_key(
     sport: str,
     stat_type: str,
     direction: str,
+    offering: Optional[object] = None,
 ) -> tuple[str, ...]:
     """Build the identity used by compatibility delivery claims."""
-    return (
+    key = (
         str(provider or "").strip().upper(),
         str(source or "").strip().upper(),
         str(event_id or "").strip(),
@@ -97,6 +98,9 @@ def _prop_claim_key(
         str(stat_type or "").strip().casefold(),
         str(direction or "").strip().upper(),
     )
+    if offering is not None:
+        key += (str(offering.external_id), float(offering.line_value), str(offering.line_variant))
+    return key
 
 
 # ── Known sharp / respected sportsbooks ───────────────────────────────────────
@@ -1254,6 +1258,7 @@ class AlertDelivery:
         stat_type: str,
         direction: str,
         line_value: float,
+        offering: Optional[object] = None,
     ) -> bool:
         """Atomically claim a compatibility prop delivery slot."""
         key = _prop_claim_key(
@@ -1264,6 +1269,7 @@ class AlertDelivery:
             sport=sport,
             stat_type=stat_type,
             direction=direction,
+            offering=offering,
         )
         now = time.time()
         with self._prop_delivery_claim_lock:
@@ -1297,6 +1303,14 @@ class AlertDelivery:
                     stored_identity == logical_identity
                     and now - claimed_at < config.UD_ALERT_DEDUP_WINDOW
                 ):
+                    if len(key) >= 10 and len(stored_key) >= 10:
+                        from engine.offering_coverage import coverage
+                        if coverage.simultaneous_alternatives(
+                            provider=provider, player=player_name, sport=sport, stat=stat_type,
+                            line_a=float(key[8]), source_a=key[7], event_a=event_id,
+                            line_b=float(stored_key[8]), source_b=stored_key[7], event_b=stored_key[2],
+                        ):
+                            continue
                     return False
             self._prop_delivery_claims[key] = (now, float(line_value))
             return True
@@ -1312,6 +1326,7 @@ class AlertDelivery:
         stat_type: str,
         direction: str,
         line_value: float,
+        offering: Optional[object] = None,
     ) -> None:
         """Release a compatibility claim unless another line replaced it."""
         key = _prop_claim_key(
@@ -1322,6 +1337,7 @@ class AlertDelivery:
             sport=sport,
             stat_type=stat_type,
             direction=direction,
+            offering=offering,
         )
         with self._prop_delivery_claim_lock:
             current = self._prop_delivery_claims.get(key)
@@ -1804,6 +1820,9 @@ class AlertDelivery:
 
     # ── Underdog delivery ─────────────────────────────────────────────────────
 
+    from engine.offering_coverage import trace_delivery as _trace_offering_delivery
+
+    @_trace_offering_delivery
     async def deliver_underdog(
         self,
         player_name: str,
@@ -2045,6 +2064,20 @@ class AlertDelivery:
                     )
 
         _ud_line_value = float(new_line or 0)
+        from engine.offering_coverage import coverage
+        _offering = coverage.match(
+            provider=source, player=player_name, sport=sport, stat=stat_type,
+            line=_ud_line_value, game_time=game_time,
+            source_id=str(source_id or ""),
+        )
+        if _offering is not None:
+            coverage.mark(_offering, "QUALIFIED")
+            if _offering.available_directions and _direction not in _offering.available_directions:
+                coverage.mark(_offering, "DELIVERY_BLOCKED", "direction unavailable on originating platform")
+                return DeliveryResult(
+                    sent=False, filtered=True,
+                    filtered_reason="Direction unavailable on originating platform",
+                )
         if not self._try_claim_prop_delivery(
             provider=source,
             source=source,
@@ -2054,6 +2087,7 @@ class AlertDelivery:
             stat_type=stat_type,
             direction=_direction,
             line_value=_ud_line_value,
+            offering=_offering,
         ):
             return DeliveryResult(sent=False, deduped=True)
 
@@ -2087,6 +2121,7 @@ class AlertDelivery:
                     intelligence_trace=intelligence_trace,
                     market_confirmation=market_confirmation,
                     source=source,
+                    offering_context=_offering,
                 )
             else:
                 message = format_underdog_change_alert(
@@ -2109,6 +2144,7 @@ class AlertDelivery:
                     opening_line=opening_line,
                     market_confirmation=market_confirmation,
                     source=source,
+                    offering_context=_offering,
                 )
         except Exception:
             logger.exception(
@@ -2154,12 +2190,20 @@ class AlertDelivery:
                 stat_type=stat_type,
                 direction=_direction,
                 line_value=_ud_line_value,
+                offering=_offering,
             )
             raise
         discord_sent = False
         if not removed and not market_move_only and counts["sent"] > 0:
             discord_sent = await send_discord_alert(message)
         alert_sent = counts["sent"] > 0
+        if _offering is not None:
+            coverage.mark(_offering, "ALERT_CREATED")
+            coverage.mark(_offering, "DELIVERY_ELIGIBLE")
+            coverage.mark(
+                _offering, "TELEGRAM_SENT" if alert_sent else "DELIVERY_FAILED",
+                "" if alert_sent else "Telegram transport did not confirm a send",
+            )
         if not alert_sent:
             self._release_prop_delivery_claim(
                 provider=source,
@@ -2170,6 +2214,7 @@ class AlertDelivery:
                 stat_type=stat_type,
                 direction=_direction,
                 line_value=_ud_line_value,
+                offering=_offering,
             )
         _alert_kind = (
             "REMOVAL" if removed

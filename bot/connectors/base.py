@@ -72,6 +72,11 @@ class MarketSnapshot:
     # Explicit event team ID/display-name pairs, retained for safe result
     # reconciliation without turning IDs into labels.
     event_teams: tuple[tuple[str, str], ...] = ()
+    available_directions: tuple[str, ...] = ()
+    line_variant: str = ""
+    game_id: str = ""
+    original_stat_type: str = ""
+    market_id: str = ""
 
     @property
     def market_key(self) -> tuple[str, str, str, str]:

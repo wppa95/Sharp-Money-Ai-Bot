@@ -1,6 +1,6 @@
 ---
 name: Player Props delivery presentation
-description: Durable rules for the unified Player Props Telegram presentation and evidence-dependent strong labels.
+description: Source-specific individual alerts, verified comparisons, requested history windows, and scheduler boundaries.
 ---
 
 The user-facing product is one Player Props feed with an explicit source label
@@ -11,11 +11,17 @@ metadata, or duplicate provider availability panels.
 market-direction recommendation look stronger than its completed-game evidence
 justified.
 
-**How to apply:** Render the current/previous line, movement, source, evidence
-source/sample, direction-specific history, cleaned reason, status, and time.
-Only use a strong-pick label when the validation provenance is explicit,
-sample size is sufficient, and the selected OVER/UNDER has direction-specific
-hit-rate support.
+**How to apply:** Show the originating platform and its actual line, actual
+event/matchup/time, and direction-specific L5/L10/L20/L30/H2H history. Show
+verified equivalent cross-platform lines, their actual classifications, and
+the absolute line difference when available; otherwise use the single-platform
+format. A line difference is not proof of profitable value. Do not add Strong
+Bet labels, stars, tiers, or score badges. Preserve the footer:
+"Monitoring player props across multiple sports. Not betting advice."
+
+**Why:** The user explicitly requires the line-shopping narrative and five
+history windows without promotional quality labels, invented availability,
+odds, or classifications.
 
 Provider-specific fetching and pacing remain separate, but production
 evaluation and delivery must enter through one shared monitoring cycle. Run

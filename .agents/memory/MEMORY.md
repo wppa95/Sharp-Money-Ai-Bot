@@ -112,7 +112,8 @@
 - [Grader date reconciliation](grader-date-reconciliation.md) — UTC event timestamps may settle against the preceding provider-local calendar date.
 - [External SQLite lock tests](external-sqlite-lock-tests.md) — lower busy_timeout to force raw-writer lock errors; otherwise SQLite waits internally and bypasses retry coverage.
 - [Canonical Player Props pipeline](canonical-player-props-pipeline.md) — PropLine and Underdog share normalization and persistence before scoring while retaining source identity.
-- [Player Props delivery presentation](player-props-delivery-presentation.md) — Telegram labels the shared product/source explicitly; strong picks require explicit results provenance and direction-specific hit-rate support.
+- [Player Props delivery presentation](player-props-delivery-presentation.md) — verified source/line comparisons and five directional windows; no Strong Bet labels, stars, tiers, or badges.
+- [Comprehensive market discovery](comprehensive-market-discovery.md) — inspect every exposed offering; qualification never selects discovery, and missing source coverage remains unknown.
 - [PropLine analytics API bridge](propline-api-bridge.md) — external bundle routes must stay behind a persistent Python facade worker so PropLine pacing/cache/source safety remain centralized.
 - [Generated API schema exports](generated-api-schema-exports.md) — Orval can name path and query parameter outputs identically; keep the package index explicit to avoid isolatedModules collisions.
 - [PropLine history pacing](propline-history-pacing.md) — scheduled history must use the fast resolved-history endpoint; raw games/event stats belong on slower supplemental paths.

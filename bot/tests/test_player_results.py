@@ -102,13 +102,14 @@ class TestComputeHitRates:
         assert samples["h2h_l20"] == tuple(values[:20])
         assert samples["h2h"] == tuple(values)
 
-    def test_push_counted_as_under(self):
+    def test_push_is_not_a_hit_for_either_direction(self):
         """Exact-line value is a push, counted as UNDER."""
         recs = _recs([2.5, 3.0, 3.0, 1.0, 2.0], line=2.5)
         hr = compute_hit_rates(recs, 2.5)
         assert hr.l5 is not None
         assert hr.l5.over_count == 2    # only strict > 2.5
-        assert hr.l5.under_count == 3  # exact-line push plus two strict unders
+        assert hr.l5.under_count == 2
+        assert hr.l5.push_count == 1
 
     def test_l5_l10_windows_use_most_recent(self):
         # 15 games; first 5 all OVER (values=3), last 10 mixed

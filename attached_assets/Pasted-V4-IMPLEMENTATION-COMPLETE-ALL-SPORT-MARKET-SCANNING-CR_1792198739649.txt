@@ -1,0 +1,456 @@
+V4 IMPLEMENTATION: COMPLETE ALL-SPORT MARKET SCANNING, CROSS-PLATFORM LINE COMPARISON, AND ACCURATE PICK ANALYSIS
+
+Implement the changes below directly in the existing V4 Telegram bot codebase.
+
+This is an implementation task, not an audit-only task. Inspect the existing architecture, identify the actual causes of missing markets and incorrect or incomplete alerts, implement the necessary fixes, and run appropriate tests.
+
+Preserve the existing working pipeline wherever possible. Do not rewrite unrelated components or change established grading behavior simply to increase alert volume.
+
+1. CRITICAL REQUIREMENT: SCAN ALL SPORTS, ALL MARKETS, ALL PLAYERS, AND ALL AVAILABLE LINES
+
+V4 must inspect every supported sport and every player-prop market and line that the existing data sources actually expose.
+
+The bot must not scan only the markets that currently produce alerts, the markets its grading system prefers, or the props it predicts are most likely to qualify.
+
+Discovery must be comprehensive. Alert delivery can remain selective.
+
+For every supported sport and active event:
+
+- Discover all available player props.
+- Discover every available stat and market type.
+- Discover every player with an available prop.
+- Inspect every distinct offered line for each player and stat.
+- Identify which platform provides each offering.
+- Record actual available directions when the source exposes that information.
+- Preserve standard lines and special lines, including PrizePicks Goblins and Demons where applicable.
+- Support previously unseen market identifiers and aliases through safe, extensible normalization.
+- Continue scanning all supported sports, not only MLB, NHL, NBA, NFL, or any other predefined shortlist.
+- Include supported esports, tennis, and other sports already handled by V4.
+- Do not stop scanning an event after finding a few potentially profitable props.
+- Do not use grading rank, historical alert frequency, or qualification status to decide which markets are discovered.
+
+If a source exposes multiple lines for the same player and stat, evaluate each distinct offering independently when sufficient data is available.
+
+Do not invent lines, assume that both OVER and UNDER are available, or assume that a market exists on a platform without evidence from that platform's data.
+
+If a source does not expose a market or line, record that limitation rather than pretending the market was scanned successfully.
+
+2. SEPARATE MARKET DISCOVERY FROM PICK SELECTION
+
+Keep these responsibilities separate:
+
+1. Discovery: Find all available offerings across supported sports and sources.
+2. Normalization: Map raw provider data to consistent sport, event, player, stat, platform, line, direction, and market-type fields.
+3. Storage: Persist observations so they can be tracked and evaluated.
+4. Evaluation eligibility: Determine which offerings have the minimum required data for evaluation.
+5. Evaluation: Evaluate each eligible offering independently.
+6. Evidence and history: Gather valid historical results, hit rates, and other existing evidence.
+7. Analysis and qualification: Apply V4's existing grading, evidence, and qualification requirements.
+8. Alert creation: Create alerts only for genuinely qualified opportunities.
+9. Delivery: Send qualified individual picks through Telegram.
+
+An offering must not be excluded from discovery simply because it is unlikely to qualify.
+
+A weak prop may fail qualification, but V4 should still be able to show that it was observed and explain why it was rejected.
+
+Do not lower grading thresholds, weaken evidence requirements, or manufacture additional picks to make the bot appear more active.
+
+3. FIX MARKET COVERAGE ACROSS ALL SUPPORTED SPORTS
+
+Audit the complete path from provider response to Telegram delivery. Identify and fix incorrect sport filters, market allowlists, incomplete stat mappings, unsupported-market handling, eligibility rules, deduplication keys, grading prefilters, and delivery filters that silently prevent valid offerings from progressing.
+
+MLB: batter and pitcher markets
+
+The current problem is that baseball alerts appear heavily concentrated on walks and home runs, while other important markets are missing.
+
+Inspect the actual source responses and correct ingestion, normalization, storage, evaluation, history, and delivery handling for all available MLB markets, including:
+
+Batter markets, when offered:
+
+- Hits
+- Home runs
+- Runs
+- RBIs
+- Hits + Runs + RBIs (HRR)
+- Total bases
+- Walks
+- Strikeouts
+- Singles, doubles, and triples
+- Stolen bases
+- Other supported batter props exposed by the source
+
+Pitcher markets, when offered:
+
+- Pitcher strikeouts
+- Walks allowed
+- Hits allowed
+- Earned runs allowed
+- Outs recorded
+- Other supported pitcher props exposed by the source
+
+Maintain the correct distinction between batter and pitcher roles, stat definitions, and settlement rules. Do not map batter strikeouts to pitcher strikeouts or merge different statistical markets simply because their names are similar.
+
+Do not hardcode this list as the complete set of baseball markets. Use it as a minimum diagnostic checklist and discover additional available markets dynamically.
+
+NHL: skater and goalie markets
+
+Investigate why alerts are concentrated on goals when other markets may be available.
+
+Inspect and correctly process all source-supported NHL markets, including:
+
+- Shots on goal
+- Hits
+- Goals
+- Assists
+- Points
+- Blocked shots
+- Goalie saves
+- Other supported player markets exposed by the source
+
+Keep goalie and skater markets distinct. Do not assume a market is available just because it is commonly offered by a sportsbook.
+
+All other supported sports
+
+Apply the same comprehensive discovery and normalization audit to every other supported sport, including basketball, football, tennis, esports, and any additional sports already supported by the existing codebase.
+
+Discover actual source-supported market types instead of relying exclusively on a manually maintained list.
+
+For every sport, identify whether missing alerts result from:
+
+- The source never returning the market.
+- The market being returned but not normalized.
+- The market being rejected by a filter.
+- The market failing storage or deduplication.
+- The market never becoming evaluation-eligible.
+- The market lacking historical evidence.
+- The market failing qualification.
+- The market being blocked after qualification.
+- Telegram delivery failing.
+
+Fix confirmed code defects without fabricating source data or changing unrelated sport-specific behavior.
+
+4. FIX CROSS-PLATFORM LINE COMPARISON
+
+V4 must compare equivalent offerings from PrizePicks and Underdog when the existing sources provide sufficient data.
+
+For each comparison, verify:
+
+- Same player.
+- Same event.
+- Same statistical market.
+- Same statistical definition and settlement rules.
+- Actual line on each platform.
+- Actual platform identity.
+- Actual direction availability.
+- Regular line versus special line classification.
+- Whether the comparison is current and sufficiently complete.
+
+Do not compare unrelated markets merely because their labels appear similar.
+
+Platform-specific availability is mandatory
+
+PrizePicks and Underdog must be treated as separate platforms with independent line and direction availability.
+
+For example, if PrizePicks offers a player at 0.5 home runs but Underdog does not offer an UNDER selection for that market, V4 must not recommend an Underdog UNDER as if it were playable.
+
+Likewise, do not assume that a line visible on Underdog exists on PrizePicks.
+
+Do not automatically reverse the recommended direction to force a comparison. If the recommended direction is unavailable on the named platform, do not present it as a playable pick there.
+
+If only one platform has a confirmed offering, V4 may still evaluate that offering independently. Missing comparison data must not automatically disqualify an otherwise valid pick.
+
+Correct line-difference calculations
+
+Calculate the absolute difference between verified equivalent lines:
+
+"line_difference = abs(platform_a_line - platform_b_line)"
+
+Display the actual difference accurately.
+
+Explain directional value separately. For equivalent markets, a lower line may favor the OVER and a higher line may favor the UNDER, but the correct interpretation depends on the exact stat, direction, settlement rules, and available offerings.
+
+Do not claim that a line difference alone proves a profitable edge.
+
+Fixed payouts, odds, and special lines
+
+Preserve the distinction between:
+
+- PrizePicks fixed-payout offerings.
+- Underdog fixed-payout offerings.
+- Available odds-based offerings, if exposed by an existing source.
+- PrizePicks Goblin and Demon lines.
+- Standard lines and other special offerings.
+
+Do not compare a special line with a standard line as if they were identical. Explicitly label the classification and explain the difference.
+
+Only display odds, payout details, or line classifications when supported by actual source data. Do not invent odds or imply that a source provides them when it does not.
+
+5. REQUIRED TELEGRAM LINE-COMPARISON DISPLAY
+
+Preserve the line-shopping narrative that identifies the platform, line difference, and potential value. Do not replace it with a generic prop card that omits the cross-platform comparison.
+
+Use the following as the target format, populating every field from verified data:
+
+Example: PrizePicks line is lower than Underdog
+
+This line is set at [verified line] on PrizePicks for a fixed payout, but Underdog has [same market] at [verified line] [with verified odds, if available]. Taking the [OVER/UNDER] on PrizePicks at [line] may offer a line advantage compared with the other offering, but verify the available alt lines and player statistics before making a decision.
+
+Diff
+[Actual absolute line difference]
+
+Time
+[Actual event date and start time, with time zone]
+
+Game
+[Actual matchup]
+
+Player
+[Actual player]
+
+Sport / Market
+[Actual sport and statistical market]
+
+Platform
+[Actual platform and offering type]
+
+L5 ([recommended direction])
+[Hit percentage] ([hits]/[valid games])
+
+L10 ([recommended direction])
+[Hit percentage] ([hits]/[valid games])
+
+L20 ([recommended direction])
+[Hit percentage] ([hits]/[valid games])
+
+L30 ([recommended direction])
+[Hit percentage] ([hits]/[valid games])
+
+H2H ([recommended direction])
+[Hit percentage] ([hits]/[valid matchups]) or N/A
+
+[Additional existing market-comparison, odds, or context fields only when reliable data is available.]
+
+Example: Underdog line is lower than PrizePicks
+
+This line is set at [verified line] on Underdog for a fixed payout, but PrizePicks has [same market] at [verified line] [with the correct Goblin/Demon/standard classification]. Taking the [OVER/UNDER] on Underdog at [line] may offer a line advantage compared with the other offering, but verify the available alt lines and player statistics before making a decision.
+
+Diff
+[Actual absolute line difference]
+
+Continue with the same event, player, market, platform, and historical-stat fields.
+
+These are templates, not hardcoded messages. Populate them from current verified records. If the other platform has no equivalent offering, do not fabricate a comparison; use the single-platform format supported by the existing bot.
+
+Do not say that a line is favored at particular odds unless those odds were actually retrieved. Do not claim that PickFinder or any other external tool was checked unless V4 actually has that data.
+
+6. REQUIRED HISTORICAL WINDOWS: L5, L10, L20, L30, H2H
+
+Preserve and implement the five requested history windows:
+
+- L5 — last 5 valid games.
+- L10 — last 10 valid games.
+- L20 — last 20 valid games.
+- L30 — last 30 valid games.
+- H2H — valid head-to-head games against the current opponent.
+
+Do not substitute L15 or season-to-date results for these requested windows. Do not silently omit a window simply because another window already exists.
+
+For each window, display the actual result sequence when the existing data supports it, the percentage for the recommended direction, and the correct numerator and denominator.
+
+For example:
+
+L5 (UNDER): 0, 0, 0, 0, 1 · 80% (4/5)
+
+For a 0.5 line, assuming the displayed numbers are the player's actual counts, four zero results would be UNDER hits. They would not be OVER hits.
+
+Historical calculation requirements
+
+- Calculate hit rates against the exact offered line and recommended direction.
+- Respect the market's actual settlement rules.
+- Use completed, valid games only.
+- Exclude DNPs, missing results, and invalid records from the denominator.
+- Handle pushes and special settlement cases according to the market's rules; do not automatically count them as hits.
+- Keep chronological ordering consistent and documented.
+- Ensure L5 is based on the five most recent valid games, L10 on the ten most recent, and so forth.
+- Compute H2H using the actual opponent and valid prior meetings.
+- Display N/A when there is insufficient valid history.
+- Never fabricate results or treat missing history as zero.
+- Never label a player's raw scoring frequency as the hit rate for the recommended direction unless the two genuinely match.
+
+When a window has fewer valid games than requested, display the actual sample size and do not imply that a complete sample exists.
+
+If the current history source cannot support a requested window, record that limitation and investigate whether the existing sources already provide the missing data. Do not add a paid data provider.
+
+7. FIND AND FIX MARKET NORMALIZATION AND STORAGE GAPS
+
+Audit the market identifiers returned by each existing provider and compare them against V4's normalized stat definitions.
+
+Look for issues such as:
+
+- Hits mapped to an unrelated baseball market or discarded.
+- HRR incorrectly mapped to total bases, runs, or RBIs.
+- Pitcher strikeouts confused with batter strikeouts.
+- Shots on goal confused with total shots or another hockey stat.
+- Hits incorrectly mapped to goals or another NHL stat.
+- Different source labels for the same supported statistical market failing to normalize.
+- Unsupported identifiers being discarded without a diagnostic.
+- Deduplication keys incorrectly merging distinct lines, platforms, directions, or market classifications.
+- A valid offering being marked as already processed because another platform has the same player and stat.
+- Player, event, team, or market aliases failing to resolve.
+- Historical records being attached to the wrong player, opponent, sport, or stat.
+
+Normalization must preserve enough identity to distinguish genuinely different offerings.
+
+At minimum, the normalized record should retain, where available:
+
+- Sport.
+- Event and opponent.
+- Player identity.
+- Player role where relevant.
+- Original source market identifier.
+- Normalized statistical market.
+- Original source label.
+- Platform.
+- Line.
+- Direction availability.
+- Standard/Goblin/Demon or other line classification.
+- Source and observation timestamp.
+- Source record identity.
+- Evaluation and qualification status.
+
+Do not erase original source information during normalization. It is needed for debugging and reconciliation.
+
+8. PRESERVE THE EXISTING EVALUATION AND EVIDENCE PIPELINE
+
+Every observed offering must progress through the existing pipeline when eligible.
+
+Use the actual stage names and equivalent internal statuses already present in V4. The intended diagnostic progression is:
+
+"OBSERVED → NORMALIZED → STORED → EVALUATION_ELIGIBLE → EVALUATED → EVIDENCE_CHECK / HISTORY → ANALYZED → DIRECTIONAL → QUALIFIED → ACTIONABLE → ALERT_CREATED → DELIVERY_ELIGIBLE → TELEGRAM_SENT"
+
+Do not force every observation to reach every stage. An offering can be rejected at a legitimate stage, but the reason must be traceable.
+
+Requirements:
+
+- Do not let Underdog polling start or control unrelated grading jobs.
+- Do not let a market-discovery job start, stop, or recursively trigger itself.
+- Do not create duplicate observations or duplicate alerts for the same actual offering.
+- Do not mark an offering evaluated when no evaluation occurred.
+- Do not report successful processing merely because a job ran.
+- Preserve existing scheduler behavior, provider quotas, cooldowns, and rate limits.
+- Preserve PropLine's existing quota and cooldown safeguards.
+- Do not bypass a provider's "Retry-After" response.
+- Do not re-enable The Odds API.
+- Do not introduce new paid providers.
+- Do not weaken evidence thresholds or alter unrelated grading logic.
+- Do not change established MLB mappings, scoring, thresholds, or delivery rules except where a confirmed defect directly prevents correct market coverage or calculation.
+
+When a valid market has insufficient history or evidence, record the specific reason. Do not fabricate evidence to force an alert.
+
+9. ADD MARKET-COVERAGE DIAGNOSTICS
+
+Implement or extend diagnostics so V4 can show actual coverage by sport, platform, market, event, and line.
+
+Track at least:
+
+- Raw offerings observed.
+- Unique offerings observed.
+- Normalization successes and failures.
+- Stored offerings.
+- Evaluation-eligible offerings.
+- Offerings evaluated.
+- Offerings with history available.
+- Offerings rejected for insufficient evidence.
+- Offerings qualified.
+- Alerts created.
+- Alerts blocked from delivery and the reason.
+- Alerts successfully sent.
+
+Where possible, report both unique offerings and repeated observations so repeated polling cannot make market coverage appear larger than it is.
+
+Provide a market inventory showing which markets the sources actually expose for each supported sport and platform.
+
+For every missing market identified in diagnostics, distinguish between:
+
+1. The source did not provide the market.
+2. The source provided it but normalization failed.
+3. The offering was rejected by a filter.
+4. Storage or deduplication discarded it.
+5. It never became evaluation-eligible.
+6. It lacked history or evidence.
+7. It failed qualification.
+8. It qualified but was blocked or failed during delivery.
+
+A market is not considered fully scanned merely because one or two props from it were observed.
+
+Do not describe a market as unavailable unless the source response or a verified source limitation supports that conclusion. Do not describe a market as scanned when the source coverage is unknown.
+
+10. KEEP THE BOT'S PURPOSE AND ALERT RULES INTACT
+
+V4 is a player-prop evidence and line-comparison bot, not a slip builder.
+
+- Send individual picks only.
+- Never create or send 2-man or 3-man slips.
+- Preserve the existing Telegram workflow and alert delivery.
+- Do not add Strong Bet labels, stars, tiers, or score badges.
+- Do not introduce new delivery blockers.
+- Do not lower qualification thresholds to increase alert volume.
+- Do not generate a pick just because two platforms have different lines.
+- Do not treat a line difference as proof of expected value.
+- Do not recommend a direction that is not actually available on the stated platform.
+- Continue monitoring all supported sports rather than restricting scanning to MLB or a small preferred market list.
+
+Retain the existing footer:
+
+"Monitoring player props across multiple sports. Not betting advice."
+
+11. TESTING AND ACCEPTANCE CRITERIA
+
+Add or update automated tests using representative fixtures from the existing providers. Avoid relying exclusively on live API calls.
+
+Test the following:
+
+1. Every available offering in a fixture is discovered, including markets that do not qualify for an alert.
+2. Multiple distinct lines for the same player and stat remain distinct.
+3. Equivalent markets with different source labels normalize correctly.
+4. Batter and pitcher markets remain distinct.
+5. All supported market types in representative MLB fixtures can progress through the pipeline.
+6. NHL hits and shots on goal are not dropped simply because goals are also present.
+7. Other supported sports and market types are not restricted to a preferred-market shortlist.
+8. PrizePicks and Underdog lines and direction availability remain platform-specific.
+9. Standard, Goblin, and Demon classifications are preserved where available.
+10. Absolute line differences are calculated correctly.
+11. L5, L10, L20, L30, and H2H use the correct valid games and denominators.
+12. OVER and UNDER hit rates are calculated independently and correctly.
+13. Missing history, DNPs, pushes, and insufficient sample sizes are handled correctly.
+14. A market rejected at any stage receives a traceable reason.
+15. Qualified picks can still be delivered through the existing Telegram pipeline.
+16. Duplicate observations do not create duplicate alerts.
+17. Provider quotas, cooldowns, and scheduler protections remain intact.
+18. No 2-man or 3-man slips are generated.
+
+Do not make live API access a requirement for every automated test. Use deterministic fixtures and the existing codebase's testing approach.
+
+12. IMPLEMENTATION RULES
+
+- Inspect the existing architecture before editing.
+- Make changes in the current V4 codebase and reuse existing providers, models, services, and database tables wherever appropriate.
+- Implement the fixes; do not stop after reporting findings.
+- Do not rewrite the entire bot.
+- Do not delete existing data or reset the database.
+- Do not add The Odds API or another paid data provider.
+- Do not bypass existing source quotas or cooldowns.
+- Do not weaken the evidence pipeline to manufacture alerts.
+- Do not require live Railway verification to consider this task complete.
+- Run relevant automated tests and report the actual results.
+- Report changed files, root causes found, fixes implemented, tests passed or failed, and remaining source limitations.
+
+Final acceptance standard
+
+V4 must discover and account for all player-prop markets and distinct lines actually exposed by its existing sources across all supported sports and platforms, then evaluate every eligible offering using the existing evidence and qualification standards.
+
+The bot must not restrict discovery to the props it already believes are best. It must identify missing markets such as baseball hits, HRR, and pitcher strikeouts or hockey hits and shots on goal when the source provides them, and fix any downstream code defects preventing those markets from being processed.
+
+Only qualified, genuinely available individual picks should reach Telegram. Every missing offering or rejected opportunity must be diagnosable, and every displayed comparison and historical statistic must be grounded in verified data.
+
+Implement the changes now and provide a concise implementation report when finished.
