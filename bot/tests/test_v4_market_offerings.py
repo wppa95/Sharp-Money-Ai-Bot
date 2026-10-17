@@ -634,7 +634,7 @@ def test_standard_priority_does_not_duplicate_or_merge_platform_candidates():
 @pytest.mark.asyncio
 async def test_durable_worker_rechecks_live_offered_direction_before_telegram(monkeypatch):
     import alerts
-    from unittest.mock import MagicMock
+    from unittest.mock import MagicMock, PropertyMock
 
     source = prop(
         provider="Underdog",
@@ -690,7 +690,11 @@ async def test_durable_worker_rechecks_live_offered_direction_before_telegram(mo
         "game_status": "",
         "fetched_at": fetched_at,
     })
-    monkeypatch.setattr(alerts.config, "allowed_user_ids", [123])
+    monkeypatch.setattr(
+        alerts.config.__class__,
+        "allowed_user_ids",
+        PropertyMock(return_value=[123]),
+    )
     monkeypatch.setattr(
         "engine.timing.is_game_alertable", lambda *a, **k: (True, "")
     )
