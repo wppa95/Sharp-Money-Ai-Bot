@@ -17,6 +17,7 @@ from engine import game_reminders as reminders
 from engine import timing
 from engine.delivery_evidence import has_qualifying_directional_pick
 from engine.player_props_pipeline import CanonicalPlayerProp
+from tests.offering_fixtures import seed_current_offering
 from engine.strongest_pick import is_strong_actionable_pick
 from engine.player_results import compute_hit_rates
 from engine.ud_bet_decision import make_ud_bet_decision
@@ -119,6 +120,20 @@ async def audit_rows(db):
 @pytest.mark.parametrize("hours", [1, 8])
 async def test_today_pick_immediate_without_wait(db, clock, monkeypatch, provider, hours):
     q = quote(clock, provider, game_time=(clock[0]+timedelta(hours=hours)).replace(tzinfo=None))
+    seed_current_offering(
+        provider=q.provider,
+        source_id=q.external_id,
+        event_id=q.game_id,
+        player_name=q.player_name,
+        sport=q.sport,
+        team=q.team,
+        stat_type=q.stat_type,
+        line_value=q.line_value,
+        direction="OVER",
+        game_time=q.game_time,
+        line_variant=q.line_variant,
+        fetched_at=q.fetched_at,
+    )
     await db.track_prop_records([dict(
         provider=q.provider, external_id=q.external_id, player_name=q.player_name,
         sport=q.sport, team=q.team, stat_type=q.stat_type, line_value=q.line_value,

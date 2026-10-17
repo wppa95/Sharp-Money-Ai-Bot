@@ -10,6 +10,8 @@ import pytest
 
 from alerts import AlertDelivery
 from commands import _is_upcoming_game
+from engine.player_props_pipeline import CanonicalPlayerProp
+from engine.offering_coverage import coverage
 from engine.timing import is_game_alertable
 from prizepicks import PPEdgeOpportunity, PrizePicksLine
 
@@ -73,6 +75,33 @@ def _delivery() -> AlertDelivery:
     return AlertDelivery(db, MagicMock(), [123])
 
 
+def _seed_underdog_offer(
+    player: str, sport: str, stat: str, line: float, game_time: datetime
+) -> tuple[str, str]:
+    source_id = f"pregame:{sport}:{player}:{stat}"
+    event_id = f"pregame-event:{sport}:{player}"
+    coverage.clear_scope("Underdog", sport)
+    coverage.canonicalize_player_props("Underdog", [
+        CanonicalPlayerProp(
+            provider="Underdog",
+            external_id=source_id,
+            game_id=event_id,
+            player_name=player,
+            team="TEAM",
+            sport=sport,
+            stat_type=stat,
+            line_value=line,
+            line_variant="",
+            game_time=game_time,
+            provider_status="scheduled",
+            fetched_at=datetime.utcnow(),
+            raw=None,
+            available_directions=("OVER",),
+        )
+    ])
+    return source_id, event_id
+
+
 def test_strict_timing_rejects_unknown_event_state():
     allowed, reason = is_game_alertable(
         None,
@@ -123,6 +152,10 @@ def test_command_views_reject_unknown_and_started_props():
 @pytest.mark.asyncio
 async def test_pregame_underdog_prop_can_reach_delivery():
     delivery = _delivery()
+    game_time = _future()
+    source_id, event_id = _seed_underdog_offer(
+        "UD Player", "NBA", "Points", 21.5, game_time
+    )
     with (
         patch("reporting.is_current_reporting_day", return_value=True),
         patch("alert_scope_filter.check", return_value=SimpleNamespace(allowed=True)),
@@ -143,7 +176,9 @@ async def test_pregame_underdog_prop_can_reach_delivery():
             "Points",
             20.5,
             21.5,
-            game_time=_future(),
+            game_time=game_time,
+            source_id=source_id,
+            event_id=event_id,
             strict_pregame=True,
             validation=SimpleNamespace(
                 has_supporting_data=True,
@@ -181,6 +216,10 @@ async def test_pregame_prizepicks_prop_can_reach_delivery():
 @pytest.mark.parametrize("sport", ["CS", "TENNIS", "FIFA"])
 async def test_scheduled_non_mlb_underdog_prop_can_reach_delivery(sport):
     delivery = _delivery()
+    game_time = _future()
+    source_id, event_id = _seed_underdog_offer(
+        "UD Player", sport, "Points", 21.5, game_time
+    )
     with (
         patch("reporting.is_current_reporting_day", return_value=True),
         patch("alert_scope_filter.check", return_value=SimpleNamespace(allowed=True)),
@@ -201,7 +240,9 @@ async def test_scheduled_non_mlb_underdog_prop_can_reach_delivery(sport):
             "Points",
             20.5,
             21.5,
-            game_time=_future(),
+            game_time=game_time,
+            source_id=source_id,
+            event_id=event_id,
             game_status="SCHEDULED",
             strict_pregame=True,
             validation=SimpleNamespace(
@@ -308,6 +349,9 @@ async def test_unknown_prizepicks_state_cannot_bypass_pregame_protection():
 async def test_underdog_delivery_allows_qualified_events_beyond_two_hours():
     delivery = _delivery()
     game_time = datetime.utcnow() + timedelta(hours=3)
+    source_id, event_id = _seed_underdog_offer(
+        "UD Player", "NBA", "Points", 21.5, game_time
+    )
     with (
         patch("reporting.is_current_reporting_day", return_value=True),
         patch("alerts.config.ALERT_WINDOW_MAX_MINUTES", 120),
@@ -324,6 +368,8 @@ async def test_underdog_delivery_allows_qualified_events_beyond_two_hours():
             20.5,
             21.5,
             game_time=game_time,
+            source_id=source_id,
+            event_id=event_id,
             strict_pregame=True,
             validation=SimpleNamespace(
                 has_supporting_data=True,
