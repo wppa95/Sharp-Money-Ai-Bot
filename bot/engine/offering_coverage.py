@@ -195,7 +195,12 @@ class OfferingCoverage:
             return None, "EXACT_OFFERING_IDENTITY_INCOMPLETE"
 
         same_source = []
-        for row in self.rows.values():
+        for key in self.index.get(
+            self._identity(provider, player, sport, stat, line), ()
+        ):
+            row = self.rows.get(key)
+            if row is None:
+                continue
             if str(getattr(row, "provider", "")).casefold() != provider.casefold():
                 continue
             if str(getattr(row, "external_id", "") or "").strip() != str(source_id).strip():
@@ -210,9 +215,10 @@ class OfferingCoverage:
                 continue
             if _utc(getattr(row, "game_time", None)) != _utc(game_time):
                 continue
-            same_source.append(row)
+            if getattr(row, "line_value", None) == line:
+                same_source.append(row)
 
-        exact_line = [row for row in same_source if getattr(row, "line_value", None) == line]
+        exact_line = same_source
         if not exact_line:
             return None, "EXACT_OFFERING_UNVERIFIED"
 
@@ -419,7 +425,7 @@ class OfferingCoverage:
 coverage = OfferingCoverage()
 
 
-def _candidate_source(candidate: dict) -> tuple[Any, str, str, str, str, str, str]:
+def _candidate_source(candidate: dict) -> tuple[Any, str, str, str, str, str, str, str]:
     prop = candidate.get("prop") or candidate.get("snap")
     provider = str(
         candidate.get("provider")
