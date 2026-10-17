@@ -719,6 +719,18 @@ def _stored_opportunity_external_id(external_id: str, provider: Optional[str]) -
     return value
 
 
+def _provider_source_id_variants(
+    external_id: str, provider: Optional[str]
+) -> tuple[str, ...]:
+    """Return the raw and canonical PP ID spellings for exact history lookup."""
+    value = str(external_id or "").strip()
+    if str(provider or "").strip().casefold() != "prizepicks":
+        return (value,) if value else ()
+    canonical = _stored_opportunity_external_id(value, provider)
+    raw = canonical[len(_PRIZEPICKS_EXTERNAL_PREFIX):]
+    return tuple(dict.fromkeys(item for item in (value, raw, canonical) if item))
+
+
 def _dedup_player_key(player_name: str, provider: Optional[str]) -> str:
     """Provider-scope the legacy three-part in-memory dedup key."""
     if str(provider or "").strip().lower() == "prizepicks":
