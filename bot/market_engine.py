@@ -7496,11 +7496,7 @@ async def underdog_job(context) -> None:
                     _dq_player, _dq_sport, _dq_st, _dq_line_val,
                     provider=getattr(_dq_snap, "provider", None) or "Underdog",
                     source_id=str(_dq_ext_id or ""),
-                    event_id=str(
-                        getattr(_dq_snap, "event", "")
-                        or getattr(_dq_snap, "game_id", "")
-                        or ""
-                    ),
+                    event_id=_snapshot_event_id(_dq_snap),
                     direction=str(_dq_direction or ""),
                 ):
                     _n_dq_deferred += 1
@@ -7538,11 +7534,7 @@ async def underdog_job(context) -> None:
                         intelligence_trace  = _dq_intel,
                         market_confirmation = _dq_odds,
                         source_id           = str(_dq_ext_id or ""),
-                        event_id            = str(
-                            getattr(_dq_snap, "event", "")
-                            or getattr(_dq_snap, "game_id", "")
-                            or ""
-                        ),
+                        event_id            = _snapshot_event_id(_dq_snap),
                         delivery_path       = (
                             "new" if _dq_path == "new"
                             else "line_change" if _dq_path == "lc"
@@ -7567,11 +7559,7 @@ async def underdog_job(context) -> None:
                         _dq_line_val,
                         provider=getattr(_dq_snap, "provider", None) or "Underdog",
                         source_id=str(_dq_ext_id or ""),
-                        event_id=str(
-                            getattr(_dq_snap, "event", "")
-                            or getattr(_dq_snap, "game_id", "")
-                            or ""
-                        ),
+                    event_id=_snapshot_event_id(_dq_snap),
                         direction=str(_dq_direction or ""),
                     )
                     logger.warning(
@@ -7596,11 +7584,7 @@ async def underdog_job(context) -> None:
                         _dq_line_val,
                         provider=getattr(_dq_snap, "provider", None) or "Underdog",
                         source_id=str(_dq_ext_id or ""),
-                        event_id=str(
-                            getattr(_dq_snap, "event", "")
-                            or getattr(_dq_snap, "game_id", "")
-                            or ""
-                        ),
+                        event_id=_snapshot_event_id(_dq_snap),
                         direction=str(_dq_direction or ""),
                     )
                     _n_fully_qualified += 1
@@ -7702,11 +7686,7 @@ async def underdog_job(context) -> None:
                         _dq_line_val,
                         provider=getattr(_dq_snap, "provider", None) or "Underdog",
                         source_id=str(_dq_ext_id or ""),
-                        event_id=str(
-                            getattr(_dq_snap, "event", "")
-                            or getattr(_dq_snap, "game_id", "")
-                            or ""
-                        ),
+                        event_id=_snapshot_event_id(_dq_snap),
                         direction=str(_dq_direction or ""),
                     )
                     _n_dq_deferred += 1
