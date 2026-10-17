@@ -7,6 +7,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from tests.offering_fixtures import seed_current_offering
 
 
 def _directional_decision(direction: str = "OVER") -> SimpleNamespace:
