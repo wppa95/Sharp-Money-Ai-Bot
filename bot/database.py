@@ -4921,15 +4921,13 @@ class Database:
             for change in changes:
                 evaluation_id = str(change.get("evaluation_id") or "")
                 disposition = str(change.get("disposition") or "")
-                identity_key = str(change.get("pick_identity_key") or "")
                 if (
                     not evaluation_id
                     or disposition not in allowed
-                    or not identity_key
                 ):
                     continue
                 row = await s.get(CandidateLifecycleRecord, evaluation_id)
-                if row is None or row.pick_identity_key != identity_key:
+                if row is None:
                     continue
                 if row.disposition in terminal:
                     continue

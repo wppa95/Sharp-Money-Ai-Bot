@@ -2071,6 +2071,7 @@ class AlertDelivery:
         line_variant: Optional[str] = None,
         defer_delivery: bool = False,
         delivery_buffer: Optional[list[dict]] = None,
+        candidate_lifecycle_id: Optional[str] = None,
     ) -> "DeliveryResult":
         """
         Full Underdog prop alert pipeline:
@@ -2232,6 +2233,24 @@ class AlertDelivery:
             )
             or ""
         )
+        if (
+            source_upper == "PRIZEPICKS"
+            and line_variant is None
+            and not (
+                isinstance(evidence_snapshot, dict)
+                and "line_variant" in evidence_snapshot
+            )
+        ):
+            return DeliveryResult(
+                sent=False,
+                filtered=True,
+                filtered_reason="PrizePicks line-variant identity is missing",
+            )
+        if candidate_lifecycle_id:
+            evidence_snapshot = {
+                **(evidence_snapshot or {}),
+                "candidate_lifecycle_id": str(candidate_lifecycle_id),
+            }
 
         # Telegram is the final edge of the durable tracking/grading funnel.
         # A prior send suppresses this exact directional source line only when
@@ -2424,26 +2443,25 @@ class AlertDelivery:
                     filtered=True,
                     filtered_reason="Durable delivery requires source, event, and game-time identity",
                 )
-            normalized_identity = {
-                "provider": source,
-                "source_id": source_id_value,
-                "event_id": event_id_value,
-                "player_name": str(player_name).strip().casefold(),
-                "sport": str(sport).strip().upper(),
-                "stat_type": str(stat_type).strip().casefold(),
-                "line_variant": (
-                    _line_variant if source_upper == "PRIZEPICKS" else ""
-                ),
-                "line_value": _ud_line_value,
-                "direction": _direction,
-            }
-            pick_key = hashlib.sha256(
-                json.dumps(
-                    normalized_identity,
-                    sort_keys=True,
-                    separators=(",", ":"),
-                ).encode("utf-8")
-            ).hexdigest()
+            from database import (
+                _stored_opportunity_external_id,
+                telegram_pick_queue_key,
+            )
+
+            normalized_line_variant = (
+                _line_variant if source_upper == "PRIZEPICKS" else ""
+            )
+            pick_key = telegram_pick_queue_key(
+                provider=source,
+                source_id=source_id_value,
+                event_id=event_id_value,
+                player_name=str(player_name),
+                sport=str(sport),
+                stat_type=str(stat_type),
+                line_variant=normalized_line_variant,
+                line_value=_ud_line_value,
+                direction=_direction,
+            )
             available_directions = getattr(_offering, "available_directions", None)
             if available_directions is not None:
                 available_directions = sorted(
@@ -2467,6 +2485,18 @@ class AlertDelivery:
                     "passed": True,
                     "available_directions": available_directions,
                 },
+                "source_line_identity": {
+                    "provider": source,
+                    "source_id": (
+                        _stored_opportunity_external_id(source_id_value, source)
+                        if source_upper == "PRIZEPICKS"
+                        else source_id_value
+                    ),
+                    "provider_source_id": source_id_value,
+                    "event_id": event_id_value,
+                    "line": _ud_line_value,
+                    "line_variant": normalized_line_variant,
+                },
                 "decision_at_qualification": {
                     "confidence": getattr(decision, "confidence", None),
                     "tier": getattr(decision, "decision_tier", None),
@@ -2487,7 +2517,7 @@ class AlertDelivery:
                 **evidence_snapshot,
                 "direction": _direction,
                 "line": _ud_line_value,
-                "line_variant": normalized_identity["line_variant"],
+                "line_variant": normalized_line_variant,
                 "source_event_id": event_id_value,
                 "source_id": source_id_value,
                 **_reminder_snapshot(
@@ -2513,7 +2543,7 @@ class AlertDelivery:
                 "player_name": str(player_name),
                 "sport": str(sport),
                 "stat_type": str(stat_type),
-                "line_variant": normalized_identity["line_variant"],
+                "line_variant": normalized_line_variant,
                 "line_value": _ud_line_value,
                 "direction": _direction,
                 "delivery_path": (
