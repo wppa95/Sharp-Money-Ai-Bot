@@ -13,6 +13,7 @@ from sqlalchemy import select
 
 import alerts
 from database import (
+    CandidateLifecycleRecord,
     Database,
     PropLineHistory,
     PropOpportunityLog,
@@ -21,6 +22,7 @@ from database import (
     TelegramPickDeliveryAttempt,
     TelegramPickDeliveryRuntime,
     UnderdogSnapshotRecord,
+    telegram_pick_queue_key,
 )
 
 
@@ -60,6 +62,7 @@ def _item(
     stat: str = "Goals",
     line: float = 1.5,
     direction: str = "OVER",
+    line_variant: str = "",
     game_time: datetime | None = None,
     fetched_at: datetime | None = None,
     rank: int = 1,
@@ -67,9 +70,16 @@ def _item(
 ) -> dict:
     now = datetime.utcnow()
     return {
-        "pick_key": (
-            f"{provider}:{source_id}:{event_id}:{player}:{sport}:{stat}:"
-            f"{line}:{direction}"
+        "pick_key": telegram_pick_queue_key(
+            provider=provider,
+            source_id=source_id,
+            event_id=event_id,
+            player_name=player,
+            sport=sport,
+            stat_type=stat,
+            line_variant=line_variant,
+            line_value=line,
+            direction=direction,
         ),
         "provider": provider,
         "source_id": source_id,
@@ -77,7 +87,7 @@ def _item(
         "player_name": player,
         "sport": sport,
         "stat_type": stat,
-        "line_variant": "",
+        "line_variant": line_variant,
         "line_value": line,
         "direction": direction,
         "delivery_path": provider.lower(),
@@ -164,7 +174,7 @@ async def _seed_pp_history(db: Database, item: dict, *, line_variant=None):
         session.add(
             PropLineHistory(
                 provider="PrizePicks",
-                product="PLAYER_PROPS",
+                product="Player Props",
                 sport=item["sport"],
                 player_name=item["player_name"],
                 team="",
@@ -175,6 +185,7 @@ async def _seed_pp_history(db: Database, item: dict, *, line_variant=None):
                 external_id=item["source_id"],
                 game_id=item["event_id"],
                 line_variant=variant,
+                removed=False,
                 fetched_at=item["source_fetched_at"],
                 first_seen=item["source_fetched_at"],
                 last_seen=item["source_fetched_at"],
@@ -212,6 +223,10 @@ async def test_enqueue_is_idempotent_and_fair_across_platform_and_sport(tmp_path
             {**item, "source_fetched_at": now, "game_time": now + timedelta(hours=2)}
             for item in candidates
         ]
+        for candidate in candidates:
+            if candidate["provider"] == "PrizePicks":
+                await _seed_pp_history(db, candidate)
+                await _seed_opportunity(db, candidate)
         ids = await db.enqueue_telegram_pick_deliveries(candidates + [candidates[0]])
         claim_start = datetime.utcnow() + timedelta(seconds=1)
         assert ids[0] == ids[3]
