@@ -88,6 +88,35 @@ def _make_delivery(db, chat_ids=None):
     return AlertDelivery(db, bot, chat_ids or [123456])
 
 
+def _seed_test_offer(
+    provider: str,
+    player: str,
+    sport: str,
+    stat: str,
+    line: float,
+    *,
+    direction: str = "OVER",
+):
+    from tests.offering_fixtures import seed_current_offering
+
+    source_id = f"limit-test:{provider}:{sport}:{player}:{stat}"
+    event_id = f"limit-test-event:{provider}:{sport}:{player}"
+    game_time = datetime.utcnow() + timedelta(minutes=60)
+    seed_current_offering(
+        provider=provider,
+        source_id=source_id,
+        event_id=event_id,
+        player_name=player,
+        sport=sport,
+        team="TEAM",
+        stat_type=stat,
+        line_value=line,
+        direction=direction,
+        game_time=game_time,
+    )
+    return source_id, event_id, game_time
+
+
 # ── Scope filter + normaliser stubs ──────────────────────────────────────────
 
 def _patch_scope_allowed():
@@ -275,12 +304,17 @@ async def test_primary_platforms_have_no_legacy_daily_cap(source, legacy_limit):
                   return_value={"sent": 1, "failed": 0}),
             patch("engine.timing.is_game_alertable", return_value=(True, "")),
         ):
+            source_id, event_id, game_time = _seed_test_offer(
+                source, "Test Player", "NBA", "Points", 26.0
+            )
             result = await delivery.deliver_underdog(
                 "Test Player", "TeamA", "NBA", "Points",
                 25.5, 26.0,
                 source=source,
                 line_variant="",
-                game_time=None,
+                source_id=source_id,
+                event_id=event_id,
+                game_time=game_time,
                 score=MagicMock(total=75),
                 validation=SimpleNamespace(
                     has_supporting_data=True,
@@ -313,10 +347,15 @@ async def test_underdog_allowed_when_under_cap():
               return_value={"sent": 1, "failed": 0}),
         patch("engine.timing.is_game_alertable", return_value=(True, "")),
     ):
+        source_id, event_id, game_time = _seed_test_offer(
+            "Underdog", "Test Player", "NBA", "Points", 26.0
+        )
         result = await delivery.deliver_underdog(
             "Test Player", "TeamA", "NBA", "Points",
             25.5, 26.0,
-            game_time=None,
+            source_id=source_id,
+            event_id=event_id,
+            game_time=game_time,
             score=MagicMock(total=75),
             validation=SimpleNamespace(
                 has_supporting_data=True,
@@ -445,6 +484,9 @@ async def test_ncaaf_alias_is_delivered_as_active_cfb_scope():
     db = _make_db()
     delivery = _make_delivery(db)
 
+    source_id, event_id, game_time = _seed_test_offer(
+        "Underdog", "Football Player", "NCAAF", "Points", 26.0
+    )
     result = await delivery.deliver_underdog(
         "Football Player",
         "TeamA",
@@ -452,6 +494,9 @@ async def test_ncaaf_alias_is_delivered_as_active_cfb_scope():
         "Points",
         25.5,
         26.0,
+        source_id=source_id,
+        event_id=event_id,
+        game_time=game_time,
         validation=SimpleNamespace(
             has_supporting_data=True,
             data_source="primary",

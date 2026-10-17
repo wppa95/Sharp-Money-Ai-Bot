@@ -36,8 +36,9 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 os.environ.setdefault("TELEGRAM_TOKEN", "test:token")
 
 import asyncio
+import inspect
 import pytest
-from datetime import datetime
+from datetime import datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -55,6 +56,67 @@ def isolate_calendar_policy_from_legacy_transport_mocks(monkeypatch):
     # These transport/formatting mocks omit event times. Real Central-day
     # eligibility for both sources is covered in test_v4_final_policy.
     monkeypatch.setattr("reporting.is_current_reporting_day", lambda *_a, **_k: True)
+
+
+@pytest.fixture(autouse=True)
+def seed_explicit_offers_for_transport_tests(monkeypatch):
+    """Legacy transport tests use a synthetic, exact current source offer."""
+    from tests.offering_fixtures import seed_current_offering
+
+    original = AlertDelivery.deliver_underdog
+    signature = inspect.signature(original)
+    sequence = iter(range(1, 1_000_000))
+
+    async def with_current_offer(self, *args, **kwargs):
+        bound = signature.bind(self, *args, **kwargs)
+        bound.apply_defaults()
+        values = bound.arguments
+        if (
+            not values["removed"]
+            and not values["market_move_only"]
+            and values["validation"] is not None
+            and values["decision"] is not None
+            and values["new_line"] is not None
+            and float(values["new_line"] or 0) > 0
+        ):
+            provider = str(values["source"] or "Underdog")
+            sport = str(values["sport"])
+            source_id = str(
+                values["source_id"]
+                or f"transport-test-{next(sequence)}"
+            )
+            event_id = str(
+                values["event_id"]
+                or f"transport-test-event-{next(sequence)}"
+            )
+            game_time = values["game_time"] or (
+                datetime.utcnow() + timedelta(minutes=60)
+            )
+            direction = str(
+                getattr(values["decision"], "recommendation", "") or "OVER"
+            ).upper()
+            variant = str(values["line_variant"] or "")
+            seed_current_offering(
+                provider=provider,
+                source_id=source_id,
+                event_id=event_id,
+                player_name=str(values["player_name"]),
+                sport=sport,
+                team=str(values["team"] or ""),
+                stat_type=str(values["stat_type"]),
+                line_value=float(values["new_line"]),
+                direction=direction,
+                game_time=game_time,
+                line_variant=variant,
+                fetched_at=values["fetched_at"] or datetime.utcnow(),
+            )
+            values["source_id"] = source_id
+            values["event_id"] = event_id
+            values["game_time"] = game_time
+            values["line_variant"] = variant
+        return await original(*bound.args, **bound.kwargs)
+
+    monkeypatch.setattr(AlertDelivery, "deliver_underdog", with_current_offer)
 
 
 def _make_pp_line(
