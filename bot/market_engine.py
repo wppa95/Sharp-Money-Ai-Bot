@@ -8864,11 +8864,7 @@ async def _stable_refresh_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                          or getattr(_sr_snap, "id", None)
                          or ""
                      ),
-                     event_id            = str(
-                         getattr(_sr_snap, "event", "")
-                         or getattr(_sr_snap, "game_id", "")
-                         or ""
-                     ),
+                     event_id            = _snapshot_event_id(_sr_snap),
                      delivery_path       = "standing",
                     defer_delivery      = True,
                 )
@@ -8885,11 +8881,7 @@ async def _stable_refresh_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                         or getattr(_sr_snap, "id", None)
                         or ""
                     ),
-                    event_id=str(
-                        getattr(_sr_snap, "event", "")
-                        or getattr(_sr_snap, "game_id", "")
-                        or ""
-                    ),
+                    event_id=_snapshot_event_id(_sr_snap),
                     direction=str(getattr(_sr_dec, "recommendation", "") or ""),
                 )
                 logger.warning(
@@ -8933,11 +8925,7 @@ async def _stable_refresh_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                         or getattr(_sr_snap, "id", None)
                         or ""
                     ),
-                    event_id=str(
-                        getattr(_sr_snap, "event", "")
-                        or getattr(_sr_snap, "game_id", "")
-                        or ""
-                    ),
+                    event_id=_snapshot_event_id(_sr_snap),
                     direction=str(getattr(_sr_dec, "recommendation", "") or ""),
                 )
 
@@ -9757,7 +9745,7 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                          _fpr_player, _fpr_sport, _fpr_stat, _fpr_line,
                          provider=_fpr_provider,
                          source_id=str(getattr(_fpr_snap, "external_id", None) or getattr(_fpr_snap, "id", None) or ""),
-                         event_id=str(getattr(_fpr_snap, "event", "") or getattr(_fpr_snap, "game_id", "") or ""),
+                         event_id=_snapshot_event_id(_fpr_snap),
                          direction=str(getattr(_fpr_dec, "recommendation", "") or ""),
                      ):
                          fpr_not_delivered += 1
@@ -9794,11 +9782,7 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                               or getattr(_fpr_snap, "id", None)
                               or ""
                           ),
-                          event_id        = str(
-                              getattr(_fpr_snap, "event", "")
-                              or getattr(_fpr_snap, "game_id", "")
-                              or ""
-                          ),
+                          event_id        = _snapshot_event_id(_fpr_snap),
                           delivery_path   = "full_pool",
                           defer_delivery  = True,
                       )
@@ -9815,11 +9799,7 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                               or getattr(_fpr_snap, "id", None)
                               or ""
                           ),
-                          event_id=str(
-                              getattr(_fpr_snap, "event", "")
-                              or getattr(_fpr_snap, "game_id", "")
-                              or ""
-                          ),
+                          event_id=_snapshot_event_id(_fpr_snap),
                           direction=str(
                               getattr(_fpr_dec, "recommendation", "") or ""
                           ),
@@ -9875,11 +9855,7 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                                 or getattr(_fpr_snap, "id", None)
                                 or ""
                             ),
-                            event_id=str(
-                                getattr(_fpr_snap, "event", "")
-                                or getattr(_fpr_snap, "game_id", "")
-                                or ""
-                            ),
+                            event_id=_snapshot_event_id(_fpr_snap),
                             direction=str(
                                 getattr(_fpr_dec, "recommendation", "") or ""
                             ),
