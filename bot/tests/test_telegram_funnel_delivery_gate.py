@@ -71,6 +71,26 @@ async def _track_and_log(db: Database, *, external_id: str = "funnel-prop") -> N
     )
 
 
+async def _confirm_pick_delivery(db, external_id: str = "funnel-prop") -> None:
+    await db.record_telegram_play_delivery(
+        provider="Underdog",
+        delivery_path="standing",
+        player_name="Funnel Player",
+        sport="MLB",
+        stat_type="Hits",
+        external_id=external_id,
+        event_id="funnel-game",
+        line_value=0.5,
+        recipients_sent=1,
+        recipients_failed=0,
+        evidence_snapshot={"direction": "OVER"},
+        direction="OVER",
+    )
+    await db.mark_opportunity_alert_sent(
+        external_id, "Hits", provider="Underdog"
+    )
+
+
 @pytest.mark.asyncio
 async def test_delivery_state_requires_tracking_and_directional_opportunity(db):
     state = await db.get_telegram_delivery_state(
@@ -94,7 +114,7 @@ async def test_delivery_state_requires_tracking_and_directional_opportunity(db):
     assert state["directional"] is True
     assert state["already_delivered"] is False
 
-    await db.mark_opportunity_alert_sent("funnel-prop", "Hits", provider="Underdog")
+    await _confirm_pick_delivery(db)
     state = await db.get_telegram_delivery_state(
         provider="Underdog",
         external_id="funnel-prop",
@@ -106,7 +126,7 @@ async def test_delivery_state_requires_tracking_and_directional_opportunity(db):
 @pytest.mark.asyncio
 async def test_alert_delivery_blocks_already_delivered_funnel_row(db):
     await _track_and_log(db)
-    await db.mark_opportunity_alert_sent("funnel-prop", "Hits", provider="Underdog")
+    await _confirm_pick_delivery(db)
 
     bot = MagicMock()
     bot.send_message = AsyncMock()

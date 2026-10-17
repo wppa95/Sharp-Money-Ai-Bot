@@ -14,6 +14,7 @@ import math
 import os
 import time
 import unicodedata
+import uuid
 import weakref
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
@@ -21,7 +22,7 @@ from typing import Iterable, Optional
 
 from sqlalchemy import (
     Boolean, Column, DateTime, Float,
-    Integer, String, Text,
+    ForeignKey, Integer, String, Text,
     Index,
     UniqueConstraint,
     select, func, desc, text, delete, or_, and_, case, tuple_, update
@@ -734,13 +735,14 @@ def _telegram_delivery_key(
     event_id: Optional[str],
     stat_type: Optional[str],
     line_value: Optional[float],
+    direction: Optional[str] = None,
 ) -> Optional[str]:
     """Build the immutable identity for one successful PLAY version.
 
     Missing identity is deliberately represented by ``None`` so legacy rows
     remain preserved but cannot be mistaken for confirmed Telegram deliveries.
-    The line is part of the version because a legitimate line-change PLAY is a
-    distinct delivery from the previous line.
+    The line and direction are part of an ACTIONABLE_PICK version because
+    opposite sides or a changed line are distinct selections.
     """
     values = {
         "provider": str(provider or "").strip(),
@@ -754,6 +756,10 @@ def _telegram_delivery_key(
         return None
     if not all(values.values()) or line_value is None:
         return None
+    if values["alert_kind"] == "ACTIONABLE_PICK":
+        direction_value = str(direction or "").strip().upper()
+        if direction_value in {"OVER", "UNDER"}:
+            values["direction"] = direction_value
     try:
         line = f"{float(line_value):.6f}"
     except (TypeError, ValueError):
@@ -1085,6 +1091,96 @@ class TelegramDeliveryAudit(Base):
             sqlite_where=text("delivery_key IS NOT NULL"),
         ),
     )
+
+
+class TelegramPickDelivery(Base):
+    """Durable outbox row for one already-qualified individual pick."""
+
+    __tablename__ = "telegram_pick_deliveries"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    pick_key = Column(String(64), nullable=False, unique=True, index=True)
+    provider = Column(String(32), nullable=False, index=True)
+    source_id = Column(String(128), nullable=False)
+    event_id = Column(String(128), nullable=False)
+    player_name = Column(String(128), nullable=False)
+    sport = Column(String(32), nullable=False, index=True)
+    stat_type = Column(String(64), nullable=False)
+    line_variant = Column(String(64), nullable=False, default="")
+    line_value = Column(Float, nullable=False)
+    direction = Column(String(8), nullable=False)
+    delivery_path = Column(String(32), nullable=False)
+    game_time = Column(DateTime, nullable=False)
+    game_status = Column(String(32), nullable=True)
+    source_fetched_at = Column(DateTime, nullable=True)
+    qualification_json = Column(Text, nullable=False)
+    evidence_snapshot_json = Column(Text, nullable=False)
+    candidate_rank = Column(Integer, nullable=True)
+    ranking_scope = Column(String(96), nullable=False)
+    message_html = Column(Text, nullable=False)
+    status = Column(String(16), nullable=False, default="pending", index=True)
+    qualified_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    next_attempt_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    lease_until = Column(DateTime, nullable=True)
+    attempt_count = Column(Integer, nullable=False, default=0)
+    sent_at = Column(DateTime, nullable=True)
+    final_reason = Column(String(256), nullable=True)
+    last_error_class = Column(String(128), nullable=True)
+    last_retry_after_seconds = Column(Float, nullable=True)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+    __table_args__ = (
+        Index(
+            "ix_telegram_pick_delivery_ready",
+            "status",
+            "next_attempt_at",
+            "qualified_at",
+        ),
+    )
+
+
+class TelegramPickDeliveryAttempt(Base):
+    """Immutable attempt record, including the evidence snapshot used."""
+
+    __tablename__ = "telegram_pick_delivery_attempts"
+
+    attempt_id = Column(String(32), primary_key=True)
+    delivery_id = Column(
+        Integer,
+        ForeignKey("telegram_pick_deliveries.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    attempted_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    completed_at = Column(DateTime, nullable=True)
+    status = Column(String(24), nullable=False, default="sending")
+    exception_class = Column(String(128), nullable=True)
+    retry_after_seconds = Column(Float, nullable=True)
+    recipients_sent = Column(Integer, nullable=False, default=0)
+    recipients_failed = Column(Integer, nullable=False, default=0)
+    evidence_snapshot_json = Column(Text, nullable=False)
+    reason = Column(String(256), nullable=True)
+
+
+class TelegramPickDeliveryGroup(Base):
+    """Persisted round-robin cursor for provider/sport fairness."""
+
+    __tablename__ = "telegram_pick_delivery_groups"
+
+    group_key = Column(String(96), primary_key=True)
+    provider = Column(String(32), nullable=False)
+    sport = Column(String(32), nullable=False)
+    last_served_at = Column(DateTime, nullable=True)
+
+
+class TelegramPickDeliveryRuntime(Base):
+    """Singleton durable pacing state for the actionable-pick outbox."""
+
+    __tablename__ = "telegram_pick_delivery_runtime"
+
+    id = Column(Integer, primary_key=True, default=1)
+    next_send_at = Column(DateTime, nullable=True)
 
 
 class TelegramCommand(Base):
@@ -2479,6 +2575,17 @@ class Database:
             ).scalars().all()
             used: set[str] = set()
             for row in rows:
+                try:
+                    evidence_snapshot = json.loads(
+                        row.evidence_snapshot_json or "{}"
+                    )
+                except (TypeError, ValueError):
+                    evidence_snapshot = {}
+                direction = (
+                    str(evidence_snapshot.get("direction") or "").strip().upper()
+                    if isinstance(evidence_snapshot, dict)
+                    else ""
+                )
                 key = _telegram_delivery_key(
                     provider=row.provider,
                     alert_kind=row.alert_kind,
@@ -2487,6 +2594,7 @@ class Database:
                     event_id=row.event_id,
                     stat_type=row.stat_type,
                     line_value=row.line_value,
+                    direction=direction,
                 )
                 if key and key not in used:
                     row.delivery_key = key
@@ -3943,6 +4051,7 @@ class Database:
         external_id: Optional[str] = None,
         event_id: Optional[str] = None,
         line_value: Optional[float] = None,
+        direction: Optional[str] = None,
         outcome: str,
         recipients_sent: int = 0,
         recipients_failed: int = 0,
@@ -3957,15 +4066,18 @@ class Database:
         provider = str(provider or "Unknown")
         alert_kind = str(alert_kind or "ACTIONABLE_PICK")
         delivery_path = str(delivery_path or "unknown")
-        delivery_key = _telegram_delivery_key(
-            provider=provider,
-            alert_kind=alert_kind,
-            delivery_path=delivery_path,
-            external_id=external_id,
-            event_id=event_id,
-            stat_type=stat_type,
-            line_value=line_value,
-        ) if str(outcome or "").lower() == "sent" else None
+        delivery_key = None
+        if str(outcome or "").lower() == "sent":
+            delivery_key = _telegram_delivery_key(
+                provider=provider,
+                alert_kind=alert_kind,
+                delivery_path=delivery_path,
+                external_id=external_id,
+                event_id=event_id,
+                stat_type=stat_type,
+                line_value=line_value,
+                direction=direction,
+            )
         values = dict(
             provider=provider,
             alert_kind=alert_kind,
@@ -4094,6 +4206,7 @@ class Database:
         recipients_failed: int,
         attempted_at: Optional[datetime] = None,
         evidence_snapshot: Optional[dict] = None,
+        direction: Optional[str] = None,
     ) -> bool:
         """Atomically persist a confirmed PLAY and mark its exact opportunity.
 
@@ -4101,6 +4214,26 @@ class Database:
         rows are idempotent: a retry reuses the same audit row and only marks
         the provider-scoped opportunity matching that source identity.
         """
+        direction = str(
+            direction or (evidence_snapshot or {}).get("direction") or ""
+        ).strip().upper()
+        if direction not in {"OVER", "UNDER"}:
+            direction = ""
+        if direction:
+            evidence_snapshot = {
+                **(evidence_snapshot or {}),
+                "direction": direction,
+            }
+        else:
+            logger.warning(
+                "Cannot confirm Telegram PLAY without an exact direction: "
+                "provider=%s external_id=%s event_id=%s stat=%s",
+                provider,
+                external_id,
+                event_id,
+                stat_type,
+            )
+            return False
         delivery_key = _telegram_delivery_key(
             provider=provider,
             alert_kind="ACTIONABLE_PICK",
@@ -4109,6 +4242,7 @@ class Database:
             event_id=event_id,
             stat_type=stat_type,
             line_value=line_value,
+            direction=direction,
         )
         if delivery_key is None:
             logger.warning(
@@ -4152,20 +4286,27 @@ class Database:
             if audit is None:
                 await s.rollback()
                 return False
-            result = await s.execute(
-                update(PropOpportunityLog)
-                .where(
-                    PropOpportunityLog.external_id == _stored_opportunity_external_id(
-                        external_id, provider
-                    ),
-                    PropOpportunityLog.stat_type == stat_type,
-                    PropOpportunityLog.provider == provider,
+            result = None
+            if direction:
+                result = await s.execute(
+                    update(PropOpportunityLog)
+                    .where(
+                        PropOpportunityLog.external_id
+                        == _stored_opportunity_external_id(external_id, provider),
+                        PropOpportunityLog.stat_type == stat_type,
+                        PropOpportunityLog.provider == provider,
+                        PropOpportunityLog.player_name == player_name,
+                        PropOpportunityLog.sport == sport,
+                        PropOpportunityLog.game_id == event_id,
+                        PropOpportunityLog.line_value == line_value,
+                        PropOpportunityLog.recommendation == direction,
+                    )
+                    .values(alert_sent=True, alert_sent_at=audit.attempted_at)
                 )
-                .values(alert_sent=True, alert_sent_at=audit.attempted_at)
-            )
             # The original PLAY and its separate reminder state share one
             # transaction. No migration, second database, or per-pick job.
-            if int(result.rowcount or 0) > 0 and evidence_snapshot is not None:
+            updated_count = int(result.rowcount or 0) if result is not None else 0
+            if updated_count > 0 and evidence_snapshot is not None:
                 from engine.game_reminders import build_record
                 reminder = build_record(audit, attempted_at or datetime.utcnow())
                 if reminder is not None:
@@ -4174,13 +4315,433 @@ class Database:
                         .prefix_with("OR IGNORE")
                     )
             await s.commit()
-            if int(result.rowcount or 0) == 0:
+            if updated_count == 0:
                 logger.warning(
                     "Confirmed Telegram PLAY has no exact opportunity row: "
                     "provider=%s external_id=%s stat=%s",
                     provider, external_id, stat_type,
                 )
                 return False
+            return True
+
+    @_retry_sqlite_write
+    async def enqueue_telegram_pick_deliveries(
+        self,
+        candidates: Iterable[dict],
+    ) -> list[int]:
+        """Persist only candidates which already passed the delivery gates."""
+        rows = [dict(candidate) for candidate in candidates]
+        if not rows:
+            return []
+        now = datetime.utcnow()
+        saved_ids: list[int] = []
+        async with self.session() as s:
+            from sqlalchemy.dialects.sqlite import insert as _sqlite_insert
+
+            for item in rows:
+                required = (
+                    "pick_key", "provider", "source_id", "event_id",
+                    "player_name", "sport", "stat_type", "line_value",
+                    "direction", "delivery_path", "game_time",
+                    "qualification_json", "evidence_snapshot_json",
+                    "ranking_scope", "message_html",
+                )
+                if any(item.get(name) in (None, "") for name in required):
+                    raise ValueError("Qualified delivery is missing stable identity or evidence")
+                provider = str(item["provider"])
+                sport = str(item["sport"])
+                group_key = f"{provider.casefold()}|{sport.casefold()}"
+                insert_row = {
+                    **item,
+                    "status": "pending",
+                    "qualified_at": item.get("qualified_at") or now,
+                    "next_attempt_at": item.get("next_attempt_at") or now,
+                    "created_at": now,
+                    "updated_at": now,
+                }
+                await s.execute(
+                    _sqlite_insert(TelegramPickDelivery)
+                    .values(**insert_row)
+                    .prefix_with("OR IGNORE")
+                )
+                row = await s.scalar(
+                    select(TelegramPickDelivery).where(
+                        TelegramPickDelivery.pick_key == item["pick_key"]
+                    )
+                )
+                if row is None:
+                    raise RuntimeError("Could not persist qualified Telegram delivery")
+                if row.status in {"pending", "expired", "invalidated"}:
+                    # Requalification refreshes only still-retryable work. It
+                    # never reopens sent or ambiguous/permanent failures.
+                    for name in (
+                        "provider", "source_id", "event_id", "player_name",
+                        "sport", "stat_type", "line_variant", "line_value",
+                        "direction",
+                        "delivery_path", "game_time", "game_status",
+                        "source_fetched_at", "qualification_json",
+                        "evidence_snapshot_json", "candidate_rank",
+                        "ranking_scope", "message_html",
+                    ):
+                        setattr(row, name, item.get(name))
+                    if row.status in {"expired", "invalidated"}:
+                        row.status = "pending"
+                        row.final_reason = None
+                        row.next_attempt_at = now
+                    row.qualified_at = item.get("qualified_at") or now
+                    row.updated_at = now
+                group = await s.get(TelegramPickDeliveryGroup, group_key)
+                if group is None:
+                    s.add(
+                        TelegramPickDeliveryGroup(
+                            group_key=group_key,
+                            provider=provider,
+                            sport=sport,
+                        )
+                    )
+                saved_ids.append(int(row.id))
+            await s.commit()
+        return saved_ids
+
+    @_retry_sqlite_write
+    async def claim_next_telegram_pick_delivery(
+        self,
+        *,
+        now: Optional[datetime] = None,
+        lease_seconds: float = 180.0,
+        pacing_seconds: float = 3.2,
+    ) -> Optional[dict]:
+        """Claim one ready pick, using persisted round-robin provider/sport order."""
+        now = now or datetime.utcnow()
+        async with self.session() as s:
+            active = (
+                await s.execute(
+                    select(TelegramPickDelivery).where(
+                        TelegramPickDelivery.status == "sending"
+                    )
+                )
+            ).scalars().all()
+            for stale in active:
+                if stale.lease_until is not None and stale.lease_until > now:
+                    await s.commit()
+                    return None
+                stale.status = "failed"
+                stale.lease_until = None
+                stale.final_reason = "process_interrupted_unknown"
+                stale.last_error_class = "ProcessInterrupted"
+                stale.updated_at = now
+                await s.execute(
+                    update(TelegramPickDeliveryAttempt)
+                    .where(
+                        TelegramPickDeliveryAttempt.delivery_id == stale.id,
+                        TelegramPickDeliveryAttempt.status == "sending",
+                    )
+                    .values(
+                        status="failed",
+                        completed_at=now,
+                        exception_class="ProcessInterrupted",
+                        reason="Send outcome unknown after restart; not retried to avoid duplicates",
+                    )
+                )
+
+            runtime = await s.get(TelegramPickDeliveryRuntime, 1)
+            if runtime is None:
+                runtime = TelegramPickDeliveryRuntime(id=1)
+                s.add(runtime)
+                await s.flush()
+            if runtime.next_send_at is not None and runtime.next_send_at > now:
+                await s.commit()
+                return None
+
+            ready = (
+                await s.execute(
+                    select(TelegramPickDelivery)
+                    .where(
+                        TelegramPickDelivery.status == "pending",
+                        TelegramPickDelivery.next_attempt_at <= now,
+                    )
+                )
+            ).scalars().all()
+            if not ready:
+                await s.commit()
+                return None
+            groups = {
+                group.group_key: group
+                for group in (
+                    await s.execute(select(TelegramPickDeliveryGroup))
+                ).scalars().all()
+            }
+
+            def fair_order(row: TelegramPickDelivery) -> tuple:
+                group_key = f"{row.provider.casefold()}|{row.sport.casefold()}"
+                last = getattr(groups.get(group_key), "last_served_at", None)
+                return (
+                    last or datetime.min,
+                    row.candidate_rank is None,
+                    row.candidate_rank if row.candidate_rank is not None else 2**31,
+                    row.qualified_at or row.created_at or datetime.min,
+                    row.id,
+                )
+
+            row = min(ready, key=fair_order)
+            group_key = f"{row.provider.casefold()}|{row.sport.casefold()}"
+            group = groups.get(group_key)
+            if group is None:
+                group = TelegramPickDeliveryGroup(
+                    group_key=group_key,
+                    provider=row.provider,
+                    sport=row.sport,
+                )
+                s.add(group)
+            group.last_served_at = now
+            row.status = "sending"
+            row.attempt_count += 1
+            row.lease_until = now + timedelta(seconds=max(30.0, lease_seconds))
+            row.updated_at = now
+            runtime.next_send_at = now + timedelta(
+                seconds=max(0.0, pacing_seconds)
+            )
+            attempt_id = uuid.uuid4().hex
+            s.add(
+                TelegramPickDeliveryAttempt(
+                    attempt_id=attempt_id,
+                    delivery_id=row.id,
+                    attempted_at=now,
+                    status="sending",
+                    evidence_snapshot_json=row.evidence_snapshot_json,
+                )
+            )
+            result = {
+                "id": row.id,
+                "pick_key": row.pick_key,
+                "attempt_id": attempt_id,
+                "provider": row.provider,
+                "source_id": row.source_id,
+                "event_id": row.event_id,
+                "player_name": row.player_name,
+                "sport": row.sport,
+                "stat_type": row.stat_type,
+                "line_variant": row.line_variant,
+                "line_value": row.line_value,
+                "direction": row.direction,
+                "delivery_path": row.delivery_path,
+                "game_time": row.game_time,
+                "game_status": row.game_status,
+                "source_fetched_at": row.source_fetched_at,
+                "qualification_json": row.qualification_json,
+                "evidence_snapshot_json": row.evidence_snapshot_json,
+                "candidate_rank": row.candidate_rank,
+                "ranking_scope": row.ranking_scope,
+                "message_html": row.message_html,
+            }
+            await s.commit()
+            return result
+
+    async def validate_telegram_pick_source(self, item: dict) -> dict:
+        """Compare a queued pick with the latest stored observation, read-only."""
+        provider = str(item.get("provider") or "")
+        async with self.session() as s:
+            if provider.casefold() == "underdog":
+                row = await s.scalar(
+                    select(UnderdogSnapshotRecord)
+                    .where(
+                        UnderdogSnapshotRecord.external_id == item.get("source_id"),
+                        UnderdogSnapshotRecord.game_id == item.get("event_id"),
+                        UnderdogSnapshotRecord.player_name == item.get("player_name"),
+                        UnderdogSnapshotRecord.sport == item.get("sport"),
+                        UnderdogSnapshotRecord.stat_type == item.get("stat_type"),
+                    )
+                    .order_by(desc(UnderdogSnapshotRecord.id))
+                    .limit(1)
+                )
+            elif provider.casefold() == "prizepicks":
+                row = await s.scalar(
+                    select(PropLineHistory)
+                    .where(
+                        PropLineHistory.provider == "PrizePicks",
+                        PropLineHistory.external_id == item.get("source_id"),
+                        PropLineHistory.game_id == item.get("event_id"),
+                        PropLineHistory.player_name == item.get("player_name"),
+                        PropLineHistory.sport == item.get("sport"),
+                        PropLineHistory.stat_type == item.get("stat_type"),
+                        func.coalesce(PropLineHistory.line_variant, "")
+                        == str(item.get("line_variant") or ""),
+                    )
+                    .order_by(desc(PropLineHistory.fetched_at), desc(PropLineHistory.id))
+                    .limit(1)
+                )
+            else:
+                return {"valid": False, "reason": "unsupported_provider"}
+            if row is None:
+                return {"valid": False, "reason": "source_observation_missing"}
+            if bool(getattr(row, "removed", False)):
+                return {"valid": False, "reason": "source_removed"}
+            try:
+                current_line = float(row.line_value)
+                expected_line = float(item.get("line_value"))
+            except (TypeError, ValueError):
+                return {"valid": False, "reason": "line_identity_missing"}
+            if not math.isclose(current_line, expected_line, rel_tol=0.0, abs_tol=1e-9):
+                return {"valid": False, "reason": "source_line_changed"}
+            opportunity_external_id = _stored_opportunity_external_id(
+                str(item.get("source_id") or ""),
+                provider,
+            )
+            opportunity = await s.scalar(
+                select(PropOpportunityLog)
+                .where(
+                    PropOpportunityLog.provider == provider,
+                    PropOpportunityLog.external_id == opportunity_external_id,
+                    PropOpportunityLog.player_name == item.get("player_name"),
+                    PropOpportunityLog.sport == item.get("sport"),
+                    PropOpportunityLog.game_id == item.get("event_id"),
+                    PropOpportunityLog.stat_type == item.get("stat_type"),
+                )
+                .order_by(
+                    desc(PropOpportunityLog.detected_at),
+                    desc(PropOpportunityLog.id),
+                )
+                .limit(1)
+            )
+            if opportunity is None:
+                return {"valid": False, "reason": "current_directional_opportunity_missing"}
+            if (
+                not math.isclose(
+                    float(opportunity.line_value),
+                    expected_line,
+                    rel_tol=0.0,
+                    abs_tol=1e-9,
+                )
+                or str(opportunity.recommendation or "").upper()
+                != str(item.get("direction") or "").upper()
+            ):
+                return {
+                    "valid": False,
+                    "reason": "qualified_line_or_direction_changed",
+                }
+            prior_delivery = await s.scalar(
+                select(TelegramDeliveryAudit)
+                .where(
+                    TelegramDeliveryAudit.provider == provider,
+                    TelegramDeliveryAudit.alert_kind == "ACTIONABLE_PICK",
+                    TelegramDeliveryAudit.outcome == "sent",
+                    TelegramDeliveryAudit.external_id == item.get("source_id"),
+                    TelegramDeliveryAudit.event_id == item.get("event_id"),
+                    TelegramDeliveryAudit.player_name == item.get("player_name"),
+                    TelegramDeliveryAudit.sport == item.get("sport"),
+                    TelegramDeliveryAudit.stat_type == item.get("stat_type"),
+                    TelegramDeliveryAudit.line_value == expected_line,
+                )
+                .limit(1)
+            )
+            if prior_delivery is not None:
+                return {"valid": False, "reason": "already_confirmed_delivered"}
+            return {
+                "valid": True,
+                "reason": "",
+                "provider": provider,
+                "source_id": str(getattr(row, "external_id", "") or ""),
+                "event_id": str(getattr(row, "game_id", "") or ""),
+                "player_name": str(getattr(row, "player_name", "") or ""),
+                "sport": str(getattr(row, "sport", "") or ""),
+                "stat_type": str(getattr(row, "stat_type", "") or ""),
+                "line_variant": str(getattr(row, "line_variant", "") or ""),
+                "line_value": current_line,
+                "game_time": getattr(row, "game_time", None),
+                "game_status": getattr(row, "provider_status", None),
+                "fetched_at": getattr(row, "fetched_at", None),
+            }
+
+    @_retry_sqlite_write
+    async def finish_telegram_pick_delivery(
+        self,
+        *,
+        delivery_id: int,
+        attempt_id: str,
+        status: str,
+        recipients_sent: int = 0,
+        recipients_failed: int = 0,
+        exception_class: Optional[str] = None,
+        retry_after_seconds: Optional[float] = None,
+        reason: Optional[str] = None,
+        now: Optional[datetime] = None,
+    ) -> bool:
+        """Finish one claimed attempt without ever retrying an unknown send."""
+        allowed = {"sent", "retry_scheduled", "failed", "expired", "invalidated"}
+        if status not in allowed:
+            raise ValueError(f"Unsupported Telegram delivery result: {status}")
+        now = now or datetime.utcnow()
+        async with self.session() as s:
+            row = await s.get(TelegramPickDelivery, int(delivery_id))
+            attempt = await s.get(TelegramPickDeliveryAttempt, str(attempt_id))
+            if row is None or attempt is None or attempt.delivery_id != row.id:
+                return False
+            if row.status != "sending":
+                return False
+            attempt.completed_at = now
+            attempt.status = status
+            attempt.exception_class = exception_class
+            attempt.retry_after_seconds = retry_after_seconds
+            attempt.recipients_sent = max(0, int(recipients_sent or 0))
+            attempt.recipients_failed = max(0, int(recipients_failed or 0))
+            attempt.reason = reason
+            row.lease_until = None
+            row.updated_at = now
+            row.last_error_class = exception_class
+            row.last_retry_after_seconds = retry_after_seconds
+            runtime = await s.get(TelegramPickDeliveryRuntime, 1)
+            if status == "sent":
+                row.status = "sent"
+                row.sent_at = now
+                row.final_reason = None
+            elif status == "retry_scheduled":
+                seconds = max(0.1, float(retry_after_seconds or 0.1))
+                due_at = now + timedelta(seconds=seconds)
+                row.status = "pending"
+                row.next_attempt_at = due_at
+                row.final_reason = reason
+                if runtime is not None and (
+                    runtime.next_send_at is None or runtime.next_send_at < due_at
+                ):
+                    runtime.next_send_at = due_at
+            else:
+                row.status = status
+                row.final_reason = reason
+            await s.commit()
+            return True
+
+    @_retry_sqlite_write
+    async def expire_pending_telegram_pick_delivery(
+        self,
+        *,
+        delivery_id: int,
+        reason: str,
+        expired: bool = False,
+    ) -> bool:
+        """Terminally expire or invalidate work after current-source validation."""
+        status = "expired" if expired else "invalidated"
+        async with self.session() as s:
+            row = await s.get(TelegramPickDelivery, int(delivery_id))
+            if row is None or row.status != "sending":
+                return False
+            row.status = status
+            row.final_reason = str(reason)[:256]
+            row.lease_until = None
+            row.updated_at = datetime.utcnow()
+            attempt = await s.scalar(
+                select(TelegramPickDeliveryAttempt)
+                .where(
+                    TelegramPickDeliveryAttempt.delivery_id == row.id,
+                    TelegramPickDeliveryAttempt.status == "sending",
+                )
+                .order_by(desc(TelegramPickDeliveryAttempt.attempted_at))
+                .limit(1)
+            )
+            if attempt is not None:
+                attempt.status = status
+                attempt.completed_at = datetime.utcnow()
+                attempt.reason = str(reason)[:256]
+            await s.commit()
             return True
 
     async def get_pending_game_reminders(self, now, *, cursor=0, limit=100):
@@ -10708,39 +11269,69 @@ class Database:
         stat_type:   str,
         provider:    Optional[str] = None,
     ) -> int:
-        """
-        Mark an existing PropOpportunityLog row as a delivered Telegram actionable pick.
+        """Reconcile the legacy flag only from an exact successful PLAY audit.
 
-        Called immediately after ``deliver_underdog()`` returns ``sent=True`` for a
-        🎯 ACTIONABLE BET PICK alert. Only those rows end up with
-        alert_sent=True; monitoring observations and undelivered directional
-        evaluations are never marked.
-
-        The row must already exist (created by ``log_prop_opportunity``).  If it
-        doesn't exist yet this is a no-op (which is safe — the try/except in the
-        engine prevents it from blocking the alert flow).
+        The audit is authoritative. A transport callback or a caller-provided
+        boolean is not sufficient evidence to set ``alert_sent``.
         """
         from sqlalchemy import update as _sa_update
         async with self.session() as s:
-            result = await s.execute(
-                _sa_update(PropOpportunityLog)
-                .where(
-                    PropOpportunityLog.external_id == _stored_opportunity_external_id(
-                        external_id, provider
-                    ),
-                    PropOpportunityLog.stat_type   == stat_type,
-                    *(
-                        [PropOpportunityLog.provider == provider]
-                        if provider else []
-                    ),
+            rows = (
+                await s.execute(
+                    select(PropOpportunityLog).where(
+                        PropOpportunityLog.external_id
+                        == _stored_opportunity_external_id(external_id, provider),
+                        PropOpportunityLog.stat_type == stat_type,
+                        *(
+                            [PropOpportunityLog.provider == provider]
+                            if provider else []
+                        ),
+                    )
                 )
-                .values(
-                    alert_sent    = True,
-                    alert_sent_at = datetime.utcnow(),
+            ).scalars().all()
+            updated = 0
+            for row in rows:
+                audits = (
+                    await s.execute(
+                        select(TelegramDeliveryAudit).where(
+                            TelegramDeliveryAudit.provider == row.provider,
+                            TelegramDeliveryAudit.alert_kind == "ACTIONABLE_PICK",
+                            TelegramDeliveryAudit.outcome == "sent",
+                            TelegramDeliveryAudit.external_id == external_id,
+                            TelegramDeliveryAudit.event_id == row.game_id,
+                            TelegramDeliveryAudit.player_name == row.player_name,
+                            TelegramDeliveryAudit.sport == row.sport,
+                            TelegramDeliveryAudit.stat_type == row.stat_type,
+                            TelegramDeliveryAudit.line_value == row.line_value,
+                        )
+                    )
+                ).scalars().all()
+                audit = None
+                for candidate in audits:
+                    try:
+                        audit_direction = str(
+                            json.loads(
+                                candidate.evidence_snapshot_json or "{}"
+                            ).get("direction", "")
+                        ).upper()
+                    except (TypeError, ValueError):
+                        continue
+                    if audit_direction == str(row.recommendation or "").upper():
+                        audit = candidate
+                        break
+                if audit is None:
+                    continue
+                await s.execute(
+                    _sa_update(PropOpportunityLog)
+                    .where(PropOpportunityLog.id == row.id)
+                    .values(
+                        alert_sent=True,
+                        alert_sent_at=audit.attempted_at or datetime.utcnow(),
+                    )
                 )
-            )
+                updated += 1
             await s.commit()
-            return int(result.rowcount or 0)
+            return updated
 
     async def get_alerted_opportunity_log(
         self,

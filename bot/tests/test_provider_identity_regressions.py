@@ -148,6 +148,8 @@ async def test_restart_restore_keeps_rotated_identity_dedup(tmp_path):
             line_value=1.5,
             recipients_sent=1,
             recipients_failed=0,
+            evidence_snapshot={"direction": "OVER"},
+            direction="OVER",
         )
 
         # Simulate a fresh process: close the first pool, reopen the persisted

@@ -6,6 +6,18 @@ import pytest
 
 
 @pytest.fixture(autouse=True)
+def isolate_telegram_pacing(monkeypatch):
+    """Keep mocked Telegram tests isolated from process-global pacing state."""
+    import alerts
+
+    monkeypatch.setattr(alerts, "_TELEGRAM_MIN_CHAT_INTERVAL_SECONDS", 0.0)
+    alerts._telegram_last_send_at.clear()
+    alerts._telegram_send_locks.clear()
+    with alerts._telegram_retry_after_lock:
+        alerts._telegram_retry_after_until.clear()
+
+
+@pytest.fixture(autouse=True)
 def isolate_propline_quota(monkeypatch, tmp_path):
     """Fixture HTTP requests must never spend the running bot's live ledger."""
     import providers.propline as propline

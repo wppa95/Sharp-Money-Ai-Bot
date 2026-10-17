@@ -17,6 +17,9 @@ immediately scannable on a mobile screen.
 
 from __future__ import annotations
 
+import asyncio
+import hashlib
+import json
 import logging
 import inspect
 import math
@@ -770,6 +773,16 @@ def _has_strong_underdog_evidence(
 _telegram_retry_after_lock = Lock()
 _telegram_retry_after_until: dict[str, float] = {}
 _telegram_clock = time.monotonic
+_telegram_send_locks: dict[tuple[int, str], asyncio.Lock] = {}
+_telegram_last_send_at: dict[str, float] = {}
+_TELEGRAM_MIN_CHAT_INTERVAL_SECONDS = 3.2
+
+
+@dataclass(frozen=True)
+class TelegramSendOutcome:
+    sent: bool
+    exception_class: Optional[str] = None
+    retry_after_seconds: Optional[float] = None
 
 
 def _telegram_retry_after_seconds(exc: RetryAfter) -> float:
@@ -813,41 +826,81 @@ async def send_alert(
     *,
     sport: Optional[str] = None,
 ) -> bool:
-    """Send a formatted alert message. Returns True on success."""
+    """Send a formatted alert message. Returns True only on Telegram success."""
+    try:
+        return (
+            await send_alert_detailed(
+                bot, chat_id, message, keyboard, sport=sport
+            )
+        ).sent
+    except TelegramError as exc:
+        logger.error("Failed to send Telegram alert: %s", type(exc).__name__)
+        return False
+
+
+async def send_alert_detailed(
+    bot: Bot,
+    chat_id: Union[int, str],
+    message: str,
+    keyboard: Optional[list[list[InlineKeyboardButton]]] = None,
+    *,
+    sport: Optional[str] = None,
+) -> TelegramSendOutcome:
+    """Send one message with shared pacing and preserve Telegram failure details."""
     # All live Telegram paths eventually pass through this low-level sender.
     # Keep internal scoring vocabulary out of user-facing alerts, including
     # legacy/direct broadcast callers that do not use the current formatters.
     message = _sanitize_user_alert_message(message)
     markup = InlineKeyboardMarkup(keyboard) if keyboard else None
-    remaining = _telegram_retry_after_remaining(chat_id)
-    if remaining > 0:
-        logger.debug(
-            "Telegram send suppressed during recipient flood-control cooldown "
-            "(%.0f seconds remain)",
-            remaining,
-        )
-        return False
-    try:
-        await bot.send_message(
-            chat_id=chat_id,
-            text=message,
-            parse_mode=ParseMode.HTML,
-            reply_markup=markup,
-            disable_web_page_preview=True,
-        )
-        return True
-    except RetryAfter as exc:
-        retry_after = _telegram_retry_after_seconds(exc)
-        _record_telegram_retry_after(chat_id, retry_after)
-        logger.warning(
-            "Telegram flood control rejected a send; suppressing sends to that "
-            "recipient for %.0f seconds",
-            retry_after,
-        )
-        return False
-    except TelegramError as exc:
-        logger.error("Failed to send Telegram alert: %s", exc)
-        return False
+    key = str(chat_id)
+    loop_key = (id(asyncio.get_running_loop()), key)
+    lock = _telegram_send_locks.setdefault(loop_key, asyncio.Lock())
+    async with lock:
+        remaining = _telegram_retry_after_remaining(chat_id)
+        if remaining > 0:
+            logger.debug(
+                "Telegram send suppressed during recipient flood-control cooldown "
+                "(%.0f seconds remain)",
+                remaining,
+            )
+            return TelegramSendOutcome(
+                False, "RetryAfter", retry_after_seconds=remaining
+            )
+        elapsed = _telegram_clock() - _telegram_last_send_at.get(key, 0.0)
+        if _telegram_last_send_at.get(key) is not None and elapsed < _TELEGRAM_MIN_CHAT_INTERVAL_SECONDS:
+            await asyncio.sleep(_TELEGRAM_MIN_CHAT_INTERVAL_SECONDS - elapsed)
+        remaining = _telegram_retry_after_remaining(chat_id)
+        if remaining > 0:
+            return TelegramSendOutcome(
+                False, "RetryAfter", retry_after_seconds=remaining
+            )
+        try:
+            await bot.send_message(
+                chat_id=chat_id,
+                text=message,
+                parse_mode=ParseMode.HTML,
+                reply_markup=markup,
+                disable_web_page_preview=True,
+            )
+            _telegram_last_send_at[key] = _telegram_clock()
+            return TelegramSendOutcome(True)
+        except RetryAfter as exc:
+            retry_after = _telegram_retry_after_seconds(exc)
+            _record_telegram_retry_after(chat_id, retry_after)
+            logger.warning(
+                "Telegram flood control rejected a send; suppressing sends to that "
+                "recipient for %.0f seconds",
+                retry_after,
+            )
+            return TelegramSendOutcome(
+                False, type(exc).__name__, retry_after_seconds=retry_after
+            )
+        except TelegramError as exc:
+            logger.error("Failed to send Telegram alert: %s", type(exc).__name__)
+            return TelegramSendOutcome(False, type(exc).__name__)
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("Unexpected Telegram sender failure")
+            return TelegramSendOutcome(False, type(exc).__name__)
 
 
 def _sanitize_user_alert_message(message: str) -> str:
@@ -1012,6 +1065,20 @@ async def broadcast_alert(
 
     Delivery qualification is enforced before this low-level sender.
     """
+    detailed = await broadcast_alert_detailed(
+        bot, chat_ids, message, sport=sport
+    )
+    return {"sent": detailed["sent"], "failed": detailed["failed"]}
+
+
+async def broadcast_alert_detailed(
+    bot: Bot,
+    chat_ids: list[Union[int, str]],
+    message: str,
+    *,
+    sport: Optional[str] = None,
+) -> dict[str, object]:
+    """Broadcast and aggregate retry/error metadata for durable pick attempts."""
     # Direct/legacy callers do not carry the structured decision and evidence
     # objects used by AlertDelivery. Retired internal labels therefore make the
     # message ineligible instead of allowing this low-level sender to bypass
@@ -1021,16 +1088,38 @@ async def broadcast_alert(
         str(message or ""),
         flags=re.IGNORECASE,
     ):
-        return {"sent": 0, "failed": 0}
+        return {
+            "sent": 0, "failed": 0,
+            "exception_class": None, "retry_after_seconds": None,
+        }
 
     message = _sanitize_user_alert_message(message)
     sent = failed = 0
+    exceptions: list[str] = []
+    retry_after_seconds: Optional[float] = None
     for cid in chat_ids:
-        if await send_alert(bot, cid, message, sport=sport):
+        outcome = await send_alert_detailed(bot, cid, message, sport=sport)
+        if outcome.sent:
             sent += 1
         else:
             failed += 1
-    return {"sent": sent, "failed": failed}
+            if outcome.exception_class:
+                exceptions.append(outcome.exception_class)
+            if outcome.retry_after_seconds is not None:
+                retry_after_seconds = max(
+                    retry_after_seconds or 0.0,
+                    outcome.retry_after_seconds,
+                )
+    return {
+        "sent": sent,
+        "failed": failed,
+        "exception_class": (
+            "RetryAfter"
+            if retry_after_seconds is not None
+            else (exceptions[0] if exceptions else None)
+        ),
+        "retry_after_seconds": retry_after_seconds,
+    }
 
 
 async def send_discord_alert(message: str) -> bool:
@@ -1259,6 +1348,8 @@ class DeliveryResult:
     filtered_reason: str = ""
     deduped: bool = False
     rate_limited: bool = False   # True when blocked by global Telegram rate limiter
+    queued: bool = False
+    queue_id: Optional[int] = None
     recipients_sent: int = 0
     recipients_failed: int = 0
     # True only when an actionable Telegram send has a durable, identity-linked
@@ -1267,6 +1358,8 @@ class DeliveryResult:
     authoritative_recorded: bool = False
 
     def __str__(self) -> str:
+        if self.queued:
+            return f"queued(id={self.queue_id})"
         if self.rate_limited:
             return f"rate-limited({self.filtered_reason})"
         if self.filtered:
@@ -1454,6 +1547,9 @@ class AlertDelivery:
                         recipients_sent=recipients_sent,
                         recipients_failed=recipients_failed,
                         evidence_snapshot=evidence_snapshot,
+                        direction=str(
+                            (evidence_snapshot or {}).get("direction") or ""
+                        ) or None,
                     )
                     if inspect.isawaitable(result):
                         result = await result
@@ -1934,6 +2030,8 @@ class AlertDelivery:
         delivery_rank: Optional[int] = None,
         delivery_total: Optional[int] = None,
         evidence_snapshot: Optional[dict] = None,
+        defer_delivery: bool = False,
+        delivery_buffer: Optional[list[dict]] = None,
     ) -> "DeliveryResult":
         """
         Full Underdog prop alert pipeline:
@@ -2237,6 +2335,193 @@ class AlertDelivery:
                 ]
             )
 
+        _alert_kind = (
+            "REMOVAL" if removed
+            else "MARKET_MOVE" if market_move_only
+            else "ACTIONABLE_PICK"
+        )
+        if evidence_snapshot is None:
+            _ud_profile = evidence_profile({
+                "validation": validation,
+                "decision": decision,
+                "direction": _direction,
+                "sport": sport,
+            })
+            evidence_snapshot = {
+                "schema_version": 1,
+                "rank": delivery_rank,
+                "total": delivery_total,
+                **_ud_profile,
+                "line": _ud_line_value,
+            }
+
+        if defer_delivery and _alert_kind == "ACTIONABLE_PICK":
+            source_id_value = str(source_id or "").strip()
+            event_id_value = str(event_id or "").strip()
+            if not source_id_value or not event_id_value or game_time is None:
+                self._release_prop_delivery_claim(
+                    provider=source, source=source, event_id=event_id_value,
+                    player_name=player_name, sport=sport, stat_type=stat_type,
+                    direction=_direction, line_value=_ud_line_value,
+                    offering=_offering,
+                )
+                return DeliveryResult(
+                    sent=False,
+                    filtered=True,
+                    filtered_reason="Durable delivery requires source, event, and game-time identity",
+                )
+            normalized_identity = {
+                "provider": source,
+                "source_id": source_id_value,
+                "event_id": event_id_value,
+                "player_name": str(player_name).strip().casefold(),
+                "sport": str(sport).strip().upper(),
+                "stat_type": str(stat_type).strip().casefold(),
+                "line_variant": (
+                    str(getattr(_offering, "line_variant", "") or "")
+                    if source_upper == "PRIZEPICKS"
+                    else ""
+                ),
+                "line_value": _ud_line_value,
+                "direction": _direction,
+            }
+            pick_key = hashlib.sha256(
+                json.dumps(
+                    normalized_identity,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ).encode("utf-8")
+            ).hexdigest()
+            available_directions = getattr(_offering, "available_directions", None)
+            if available_directions is not None:
+                available_directions = sorted(
+                    str(value).upper() for value in available_directions
+                )
+            qualification = {
+                "qualified": True,
+                "qualification_stage": "existing AlertDelivery gates passed",
+                "scope": {"passed": True},
+                "game_timing": {"passed": True, "strict_pregame": bool(strict_pregame)},
+                "current_reporting_day": {"passed": True},
+                "fresh_source_line": {"passed": True},
+                "direction_and_evidence": {
+                    "passed": True,
+                    "direction": _direction,
+                    "evidence_available": bool(evidence_available),
+                },
+                "tracking": {"passed": True},
+                "dedup_claim": {"passed": True},
+                "originating_platform_direction": {
+                    "passed": True,
+                    "available_directions": available_directions,
+                },
+                "decision_at_qualification": {
+                    "confidence": getattr(decision, "confidence", None),
+                    "tier": getattr(decision, "decision_tier", None),
+                    "reason": getattr(decision, "reason", None),
+                    "reason_codes": getattr(decision, "reason_codes", None),
+                    "score_total": getattr(score, "total", None),
+                },
+                "validation_at_qualification": {
+                    "passed": True,
+                    "reason": getattr(validation, "reason", None),
+                    "sample_size": getattr(validation, "sample_size", None),
+                    "evidence_completeness": getattr(
+                        validation, "evidence_completeness", None
+                    ),
+                },
+            }
+            evidence_snapshot = {
+                **evidence_snapshot,
+                "direction": _direction,
+                "line": _ud_line_value,
+                "line_variant": normalized_identity["line_variant"],
+                "source_event_id": event_id_value,
+                "source_id": source_id_value,
+                **_reminder_snapshot(
+                    game_time,
+                    _direction,
+                    getattr(_offering, "line_variant", ""),
+                    getattr(_offering, "game_id", "") or event_id_value,
+                ),
+                "evidence_timestamp": (
+                    getattr(validation, "fetched_at", None)
+                    or getattr(validation, "updated_at", None)
+                ),
+            }
+            if hasattr(evidence_snapshot.get("evidence_timestamp"), "isoformat"):
+                evidence_snapshot["evidence_timestamp"] = (
+                    evidence_snapshot["evidence_timestamp"].isoformat()
+                )
+            queue_item = {
+                "pick_key": pick_key,
+                "provider": source,
+                "source_id": source_id_value,
+                "event_id": event_id_value,
+                "player_name": str(player_name),
+                "sport": str(sport),
+                "stat_type": str(stat_type),
+                "line_variant": normalized_identity["line_variant"],
+                "line_value": _ud_line_value,
+                "direction": _direction,
+                "delivery_path": (
+                    delivery_path
+                    or ("prizepicks" if source_upper == "PRIZEPICKS" else "underdog")
+                ),
+                "game_time": game_time,
+                "game_status": str(game_status or ""),
+                "source_fetched_at": fetched_at,
+                "qualification_json": json.dumps(
+                    qualification, sort_keys=True, separators=(",", ":"), default=str
+                ),
+                "evidence_snapshot_json": json.dumps(
+                    evidence_snapshot, sort_keys=True, separators=(",", ":"), default=str
+                ),
+                "candidate_rank": delivery_rank,
+                "ranking_scope": f"sport:{str(sport).upper()}",
+                "message_html": _sanitize_user_alert_message(message),
+            }
+            try:
+                if delivery_buffer is not None:
+                    delivery_buffer.append(queue_item)
+                    queue_id = None
+                else:
+                    queue_ids = await self._db.enqueue_telegram_pick_deliveries(
+                        [queue_item]
+                    )
+                    queue_id = queue_ids[0] if queue_ids else None
+            except Exception as exc:  # noqa: BLE001
+                self._release_prop_delivery_claim(
+                    provider=source, source=source, event_id=event_id_value,
+                    player_name=player_name, sport=sport, stat_type=stat_type,
+                    direction=_direction, line_value=_ud_line_value,
+                    offering=_offering,
+                )
+                logger.warning(
+                    "Could not persist qualified Telegram pick: %s",
+                    type(exc).__name__,
+                )
+                return DeliveryResult(
+                    sent=False,
+                    filtered=True,
+                    filtered_reason="Durable delivery persistence failed",
+                )
+            if _offering is not None:
+                coverage.mark(_offering, "ALERT_CREATED")
+                coverage.mark(_offering, "DELIVERY_ELIGIBLE")
+            self._release_prop_delivery_claim(
+                provider=source,
+                source=source,
+                event_id=event_id_value,
+                player_name=player_name,
+                sport=sport,
+                stat_type=stat_type,
+                direction=_direction,
+                line_value=_ud_line_value,
+                offering=_offering,
+            )
+            return DeliveryResult(sent=False, queued=True, queue_id=queue_id)
+
         # 5. Broadcast
         try:
             counts = await broadcast_alert(self._bot, self._chat_ids, message, sport=sport)
@@ -2276,26 +2561,6 @@ class AlertDelivery:
                 line_value=_ud_line_value,
                 offering=_offering,
             )
-        _alert_kind = (
-            "REMOVAL" if removed
-            else "MARKET_MOVE" if market_move_only
-            else "ACTIONABLE_PICK"
-        )
-        if evidence_snapshot is None:
-            _ud_profile = evidence_profile({
-                "validation": validation,
-                "decision": decision,
-                "direction": _direction,
-                "sport": sport,
-            })
-            evidence_snapshot = {
-                "schema_version": 1,
-                "rank": delivery_rank,
-                "total": delivery_total,
-                **_ud_profile,
-                "line": _ud_line_value,
-            }
-
         _audit_ok = await self._audit_telegram_attempt(
             provider=source,
             alert_kind=_alert_kind,
@@ -2408,3 +2673,201 @@ class AlertDelivery:
             detected_at=alert.timestamp,
         )
         await self._db.save_steam(record)
+
+
+async def telegram_pick_delivery_job(context) -> None:
+    """Send one durable, freshly-validated individual pick per scheduler tick."""
+    db = context.bot_data.get("db")
+    if db is None or not config.allowed_user_ids:
+        return
+    claim = getattr(db, "claim_next_telegram_pick_delivery", None)
+    finish = getattr(db, "finish_telegram_pick_delivery", None)
+    validate = getattr(db, "validate_telegram_pick_source", None)
+    if not all(callable(method) for method in (claim, finish, validate)):
+        logger.error("Durable Telegram pick delivery is unavailable: database contract missing")
+        return
+
+    item = await claim()
+    if not item:
+        return
+    delivery_id = int(item["id"])
+    attempt_id = str(item["attempt_id"])
+
+    def _finish(status: str, **kwargs):
+        return finish(
+            delivery_id=delivery_id,
+            attempt_id=attempt_id,
+            status=status,
+            **kwargs,
+        )
+
+    try:
+        qualification = json.loads(item.get("qualification_json") or "{}")
+        evidence_snapshot = json.loads(item.get("evidence_snapshot_json") or "{}")
+        direction = str(item.get("direction") or "").upper()
+        offered = qualification.get("originating_platform_direction", {}).get(
+            "available_directions"
+        )
+        if (
+            qualification.get("qualified") is not True
+            or not qualification.get("direction_and_evidence", {}).get("passed")
+            or direction not in {"OVER", "UNDER"}
+            or (offered and direction not in offered)
+        ):
+            await _finish(
+                "invalidated",
+                reason="persisted qualification snapshot no longer supports direction",
+            )
+            return
+
+        current = await validate(item)
+        if not current.get("valid"):
+            await _finish(
+                "invalidated",
+                reason=str(current.get("reason") or "source_identity_mismatch"),
+            )
+            return
+        if (
+            item.get("source_fetched_at") is None
+            or current.get("fetched_at") != item.get("source_fetched_at")
+        ):
+            await _finish(
+                "invalidated",
+                reason="source observation changed after qualification",
+            )
+            return
+        current_fetched_at = current.get("fetched_at")
+        if not _is_fresh_delivery_line(current_fetched_at):
+            await _finish(
+                "expired",
+                reason="source observation is outside the existing freshness window",
+            )
+            return
+
+        game_time = current.get("game_time")
+        if (
+            game_time is None
+            or game_time != item.get("game_time")
+            or str(current.get("game_status") or "").casefold()
+            != str(item.get("game_status") or "").casefold()
+        ):
+            await _finish(
+                "invalidated",
+                reason="current event timing or status differs from qualified candidate",
+            )
+            return
+        from engine.timing import is_game_alertable
+        allowed, timing_reason = is_game_alertable(
+            game_time,
+            min_minutes=0,
+            max_minutes=None,
+            urgent_edge=config.URGENT_EDGE_THRESHOLD,
+            edge=0,
+            game_status=current.get("game_status"),
+            require_known=True,
+        )
+        if not allowed:
+            await _finish(
+                "expired",
+                reason=f"game is no longer pregame: {timing_reason}",
+            )
+            return
+        from reporting import is_current_reporting_day
+        if not is_current_reporting_day(game_time):
+            await _finish(
+                "expired",
+                reason="game is no longer on the current Central reporting day",
+            )
+            return
+
+        counts = await broadcast_alert_detailed(
+            context.bot,
+            list(config.allowed_user_ids),
+            str(item["message_html"]),
+            sport=str(item["sport"]),
+        )
+        sent = int(counts.get("sent") or 0)
+        failed = int(counts.get("failed") or 0)
+        error_class = counts.get("exception_class")
+        retry_after = counts.get("retry_after_seconds")
+        delivery = AlertDelivery(db, context.bot, list(config.allowed_user_ids))
+        audit_ok = await delivery._audit_telegram_attempt(
+            provider=str(item["provider"]),
+            alert_kind="ACTIONABLE_PICK",
+            delivery_path=str(item["delivery_path"]),
+            player_name=str(item["player_name"]),
+            sport=str(item["sport"]),
+            stat_type=str(item["stat_type"]),
+            external_id=str(item["source_id"]),
+            event_id=str(item["event_id"]),
+            line_value=float(item["line_value"]),
+            outcome="sent" if sent else ("rate_limited" if retry_after else "failed"),
+            recipients_sent=sent,
+            recipients_failed=failed,
+            evidence_snapshot=evidence_snapshot,
+        )
+
+        if sent > 0:
+            await _finish(
+                "sent",
+                recipients_sent=sent,
+                recipients_failed=failed,
+                exception_class=str(error_class) if error_class else None,
+                retry_after_seconds=retry_after,
+                reason=None if audit_ok else "telegram_sent_audit_write_unconfirmed",
+            )
+            try:
+                await db.update_prop_lifecycle_state(
+                    str(item["provider"]),
+                    str(item["player_name"]),
+                    str(item["sport"]),
+                    str(item["stat_type"]),
+                    "ACTIVE_ALERTED",
+                    first_alert_sent_at=datetime.utcnow(),
+                    external_id=str(item["source_id"]),
+                    game_id=str(item["event_id"]),
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "Telegram pick sent; lifecycle update failed: %s",
+                    type(exc).__name__,
+                )
+            try:
+                await send_discord_alert(str(item["message_html"]))
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("Discord companion send failed: %s", type(exc).__name__)
+            return
+
+        if retry_after is not None:
+            await _finish(
+                "retry_scheduled",
+                recipients_sent=sent,
+                recipients_failed=failed,
+                exception_class=str(error_class or "RetryAfter"),
+                retry_after_seconds=float(retry_after),
+                reason="Telegram RetryAfter; retry is delayed until the supplied cooldown",
+            )
+            return
+
+        # Non-rate-limit failures can be ambiguous (e.g. a connection timed
+        # out after Telegram accepted the message). Never auto-retry them.
+        await _finish(
+            "failed",
+            recipients_sent=sent,
+            recipients_failed=failed,
+            exception_class=str(error_class) if error_class else "UnconfirmedSend",
+            reason="Telegram did not confirm delivery; automatic retry suppressed",
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Durable Telegram pick attempt failed")
+        try:
+            await _finish(
+                "failed",
+                exception_class=type(exc).__name__,
+                reason="application_error_before_confirmed_send",
+            )
+        except Exception as finish_exc:  # noqa: BLE001
+            logger.error(
+                "Could not persist Telegram pick attempt result: %s",
+                type(finish_exc).__name__,
+            )

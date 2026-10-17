@@ -135,6 +135,7 @@ async def _log_actionable_opportunity(
     stat_type: str = "Hits",
     provider: str = "Underdog",
     game_id: str = "",
+    line_value: float = 0.5,
 ):
     from database import PropOpportunityLog
 
@@ -147,7 +148,7 @@ async def _log_actionable_opportunity(
             "team": "TEAM",
             "sport": "MLB",
             "stat_type": stat_type,
-            "line_value": 0.5,
+            "line_value": line_value,
             "game_time": now + timedelta(hours=3),
             "game_id": opportunity_game_id,
             "provider": provider,
@@ -160,7 +161,7 @@ async def _log_actionable_opportunity(
             team="TEAM",
             sport="MLB",
             stat_type=stat_type,
-            line_value=0.5,
+            line_value=line_value,
             recommendation="OVER",
             decision_tier="A",
             confidence=85,
@@ -217,7 +218,7 @@ async def test_successful_play_persists_exact_source_and_event_and_marks_opportu
     from sqlalchemy import select
 
     await _log_actionable_opportunity(
-        db, external_id="play-source-1", game_id="game-1"
+        db, external_id="play-source-1", game_id="game-1", line_value=1.5
     )
     result = await _deliver_traceable_play(
         db,
@@ -268,7 +269,7 @@ async def test_successful_play_marks_only_the_exact_source_opportunity(db):
     from sqlalchemy import select
 
     await _log_actionable_opportunity(
-        db, external_id="play-source-a", game_id="game-a"
+        db, external_id="play-source-a", game_id="game-a", line_value=1.5
     )
     await _log_actionable_opportunity(db, external_id="play-source-b")
     await _deliver_traceable_play(

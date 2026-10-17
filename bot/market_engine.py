@@ -3315,7 +3315,8 @@ async def _run_prizepicks_independent_cycle(
     actionable = _rank_delivery_candidates_by_sport(actionable)
     delivered = 0
     delivery = AlertDelivery(db, bot, chat_ids)
-    for candidate in actionable:
+    _pp_delivery_buffer: list[dict] = []
+    for candidate_rank, candidate in enumerate(actionable, start=1):
         player = candidate["player"]
         sport = candidate["sport"]
         stat = candidate["stat"]
@@ -3357,6 +3358,10 @@ async def _run_prizepicks_independent_cycle(
                 ),
                 fetched_at=getattr(candidate["prop"], "fetched_at", None),
                 delivery_path="prizepicks",
+                defer_delivery=True,
+                delivery_rank=candidate_rank,
+                delivery_total=len(actionable),
+                delivery_buffer=_pp_delivery_buffer,
             )
         except Exception as exc:  # noqa: BLE001
             _release_prop_delivery_claim(
@@ -3419,10 +3424,23 @@ async def _run_prizepicks_independent_cycle(
                 or ("deduped" if getattr(result, "deduped", False) else "not sent"),
             )
 
+    _pp_queued = 0
+    if _pp_delivery_buffer:
+        try:
+            await db.enqueue_telegram_pick_deliveries(_pp_delivery_buffer)
+            _pp_queued = len(_pp_delivery_buffer)
+        except Exception as exc:  # noqa: BLE001
+            logger.error(
+                "prizepicks_cycle: durable delivery batch failed: %s",
+                type(exc).__name__,
+            )
+
     logger.info(
         "prizepicks_cycle: provider=PrizePicks sport=%s fetch_succeeded=true "
-        "observations=%d persisted=%d evaluated=%d directional=%d actionable=%d delivered=%d",
-        sport, len(unique_props), len(unique_props), evaluated, directional, len(actionable), delivered,
+        "observations=%d persisted=%d evaluated=%d directional=%d actionable=%d "
+        "delivered=%d queued=%d",
+        sport, len(unique_props), len(unique_props), evaluated, directional,
+        len(actionable), delivered, _pp_queued,
     )
 
 
@@ -4228,6 +4246,7 @@ async def _deliver_full_pool_candidate(
             source_id=source_id,
             event_id=event_id,
             delivery_path="full_pool",
+            defer_delivery=True,
         )
         return result, True
     except Exception as exc:  # noqa: BLE001
@@ -7012,7 +7031,9 @@ async def underdog_job(context) -> None:
                 _ranked["_delivery_rank"] = _sport_rank
                 _ranked["_delivery_total"] = _delivery_sport_totals[_sport_key]
             _n_dq_deferred   = 0
+            _n_dq_queued     = 0
             _dq_deferred_log: list[str] = []
+            _udog_delivery_buffer: list[dict] = []
             for _dq in _delivery_queue:
                 _dq_player    = _dq["player"]
                 _dq_snap      = _dq["snap"]
@@ -7144,6 +7165,8 @@ async def underdog_job(context) -> None:
                         delivery_rank       = _dq.get("_delivery_rank"),
                         delivery_total     = _dq.get("_delivery_total"),
                         evidence_snapshot  = _dq_snapshot,
+                        defer_delivery     = True,
+                        delivery_buffer    = _udog_delivery_buffer,
                     )
                 except Exception as _dq_delivery_exc:
                     _release_prop_delivery_claim(
@@ -7167,13 +7190,43 @@ async def underdog_job(context) -> None:
                     )
                     _dq_result = DeliveryResult(sent=False)
 
+                if getattr(_dq_result, "queued", False):
+                    _release_prop_delivery_claim(
+                        _prop_market_alerted,
+                        _dq_player,
+                        _dq_sport,
+                        _dq_st,
+                        _dq_line_val,
+                        provider=getattr(_dq_snap, "provider", None) or "Underdog",
+                        source_id=str(_dq_ext_id or ""),
+                        event_id=str(
+                            getattr(_dq_snap, "event", "")
+                            or getattr(_dq_snap, "game_id", "")
+                            or ""
+                        ),
+                        direction=str(_dq_direction or ""),
+                    )
+                    if _dq_record is not None:
+                        _dq_record.alert_outcome = "pending_delivery"
+                    _n_dq_queued += 1
+                    _n_dq_deferred += 1
+                    _dq_deferred_log.append(
+                        f"{_dq_player}/{_dq_st} [path={_dq_path}]: queued"
+                    )
+                    continue
+
                 if _dq_result.sent:
                     _dq["_sent"] = True
                     # Update snapshot record fields before bulk-save
                     if _dq_record is not None:
-                        _dq_record.alert_sent    = True
+                        if getattr(_dq_result, "authoritative_recorded", False):
+                            _dq_record.alert_sent = True
                         _dq_record.alert_outcome = (
-                            "new_prop_sent" if _dq_path == "new" else "sent"
+                            "new_prop_sent"
+                            if _dq_path == "new"
+                            else "sent" if getattr(
+                                _dq_result, "authoritative_recorded", False
+                            ) else "sent_audit_unconfirmed"
                         )
                     # Per-path: counter, dedup update, lifecycle transition.
                     # Each path is handled inline so source-inspection tests can
@@ -7256,22 +7309,41 @@ async def underdog_job(context) -> None:
                         f"{str(_dq_result)}"
                     )
                                     
+            if _udog_delivery_buffer:
+                try:
+                    await db.enqueue_telegram_pick_deliveries(
+                        _udog_delivery_buffer
+                    )
+                except Exception as _queue_write_exc:
+                    _n_dq_queued = 0
+                    logger.error(
+                        "underdog_job: durable delivery batch failed: %s",
+                        type(_queue_write_exc).__name__,
+                    )
+                    for _queued_candidate in _delivery_queue:
+                        _queued_record = _queued_candidate.get("record")
+                        if (
+                            _queued_record is not None
+                            and _queued_record.alert_outcome == "pending_delivery"
+                        ):
+                            _queued_record.alert_outcome = "queue_persist_failed"
 
             if _n_dq_deferred:
                 _dq_sent_log = [
                     f"{c['player']}/{c['stat_type']}"
                     for c in _delivery_queue if c.get("_sent")
                 ]
-                # Deferral is expected when another scan path already owns the
-                # atomic delivery claim; it is not a failed delivery or lost
-                # scheduled work.  Keep genuine send failures above WARNING.
+                # Candidates are either safely queued or deferred by an
+                # existing qualification/dedup gate; neither path changes
+                # which picks qualify.
                 logger.info(
-                    "underdog_job: ranked delivery — %d/%d sent, %d deferred\n"
+                    "underdog_job: ranked delivery — %d sent, %d queued, "
+                    "%d other deferred\n"
                     "  Selected: %s\n"
-                    "  Deferred: %s",
+                    "  Queue/deferral notes: %s",
                     len(_delivery_queue) - _n_dq_deferred,
-                    len(_delivery_queue),
-                    _n_dq_deferred,
+                    _n_dq_queued,
+                    max(0, _n_dq_deferred - _n_dq_queued),
                     ", ".join(_dq_sent_log) or "none",
                     "; ".join(_dq_deferred_log[:10]),
                 )
@@ -8330,6 +8402,7 @@ async def _stable_refresh_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                          or ""
                      ),
                      delivery_path       = "standing",
+                    defer_delivery      = True,
                 )
             except Exception as _sr_delivery_exc:
                 _release_prop_delivery_claim(
@@ -9259,6 +9332,7 @@ async def _full_pool_rescan_job(context: "ContextTypes.DEFAULT_TYPE") -> None:
                               or ""
                           ),
                           delivery_path   = "full_pool",
+                          defer_delivery  = True,
                       )
                      except Exception as _fpr_delivery_exc:
                       _release_prop_delivery_claim(

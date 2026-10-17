@@ -34,11 +34,35 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 # ─────────────────────────────────────────────────────────────────────────────
 
 @pytest.fixture()
-async def db():
+async def db(monkeypatch):
     """Fresh in-memory database for each test, properly closed on teardown."""
     from database import Database
     _db = Database("sqlite+aiosqlite:///:memory:")
     await _db.init()
+    original_mark = _db.mark_opportunity_alert_sent
+
+    async def mark_after_confirmed_delivery(
+        external_id: str, stat_type: str, provider: str | None = None
+    ):
+        row = await _fetch_opp(_db, external_id, stat_type)
+        if row is not None:
+            await _db.record_telegram_play_delivery(
+                provider=provider or row.provider or "Underdog",
+                delivery_path="standing",
+                player_name=row.player_name,
+                sport=row.sport,
+                stat_type=row.stat_type,
+                external_id=external_id,
+                event_id=row.game_id,
+                line_value=row.line_value,
+                recipients_sent=1,
+                recipients_failed=0,
+                evidence_snapshot={"direction": row.recommendation},
+                direction=row.recommendation,
+            )
+        return await original_mark(external_id, stat_type, provider=provider)
+
+    monkeypatch.setattr(_db, "mark_opportunity_alert_sent", mark_after_confirmed_delivery)
     yield _db
     await _db.close()
 
@@ -85,18 +109,22 @@ async def _fetch_opp(db, external_id: str, stat_type: str):
 async def _confirm_telegram_play(db, external_id: str, stat_type: str = "hits",
                                  line: float = 0.5) -> None:
     """Create the identity-complete audit required for V4 confirmation."""
-    await db.mark_opportunity_alert_sent(external_id, stat_type)
-    await db.log_telegram_delivery(
-        provider="Underdog",
+    row = await _fetch_opp(db, external_id, stat_type)
+    if row is None:
+        return
+    await db.record_telegram_play_delivery(
+        provider=row.provider or "Underdog",
         delivery_path="standing",
-        player_name="Test Player",
-        sport="MLB",
-        stat_type=stat_type,
+        player_name=row.player_name,
+        sport=row.sport,
+        stat_type=row.stat_type,
         external_id=external_id,
-        event_id=f"game-{external_id}",
-        line_value=line,
-        outcome="sent",
+        event_id=row.game_id,
+        line_value=row.line_value if row.line_value is not None else line,
+        evidence_snapshot={"direction": row.recommendation},
+        direction=row.recommendation,
         recipients_sent=1,
+        recipients_failed=0,
     )
 
 

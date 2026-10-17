@@ -80,11 +80,14 @@ async def store_pick(db, q, *, sent_at, display_event=None):
     assert await db.record_telegram_play_delivery(
         provider=q.provider, delivery_path="new", player_name=q.player_name,
         sport=q.sport, stat_type=q.stat_type, external_id=q.external_id,
-        event_id=display_event or q.game_id, line_value=q.line_value, recipients_sent=1,
+            event_id=q.game_id, line_value=q.line_value, recipients_sent=1,
         recipients_failed=0, attempted_at=sent_at.replace(tzinfo=None),
-        evidence_snapshot=alerts._reminder_snapshot(
-            q.game_time, "OVER", q.line_variant, q.game_id,
-        ),
+            evidence_snapshot={
+                **alerts._reminder_snapshot(
+                    q.game_time, "OVER", q.line_variant, q.game_id,
+                ),
+                "event_display_label": display_event or q.game_id,
+            },
     )
 
 
@@ -392,7 +395,9 @@ def test_ambiguous_or_missing_reminder_timestamp_is_not_fabricated():
         ) is None
 
 
-async def test_verified_provider_event_id_can_differ_from_immutable_audit_label(db, clock, monkeypatch):
+async def test_provider_event_id_stays_canonical_when_display_label_differs(
+    db, clock, monkeypatch
+):
     q = quote(clock, game_id="272866")
     await store_pick(db, q, sent_at=clock[0], display_event="Verified Team A vs Team B")
     reminders.observe([q])
@@ -402,6 +407,10 @@ async def test_verified_provider_event_id_can_differ_from_immutable_audit_label(
     await reminders.run_due_reminders(db, object(), [123], now=clock[0])
     rows = await audit_rows(db)
     assert send.await_count == 1
-    assert rows[0].event_id == rows[1].event_id == "Verified Team A vs Team B"
+    assert rows[0].event_id == rows[1].event_id == "272866"
+    assert (
+        json.loads(rows[0].evidence_snapshot_json)["event_display_label"]
+        == "Verified Team A vs Team B"
+    )
     assert json.loads(rows[1].evidence_snapshot_json)["source_event_id"] == "272866"
     assert rows[1].outcome == "sent"

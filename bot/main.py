@@ -43,7 +43,7 @@ from models import (
     OddsMovement,
     Sport,
 )
-from alerts import AlertDelivery, broadcast_alert
+from alerts import AlertDelivery, broadcast_alert, telegram_pick_delivery_job
 from commands import (
     cmd_start,
     cmd_help,
@@ -769,6 +769,23 @@ async def post_init(application: Application) -> None:
     # Register background jobs
     jq = application.job_queue
     if jq:
+        # Already-qualified individual picks are persisted before network I/O.
+        # One worker sends at a time, with the durable sender pace and a
+        # persisted provider/sport round-robin cursor.
+        jq.run_repeating(
+            _coordinated_job(
+                "telegram_pick_delivery",
+                telegram_pick_delivery_job,
+                use_exclusive_group=False,
+            ),
+            interval=1,
+            first=5,
+            name="telegram_pick_delivery",
+            job_kwargs={
+                "coalesce": True,
+                "misfire_grace_time": 5,
+            },
+        )
         # The scheduler-facing callback is constructed with
         # _shared_monitoring_cycle so PropLine ingestion and Underdog scanning
         # retain one monitoring owner.
