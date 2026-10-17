@@ -1,0 +1,81 @@
+V4 Read-Only Forensic Audit — Qualification Funnel and Historical Delivery Reconciliation
+
+Perform a strictly read-only investigation of the currently running V4 bot in Replit. Do not modify code, restart the bot, mutate the database, repair historical flags, send Telegram messages, or make manual provider requests.
+
+Objective 1 — Explain the 32 Underdog opportunities
+
+Inspect the 32 Underdog opportunity records observed during the 16:53:03–16:58:44 UTC monitoring window on October 17, 2026.
+
+For each record, trace the available lifecycle evidence:
+
+OBSERVED → NORMALIZED → STORED → EVALUATION_ELIGIBLE → EVALUATED → evidence/history checks → ANALYZED → DIRECTIONAL → QUALIFIED → ACTIONABLE → ALERT_CREATED → DELIVERY_ELIGIBLE → QUEUED
+
+Determine:
+
+- Which stages each record actually reached.
+- Whether it was evaluated, rejected, filtered, or never processed.
+- Whether a rejection reason or qualification decision was persisted.
+- Why qualification-path and decision-tier fields are blank, if applicable.
+- Whether the durable delivery queue insertion was correctly skipped or a transition is missing.
+- Whether any records remain eligible but stranded outside the queue.
+
+Use existing logs, database records, and code paths. Do not infer that a record qualified merely because it was observed or stored.
+
+Preserve all current platform, sport, history, evidence, direction, event-status, and freshness rules. Do not relax thresholds to force a pick into the queue.
+
+Objective 2 — Trace every "alert_sent" write path
+
+Locate all code paths that set or update "alert_sent", "alert_sent_at", and equivalent delivery-status fields.
+
+For each write path, document:
+
+- The exact triggering condition.
+- Whether Telegram success must be confirmed before the flag is written.
+- Whether a successful "ACTIONABLE_PICK" audit is required.
+- The identity fields used to match the audit and opportunity.
+- Whether the path can write a flag when the audit insert is absent, fails, or uses a different identity.
+- Whether legacy code, reminder handling, reconciliation, or an alternate delivery path can explain the observed discrepancies.
+
+Do not assume that a missing audit proves a message was not sent. Distinguish confirmed delivery, unconfirmed delivery, and confirmed failure.
+
+Objective 3 — Reproduce the historical mismatch read-only
+
+Using retained records, inspect the reported historical counts:
+
+- Underdog: 4,107 "alert_sent=true"; 1,324 exact success-audit matches; 3 same source/event/player/market with a different line or side; 2,780 with no matching success audit.
+- PrizePicks: 418 "alert_sent=true"; zero exact success-audit matches; 418 with no matching success audit.
+- Pre-restart interval: 14 Underdog "alert_sent" updates and seven successful "ACTIONABLE_PICK" audits, with no identity matches.
+
+Recalculate these counts with explicit, documented identity rules. Check whether audit retention, missing source IDs, platform normalization, player/stat normalization, line representation, direction, or timestamp handling affects the result.
+
+Determine why the PrizePicks records have zero exact matches. Do not assume a platform-wide delivery failure without examining the underlying records and write paths.
+
+Do not count a different line or direction as an exact match. Do not change any flags or create replacement audits.
+
+Objective 4 — Review queue admission and audit ordering
+
+Trace the complete path from qualification to durable queue insertion and from Telegram's confirmed result to audit persistence and "alert_sent" updates.
+
+Verify:
+
+- Whether queue admission can be skipped after a valid qualification.
+- Whether a queue row can be created without a complete source/event/player/market/line/direction identity.
+- Whether audit persistence can fail after Telegram accepts a message.
+- Whether a success audit can be written without the queue being marked correctly.
+- Whether queue reconciliation and historical reporting use the same identity definition.
+- Whether a successful send on one line or direction could suppress or misrepresent another.
+
+Do not change the queue worker, retry behavior, reminder behavior, scheduler, or selection logic during this audit.
+
+Deliverable
+
+Return a concise evidence-based report containing:
+
+1. Root cause confirmed, likely, or unknown for each discrepancy.
+2. The actual lifecycle stage and recorded reason for each of the 32 observed opportunities, summarized in a table.
+3. A breakdown of all "alert_sent" write paths and their audit requirements.
+4. The SQL or equivalent read-only checks used to reproduce the historical counts.
+5. Whether the evidence indicates a code defect, legacy inconsistency, missing audit retention, or insufficient evidence to decide.
+6. A minimal proposed fix plan, separated from the investigation.
+
+Clearly distinguish verified facts from hypotheses. Do not modify files or data. Do not restart, deploy, push to GitHub, change thresholds, backfill history, or send test messages. Stop after presenting findings and wait for approval before implementing any fix.
