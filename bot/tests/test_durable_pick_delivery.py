@@ -13,6 +13,7 @@ from sqlalchemy import select
 
 import alerts
 from tests.offering_fixtures import seed_current_offering
+from engine.offering_coverage import coverage
 from database import (
     CandidateLifecycleRecord,
     Database,
@@ -1121,6 +1122,83 @@ async def test_confirmed_send_is_audited_and_never_sent_twice(tmp_path, monkeypa
                 attempt.attempted_at + timedelta(seconds=3.21)
             )
         assert await db.count_actionable_pick_records() == 1
+    finally:
+        await _close_db(db)
+
+
+@pytest.mark.asyncio
+async def test_delivery_waits_for_initial_provider_snapshot_and_keeps_pick_pending(
+    tmp_path, monkeypatch
+):
+    db = await _make_db(tmp_path)
+    coverage.reset_readiness()
+    try:
+        now = datetime.utcnow()
+        candidate = _item(game_time=now + timedelta(hours=2), fetched_at=now)
+        await _seed_underdog(db, candidate)
+        await _seed_opportunity(db, candidate)
+        await db.enqueue_telegram_pick_deliveries([candidate])
+        coverage.reset_readiness()
+        monkeypatch.setenv("ALLOWED_USER_IDS", "12345")
+        bot = _FakeBot()
+        context = SimpleNamespace(bot_data={"db": db}, bot=bot)
+
+        # The source row and offer exist, but no successful initial snapshot
+        # has declared Underdog ready for this runtime session.
+        await alerts.telegram_pick_delivery_job(context)
+        async with db.session() as session:
+            row = (await session.execute(
+                select(TelegramPickDelivery)
+            )).scalars().one()
+            assert row.status == "pending"
+            assert row.attempt_count == 0
+        assert bot.calls == 0
+
+        coverage.mark_scope_ready("Underdog")
+        await alerts.telegram_pick_delivery_job(context)
+        assert bot.calls == 1
+        async with db.session() as session:
+            row = (await session.execute(
+                select(TelegramPickDelivery)
+            )).scalars().one()
+            assert row.status == "sent"
+    finally:
+        coverage.reset_readiness()
+        await _close_db(db)
+
+
+@pytest.mark.asyncio
+async def test_queue_claim_skips_provider_sports_without_ready_snapshots(tmp_path):
+    db = await _make_db(tmp_path)
+    try:
+        ud = _item(provider="Underdog", sport="NHL", source_id="ud-ready-test")
+        pp = _item(
+            provider="PrizePicks",
+            sport="NBA",
+            source_id="PrizePicks::pp-ready-test",
+        )
+        await db.enqueue_telegram_pick_deliveries([ud, pp])
+        now = datetime.utcnow() + timedelta(seconds=1)
+
+        assert await db.claim_next_telegram_pick_delivery(
+            now=now, pacing_seconds=0, ready_scopes=set()
+        ) is None
+        pp_claim = await db.claim_next_telegram_pick_delivery(
+            now=now,
+            pacing_seconds=0,
+            ready_scopes={("PrizePicks", "NBA")},
+        )
+
+        assert pp_claim is not None
+        assert pp_claim["provider"] == "PrizePicks"
+        async with db.session() as session:
+            rows = (await session.execute(
+                select(TelegramPickDelivery)
+            )).scalars().all()
+            by_provider = {row.provider: row for row in rows}
+            assert by_provider["Underdog"].status == "pending"
+            assert by_provider["Underdog"].attempt_count == 0
+            assert by_provider["PrizePicks"].status == "sending"
     finally:
         await _close_db(db)
 

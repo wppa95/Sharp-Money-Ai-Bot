@@ -46,4 +46,9 @@ def seed_current_offering(
         raw=None,
         available_directions=(str(direction).upper(),),
     )
-    return canonicalize_player_props(provider, [prop])[0]
+    canonical = canonicalize_player_props(provider, [prop])[0]
+    if str(provider).strip().casefold() == "underdog":
+        coverage.mark_scope_ready(provider)
+    else:
+        coverage.mark_scope_ready(provider, sport)
+    return canonical
