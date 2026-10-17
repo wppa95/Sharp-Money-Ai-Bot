@@ -279,6 +279,7 @@ async def test_primary_platforms_have_no_legacy_daily_cap(source, legacy_limit):
                 "Test Player", "TeamA", "NBA", "Points",
                 25.5, 26.0,
                 source=source,
+                    line_variant="",
                 game_time=None,
                 score=MagicMock(total=75),
                 validation=SimpleNamespace(
