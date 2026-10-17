@@ -4770,6 +4770,154 @@ class Database:
             return True
 
     @_retry_sqlite_write
+    async def record_candidate_lifecycle_batch(
+        self,
+        candidates: Iterable[dict],
+    ) -> int:
+        """Persist candidate identities before final delivery checks, without gating sends."""
+        rows: list[dict] = []
+        for candidate in candidates:
+            item = dict(candidate)
+            provider = str(item.get("provider") or "").strip()
+            source_id = str(item.get("source_id") or "").strip()
+            event_id = str(item.get("event_id") or "").strip()
+            player_name = str(item.get("player_name") or "").strip()
+            sport = str(item.get("sport") or "").strip()
+            stat_type = str(item.get("stat_type") or "").strip()
+            direction = str(item.get("direction") or "").strip().upper()
+            line_variant = item.get("line_variant")
+            if provider.casefold() != "prizepicks" and line_variant is None:
+                line_variant = ""
+            identity_key = _candidate_lifecycle_identity_key(
+                provider=provider,
+                source_id=source_id,
+                event_id=event_id,
+                player_name=player_name,
+                sport=sport,
+                stat_type=stat_type,
+                line_value=item.get("line_value"),
+                direction=direction,
+                line_variant=line_variant,
+            )
+            if identity_key is None:
+                continue
+            evaluation_id = str(item.get("evaluation_id") or uuid.uuid4().hex)
+            if len(evaluation_id) != 32:
+                continue
+            rows.append({
+                "evaluation_id": evaluation_id,
+                "pick_identity_key": identity_key,
+                "provider": provider,
+                "source_id": source_id,
+                "event_id": event_id,
+                "player_name": player_name,
+                "sport": sport,
+                "stat_type": stat_type,
+                "line_variant": str(line_variant or ""),
+                "line_value": float(item["line_value"]),
+                "direction": direction,
+                "delivery_path": str(item.get("delivery_path") or "unknown"),
+                "disposition": "directional_decision",
+                "candidate_rank": item.get("candidate_rank"),
+                "ranking_scope": item.get("ranking_scope"),
+                "qualification_json": self._lifecycle_json(
+                    item.get("qualification_json")
+                ),
+                "evidence_snapshot_json": self._lifecycle_json(
+                    item.get("evidence_snapshot_json")
+                ),
+                "directional_at": item.get("directional_at") or datetime.utcnow(),
+                "created_at": datetime.utcnow(),
+                "updated_at": datetime.utcnow(),
+            })
+        if not rows:
+            return 0
+        async with self.session() as s:
+            from sqlalchemy.dialects.sqlite import insert as _sqlite_insert
+
+            await s.execute(
+                _sqlite_insert(CandidateLifecycleRecord)
+                .values(rows)
+                .prefix_with("OR IGNORE")
+            )
+            await s.commit()
+        return len(rows)
+
+    @staticmethod
+    def _lifecycle_json(value: object) -> Optional[str]:
+        if value is None:
+            return None
+        if isinstance(value, str):
+            try:
+                parsed = json.loads(value)
+            except (TypeError, ValueError):
+                return value
+            return json.dumps(parsed, sort_keys=True, separators=(",", ":"), default=str)
+        return json.dumps(value, sort_keys=True, separators=(",", ":"), default=str)
+
+    @_retry_sqlite_write
+    async def update_candidate_lifecycle_batch(
+        self,
+        updates: Iterable[dict],
+    ) -> int:
+        """Advance candidate disposition without changing its stored pick identity."""
+        changes = [dict(change) for change in updates]
+        if not changes:
+            return 0
+        terminal = {
+            "delivered", "delivery_unconfirmed", "rejected", "blocked",
+            "queue_persist_failed", "delivery_failed", "delivery_unknown",
+            "expired", "invalidated",
+        }
+        allowed = terminal | {
+            "directional_decision", "qualified", "queue_admitted",
+        }
+        updated = 0
+        async with self.session() as s:
+            for change in changes:
+                evaluation_id = str(change.get("evaluation_id") or "")
+                disposition = str(change.get("disposition") or "")
+                identity_key = str(change.get("pick_identity_key") or "")
+                if (
+                    not evaluation_id
+                    or disposition not in allowed
+                    or not identity_key
+                ):
+                    continue
+                row = await s.get(CandidateLifecycleRecord, evaluation_id)
+                if row is None or row.pick_identity_key != identity_key:
+                    continue
+                if row.disposition in terminal:
+                    continue
+                now = change.get("updated_at") or datetime.utcnow()
+                row.disposition = disposition
+                row.final_reason = (
+                    str(change["final_reason"])[:256]
+                    if change.get("final_reason") is not None
+                    else None
+                )
+                row.updated_at = now
+                if disposition in {"qualified", "queue_admitted", "delivered"}:
+                    row.qualified_at = row.qualified_at or now
+                if disposition == "queue_admitted":
+                    row.queue_admitted_at = row.queue_admitted_at or now
+                    if change.get("queue_delivery_id") is not None:
+                        row.queue_delivery_id = int(change["queue_delivery_id"])
+                if disposition == "delivered":
+                    row.delivered_at = row.delivered_at or now
+                if change.get("qualification_json") is not None:
+                    row.qualification_json = self._lifecycle_json(
+                        change["qualification_json"]
+                    )
+                if change.get("evidence_snapshot_json") is not None:
+                    row.evidence_snapshot_json = self._lifecycle_json(
+                        change["evidence_snapshot_json"]
+                    )
+                updated += 1
+            await s.commit()
+        return updated
+
+    @_retry_sqlite_write
     async def enqueue_telegram_pick_deliveries(
         self,
         candidates: Iterable[dict],
@@ -4787,7 +4935,7 @@ class Database:
                 required = (
                     "pick_key", "provider", "source_id", "event_id",
                     "player_name", "sport", "stat_type", "line_value",
-                    "direction", "delivery_path", "game_time",
+                    "line_variant", "direction", "delivery_path", "game_time",
                     "qualification_json", "evidence_snapshot_json",
                     "ranking_scope", "message_html",
                 )
@@ -4795,6 +4943,65 @@ class Database:
                     raise ValueError("Qualified delivery is missing stable identity or evidence")
                 provider = str(item["provider"])
                 sport = str(item["sport"])
+                expected_pick_key = telegram_pick_queue_key(
+                    provider=provider,
+                    source_id=str(item["source_id"]),
+                    event_id=str(item["event_id"]),
+                    player_name=str(item["player_name"]),
+                    sport=sport,
+                    stat_type=str(item["stat_type"]),
+                    line_variant=str(item["line_variant"]),
+                    line_value=float(item["line_value"]),
+                    direction=str(item["direction"]),
+                )
+                if str(item["pick_key"]) != expected_pick_key:
+                    raise ValueError("Delivery pick key does not match its exact source identity")
+                if provider.casefold() == "prizepicks":
+                    variant = str(item["line_variant"])
+                    if "line_variant" not in item or item["line_variant"] is None:
+                        raise ValueError(
+                            "PrizePicks delivery requires an explicit line variant"
+                        )
+                    source_id = str(item["source_id"]).strip()
+                    event_id = str(item["event_id"]).strip()
+                    player_name = str(item["player_name"]).strip()
+                    stat_type = str(item["stat_type"]).strip()
+                    direction = str(item["direction"]).strip().upper()
+                    line_value = float(item["line_value"])
+                    canonical_source_id = _stored_opportunity_external_id(
+                        source_id, provider
+                    )
+                    propline_id = await s.scalar(
+                        select(PropLineHistory.id).where(
+                            PropLineHistory.provider == "PrizePicks",
+                            PropLineHistory.product == PLAYER_PROPS_PRODUCT,
+                            PropLineHistory.external_id == source_id,
+                            PropLineHistory.game_id == event_id,
+                            PropLineHistory.player_name == player_name,
+                            PropLineHistory.sport == sport,
+                            PropLineHistory.stat_type == stat_type,
+                            func.coalesce(PropLineHistory.line_variant, "") == variant,
+                            PropLineHistory.line_value == line_value,
+                            PropLineHistory.removed.is_(False),
+                        ).limit(1)
+                    )
+                    opportunity_id = await s.scalar(
+                        select(PropOpportunityLog.id).where(
+                            PropOpportunityLog.provider == "PrizePicks",
+                            PropOpportunityLog.external_id == canonical_source_id,
+                            PropOpportunityLog.game_id == event_id,
+                            PropOpportunityLog.player_name == player_name,
+                            PropOpportunityLog.sport == sport,
+                            PropOpportunityLog.stat_type == stat_type,
+                            PropOpportunityLog.line_value == line_value,
+                            PropOpportunityLog.recommendation == direction,
+                        ).limit(1)
+                    )
+                    if propline_id is None or opportunity_id is None:
+                        raise ValueError(
+                            "PrizePicks delivery requires an exact PropLine source line "
+                            "and directional opportunity"
+                        )
                 group_key = f"{provider.casefold()}|{sport.casefold()}"
                 insert_row = {
                     **item,
@@ -4835,6 +5042,63 @@ class Database:
                         row.next_attempt_at = now
                     row.qualified_at = item.get("qualified_at") or now
                     row.updated_at = now
+                try:
+                    evidence_snapshot = json.loads(
+                        item.get("evidence_snapshot_json") or "{}"
+                    )
+                except (TypeError, ValueError):
+                    evidence_snapshot = {}
+                lifecycle_id = (
+                    evidence_snapshot.get("candidate_lifecycle_id")
+                    if isinstance(evidence_snapshot, dict) else None
+                )
+                if lifecycle_id:
+                    lifecycle_key = _candidate_lifecycle_identity_key(
+                        provider=provider,
+                        source_id=str(item["source_id"]),
+                        event_id=str(item["event_id"]),
+                        player_name=str(item["player_name"]),
+                        sport=sport,
+                        stat_type=str(item["stat_type"]),
+                        line_value=float(item["line_value"]),
+                        direction=str(item["direction"]),
+                        line_variant=str(item["line_variant"]),
+                    )
+                    lifecycle = await s.get(
+                        CandidateLifecycleRecord, str(lifecycle_id)
+                    )
+                    if (
+                        lifecycle is not None
+                        and lifecycle.pick_identity_key == lifecycle_key
+                        and lifecycle.disposition not in {
+                            "delivered", "delivery_unconfirmed", "rejected",
+                            "blocked", "queue_persist_failed", "delivery_failed",
+                            "delivery_unknown", "expired", "invalidated",
+                        }
+                    ):
+                        lifecycle.disposition = (
+                            "delivery_unknown"
+                            if row.status == "sent"
+                            and row.final_reason == "telegram_sent_audit_write_unconfirmed"
+                            else "delivered" if row.status == "sent"
+                            else "queue_admitted"
+                        )
+                        lifecycle.final_reason = row.final_reason
+                        lifecycle.queue_delivery_id = int(row.id)
+                        lifecycle.updated_at = now
+                        lifecycle.qualified_at = lifecycle.qualified_at or now
+                        if lifecycle.disposition == "queue_admitted":
+                            lifecycle.queue_admitted_at = (
+                                lifecycle.queue_admitted_at or now
+                            )
+                        if lifecycle.disposition == "delivered":
+                            lifecycle.delivered_at = lifecycle.delivered_at or row.sent_at or now
+                        lifecycle.qualification_json = str(
+                            item.get("qualification_json") or "{}"
+                        )
+                        lifecycle.evidence_snapshot_json = str(
+                            item.get("evidence_snapshot_json") or "{}"
+                        )
                 group = await s.get(TelegramPickDeliveryGroup, group_key)
                 if group is None:
                     s.add(
