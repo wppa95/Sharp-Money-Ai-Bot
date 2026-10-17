@@ -3384,66 +3384,26 @@ async def _run_prizepicks_independent_cycle(
     chat_ids = list(config.allowed_user_ids)
     _pp_lifecycle_updates: list[dict] = []
     if actionable:
-        _pp_lifecycle_rows = []
+        _pp_rank_updates = []
         for candidate_rank, candidate in enumerate(actionable, start=1):
-            prop = candidate["prop"]
-            decision = candidate["decision"]
-            validation = candidate["validation"]
-            _pp_lifecycle_rows.append({
+            _pp_rank_updates.append({
                 "evaluation_id": candidate["candidate_lifecycle_id"],
-                "provider": "PrizePicks",
-                "source_id": str(candidate.get("external_id") or ""),
-                "event_id": str(
-                    getattr(prop, "event_id", "")
-                    or getattr(prop, "game_id", "")
-                    or ""
-                ),
-                "player_name": candidate["player"],
-                "sport": candidate["sport"],
-                "stat_type": candidate["stat"],
-                "line_variant": str(getattr(prop, "line_variant", "") or ""),
-                "line_value": float(candidate["line"]),
-                "direction": str(
-                    getattr(decision, "recommendation", "") or ""
-                ).upper(),
-                "delivery_path": "prizepicks",
+                "disposition": "directional_decision",
                 "candidate_rank": candidate_rank,
                 "ranking_scope": (
                     f"sport:{str(candidate['sport']).upper()}"
                 ),
-                "qualification_json": {
-                    "stage": "directional_candidate_collection",
-                    "passed_collection_gates": True,
-                    "passed_final_delivery_checks": False,
-                },
-                "evidence_snapshot_json": {
-                    "line": float(candidate["line"]),
-                    "line_variant": str(
-                        getattr(prop, "line_variant", "") or ""
-                    ),
-                    "direction": str(
-                        getattr(decision, "recommendation", "") or ""
-                    ).upper(),
-                    "validation": getattr(
-                        validation, "to_dict", lambda: {}
-                    )(),
-                    "decision": getattr(
-                        decision, "to_dict", lambda: {}
-                    )(),
-                    "evidence_timestamp": str(
-                        getattr(prop, "fetched_at", "") or ""
-                    ),
-                },
+                "final_reason": None,
             })
         try:
-            lifecycle_writer = getattr(
-                db, "record_candidate_lifecycle_batch", None
+            lifecycle_updater = getattr(
+                db, "update_candidate_lifecycle_batch", None
             )
-            if callable(lifecycle_writer):
-                await lifecycle_writer(_pp_lifecycle_rows)
+            if callable(lifecycle_updater):
+                await lifecycle_updater(_pp_rank_updates)
         except Exception as exc:  # noqa: BLE001
             logger.warning(
-                "prizepicks_cycle: candidate lifecycle write failed: %s",
+                "prizepicks_cycle: candidate rank update failed: %s",
                 type(exc).__name__,
             )
     if not chat_ids:
