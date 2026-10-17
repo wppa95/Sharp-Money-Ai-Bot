@@ -3066,6 +3066,8 @@ async def _run_prizepicks_independent_cycle(
 
     actionable: list[dict] = []
     _pp_candidate_rows: list[dict] = []
+    _pp_lifecycle_candidates: list[dict] = []
+    _pp_lifecycle_rejections: list[dict] = []
     evaluated = 0
     directional = 0
 
@@ -3177,6 +3179,37 @@ async def _run_prizepicks_independent_cycle(
         if decision is None or decision.recommendation not in ("OVER", "UNDER"):
             continue
         directional += 1
+        candidate_lifecycle_id = uuid.uuid4().hex
+        _pp_lifecycle_candidates.append({
+            "evaluation_id": candidate_lifecycle_id,
+            "provider": "PrizePicks",
+            "source_id": external_id,
+            "event_id": str(
+                getattr(prop, "event_id", "")
+                or getattr(prop, "game_id", "")
+                or ""
+            ),
+            "player_name": player,
+            "sport": sport,
+            "stat_type": stat,
+            "line_variant": str(getattr(prop, "line_variant", "") or ""),
+            "line_value": line,
+            "direction": str(decision.recommendation).upper(),
+            "delivery_path": "prizepicks",
+            "ranking_scope": f"sport:{sport.upper()}",
+            "qualification_json": {
+                "stage": "directional_decision",
+                "passed_collection_gates": False,
+            },
+            "evidence_snapshot_json": {
+                "line": line,
+                "line_variant": str(getattr(prop, "line_variant", "") or ""),
+                "direction": str(decision.recommendation).upper(),
+                "validation": getattr(validation, "to_dict", lambda: {})(),
+                "decision": getattr(decision, "to_dict", lambda: {})(),
+                "evidence_timestamp": str(getattr(prop, "fetched_at", "") or ""),
+            },
+        })
         setattr(prop, "bet_recommendation", decision.recommendation)
         _analyst_result = _analyst_payload(
             player_name=player,
@@ -3235,9 +3268,14 @@ async def _run_prizepicks_independent_cycle(
                 "prizepicks_cycle: opportunity write failed for %s/%s: %s",
                 player, stat, type(exc).__name__,
             )
+            _pp_lifecycle_rejections.append({
+                "evaluation_id": candidate_lifecycle_id,
+                "disposition": "rejected",
+                "final_reason": "directional opportunity persistence failed",
+            })
             continue
 
-        if _tier_delivery_gate(
+        _pp_collection_gate_passed = _tier_delivery_gate(
             sport,
             decision.recommendation,
             float(getattr(score, "total", 0) or 0),
@@ -3251,7 +3289,12 @@ async def _run_prizepicks_independent_cycle(
             ),
             score_tier=getattr(decision, "decision_tier", None),
             confidence=getattr(decision, "confidence", None),
-        ):
+        )
+        _pp_lifecycle_candidates[-1]["qualification_json"] = {
+            "stage": "directional_decision",
+            "passed_collection_gates": bool(_pp_collection_gate_passed),
+        }
+        if _pp_collection_gate_passed:
             actionable.append({
                 "provider": "PrizePicks",
                 "prop": prop,
@@ -3264,8 +3307,33 @@ async def _run_prizepicks_independent_cycle(
                 "score": score,
                 "validation": validation,
                 "decision": decision,
-                "candidate_lifecycle_id": uuid.uuid4().hex,
+                "candidate_lifecycle_id": candidate_lifecycle_id,
             })
+        else:
+            _pp_lifecycle_rejections.append({
+                "evaluation_id": candidate_lifecycle_id,
+                "disposition": "rejected",
+                "final_reason": (
+                    "directional decision did not pass existing PrizePicks "
+                    "collection qualification gate"
+                ),
+            })
+
+    try:
+        lifecycle_writer = getattr(
+            db, "record_candidate_lifecycle_batch", None
+        )
+        if callable(lifecycle_writer):
+            await lifecycle_writer(_pp_lifecycle_candidates)
+            if _pp_lifecycle_rejections:
+                await db.update_candidate_lifecycle_batch(
+                    _pp_lifecycle_rejections
+                )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "prizepicks_cycle: candidate lifecycle write failed: %s",
+            type(exc).__name__,
+        )
 
     try:
         # Refresh score/recommendation metadata on the current row without
@@ -3279,6 +3347,18 @@ async def _run_prizepicks_independent_cycle(
         )
     except Exception as exc:  # noqa: BLE001
         logger.warning("prizepicks_cycle: history persistence failed: %s", type(exc).__name__)
+        try:
+            await db.update_candidate_lifecycle_batch([
+                {
+                    "evaluation_id": candidate.get("candidate_lifecycle_id"),
+                    "disposition": "blocked",
+                    "final_reason": "canonical history metadata persistence failed",
+                }
+                for candidate in actionable
+                if candidate.get("candidate_lifecycle_id")
+            ])
+        except Exception:
+            logger.debug("prizepicks_cycle: blocked lifecycle update unavailable")
         logger.info(
             "prizepicks_cycle: provider=PrizePicks sport=%s fetch_succeeded=true "
             "observations=%d persisted=0 evaluated=%d actionable=%d delivered=0",
