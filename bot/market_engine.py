@@ -7174,6 +7174,11 @@ async def underdog_job(context) -> None:
                     confidence=getattr(_dq_dec, "confidence", None),
                 ):
                     _n_dq_deferred += 1
+                    _lifecycle_updates.append({
+                        "evaluation_id": _dq.get("candidate_lifecycle_id"),
+                        "disposition": "rejected",
+                        "final_reason": "direction/evidence gate",
+                    })
                     _dq_deferred_log.append(
                         f"{_dq_player}/{_dq_st}"
                          f" [sport={_dq_sport} dir={_dq_direction}]: "
@@ -7199,6 +7204,11 @@ async def underdog_job(context) -> None:
                     direction=str(_dq_direction or ""),
                 ):
                     _n_dq_deferred += 1
+                    _lifecycle_updates.append({
+                        "evaluation_id": _dq.get("candidate_lifecycle_id"),
+                        "disposition": "rejected",
+                        "final_reason": "delivery claim already held",
+                    })
                     _dq_deferred_log.append(
                         f"{_dq_player}/{_dq_st}"
                         f" [sport={_dq_sport}]: concurrent path already claimed delivery slot"
@@ -7246,6 +7256,7 @@ async def underdog_job(context) -> None:
                         evidence_snapshot  = _dq_snapshot,
                         defer_delivery     = True,
                         delivery_buffer    = _udog_delivery_buffer,
+                        candidate_lifecycle_id=_dq.get("candidate_lifecycle_id"),
                     )
                 except Exception as _dq_delivery_exc:
                     _release_prop_delivery_claim(
@@ -7268,6 +7279,13 @@ async def underdog_job(context) -> None:
                         _dq_player, _dq_st, type(_dq_delivery_exc).__name__,
                     )
                     _dq_result = DeliveryResult(sent=False)
+                    _lifecycle_updates.append({
+                        "evaluation_id": _dq.get("candidate_lifecycle_id"),
+                        "disposition": "rejected",
+                        "final_reason": (
+                            f"delivery exception: {type(_dq_delivery_exc).__name__}"
+                        ),
+                    })
 
                 if getattr(_dq_result, "queued", False):
                     _release_prop_delivery_claim(
@@ -7285,8 +7303,14 @@ async def underdog_job(context) -> None:
                         ),
                         direction=str(_dq_direction or ""),
                     )
+                    _n_fully_qualified += 1
                     if _dq_record is not None:
-                        _dq_record.alert_outcome = "pending_delivery"
+                        _dq_record.alert_outcome = "queue_buffered"
+                    _lifecycle_updates.append({
+                        "evaluation_id": _dq.get("candidate_lifecycle_id"),
+                        "disposition": "qualified",
+                        "final_reason": None,
+                    })
                     _n_dq_queued += 1
                     _n_dq_deferred += 1
                     _dq_deferred_log.append(
@@ -7295,6 +7319,7 @@ async def underdog_job(context) -> None:
                     continue
 
                 if _dq_result.sent:
+                    _n_fully_qualified += 1
                     _dq["_sent"] = True
                     # Update snapshot record fields before bulk-save
                     if _dq_record is not None:
@@ -7387,12 +7412,45 @@ async def underdog_job(context) -> None:
                          f"{_dq_player}/{_dq_st} [path={_dq_path}]:"
                         f"{str(_dq_result)}"
                     )
+                    _lifecycle_updates.append({
+                        "evaluation_id": _dq.get("candidate_lifecycle_id"),
+                        "disposition": "rejected",
+                        "final_reason": (
+                            str(getattr(_dq_result, "filtered_reason", None)
+                                or "delivery did not reach the durable queue")
+                        ),
+                    })
+
+            if _lifecycle_updates:
+                try:
+                    _update_lifecycle = getattr(
+                        db, "update_candidate_lifecycle_batch", None
+                    )
+                    if callable(_update_lifecycle):
+                        await _update_lifecycle(_lifecycle_updates)
+                except Exception as _lifecycle_exc:
+                    logger.warning(
+                        "underdog_job: candidate disposition update failed: %s",
+                        type(_lifecycle_exc).__name__,
+                    )
                                     
             if _udog_delivery_buffer:
                 try:
-                    await db.enqueue_telegram_pick_deliveries(
+                    _saved_queue_ids = await db.enqueue_telegram_pick_deliveries(
                         _udog_delivery_buffer
                     )
+                    if len(_saved_queue_ids) != len(_udog_delivery_buffer):
+                        raise RuntimeError(
+                            "durable delivery batch returned an incomplete identity set"
+                        )
+                    _n_queue_admitted += len(_saved_queue_ids)
+                    for _queued_candidate in _delivery_queue:
+                        _queued_record = _queued_candidate.get("record")
+                        if (
+                            _queued_record is not None
+                            and _queued_record.alert_outcome == "queue_buffered"
+                        ):
+                            _queued_record.alert_outcome = "queue_admitted"
                 except Exception as _queue_write_exc:
                     _n_dq_queued = 0
                     logger.error(
@@ -7403,9 +7461,28 @@ async def underdog_job(context) -> None:
                         _queued_record = _queued_candidate.get("record")
                         if (
                             _queued_record is not None
-                            and _queued_record.alert_outcome == "pending_delivery"
+                            and _queued_record.alert_outcome == "queue_buffered"
                         ):
                             _queued_record.alert_outcome = "queue_persist_failed"
+                    try:
+                        await db.update_candidate_lifecycle_batch([
+                            {
+                                "evaluation_id": item.get("candidate_lifecycle_id"),
+                                "disposition": "queue_persist_failed",
+                                "final_reason": (
+                                    f"queue persistence failed: "
+                                    f"{type(_queue_write_exc).__name__}"
+                                ),
+                            }
+                            for item in _delivery_queue
+                            if item.get("candidate_lifecycle_id")
+                            and item.get("record") is not None
+                            and item["record"].alert_outcome == "queue_persist_failed"
+                        ])
+                    except Exception:
+                        logger.debug(
+                            "underdog_job: lifecycle queue failure update unavailable"
+                        )
 
             if _n_dq_deferred:
                 _dq_sent_log = [
@@ -7417,7 +7494,7 @@ async def underdog_job(context) -> None:
                 # which picks qualify.
                 logger.info(
                     "underdog_job: ranked delivery — %d sent, %d queued, "
-                    "%d other deferred\n"
+                    "%d other rejected or deferred\n"
                     "  Selected: %s\n"
                     "  Queue/deferral notes: %s",
                     len(_delivery_queue) - _n_dq_deferred,
