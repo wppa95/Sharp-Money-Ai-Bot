@@ -7143,7 +7143,7 @@ async def underdog_job(context) -> None:
         # are attempted in priority order. Ranking does not impose a rolling send
         # limit; existing per-candidate delivery gates still apply.
         _lifecycle_updates: list[dict] = []
-        if _delivery_queue and db:
+        if _opportunity_batch and db:
             def _lifecycle_identity(
                 provider: object,
                 source_id: object,
@@ -7172,6 +7172,7 @@ async def underdog_job(context) -> None:
                 )
 
             _queue_lifecycle_ids: dict[tuple, list[str]] = {}
+            _queue_candidate_by_id: dict[str, dict] = {}
             for _candidate in _delivery_queue:
                 _candidate_snap = _candidate.get("snap")
                 _candidate_decision = _candidate.get("decision")
@@ -7193,6 +7194,7 @@ async def underdog_job(context) -> None:
                 _queue_lifecycle_ids.setdefault(_queue_key, []).append(
                     _candidate_lifecycle_id
                 )
+                _queue_candidate_by_id[_candidate_lifecycle_id] = _candidate
 
             _lifecycle_rows: list[dict] = []
             _lifecycle_rejected: list[dict] = []
@@ -7215,12 +7217,8 @@ async def underdog_job(context) -> None:
                 _evaluation_id = (
                     _matching_ids.pop(0) if _matching_ids else uuid.uuid4().hex
                 )
-                _passed_collection = bool(
-                    _evaluation_id in {
-                        item.get("candidate_lifecycle_id")
-                        for item in _delivery_queue
-                    }
-                )
+                _matched_candidate = _queue_candidate_by_id.get(_evaluation_id)
+                _passed_collection = _matched_candidate is not None
                 _lifecycle_rows.append({
                     "evaluation_id": _evaluation_id,
                     "provider": _provider,
@@ -7233,14 +7231,8 @@ async def underdog_job(context) -> None:
                     "line_value": _line_value,
                     "direction": _direction,
                     "delivery_path": (
-                        "underdog" if not _passed_collection else next(
-                            (
-                                str(item.get("path") or "underdog")
-                                for item in _delivery_queue
-                                if item.get("candidate_lifecycle_id") == _evaluation_id
-                            ),
-                            "underdog",
-                        )
+                        str(_matched_candidate.get("path") or "underdog")
+                        if _matched_candidate else "underdog"
                     ),
                     "qualification_json": {
                         "stage": "directional_decision",
