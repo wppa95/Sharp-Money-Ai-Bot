@@ -138,12 +138,14 @@ class OfferingCoverage:
 
     def clear_scope(self, provider: str, sport: str = "") -> None:
         """Discard the prior in-memory offering snapshot for a successful feed."""
+        from engine.sport_policy import player_sport_key
+
         provider_key = str(provider or "").casefold()
-        sport_key = str(sport or "").upper()
+        sport_key = player_sport_key(sport) if sport else ""
         for key, row in list(self.rows.items()):
             if str(getattr(row, "provider", "")).casefold() != provider_key:
                 continue
-            if sport_key and str(getattr(row, "sport", "")).upper() != sport_key:
+            if sport_key and player_sport_key(getattr(row, "sport", "")) != sport_key:
                 continue
             self.rows.pop(key, None)
             self.stages.pop(key, None)
@@ -179,6 +181,9 @@ class OfferingCoverage:
         max_age_seconds: int = 900,
     ) -> tuple[Any | None, str]:
         """Fail closed unless the exact, fresh source offering supports a pick."""
+        from engine.sport_policy import player_sport_key
+
+        sport_key = player_sport_key(sport)
         direction = str(direction or "").strip().upper()
         if direction not in {"OVER", "UNDER"}:
             return None, "DIRECTION_UNVERIFIED"
@@ -196,7 +201,7 @@ class OfferingCoverage:
 
         same_source = []
         for key in self.index.get(
-            self._identity(provider, player, sport, stat, line), ()
+            self._identity(provider, player, sport_key, stat, line), ()
         ):
             row = self.rows.get(key)
             if row is None:
@@ -209,9 +214,9 @@ class OfferingCoverage:
                 continue
             if str(getattr(row, "player_name", "") or "").strip().casefold() != player.strip().casefold():
                 continue
-            if str(getattr(row, "sport", "") or "").upper() != sport.upper():
+            if player_sport_key(getattr(row, "sport", "")) != sport_key:
                 continue
-            if market_identity(sport, str(getattr(row, "stat_type", "") or "")) != market_identity(sport, stat):
+            if market_identity(sport_key, str(getattr(row, "stat_type", "") or "")) != market_identity(sport_key, stat):
                 continue
             if _utc(getattr(row, "game_time", None)) != _utc(game_time):
                 continue

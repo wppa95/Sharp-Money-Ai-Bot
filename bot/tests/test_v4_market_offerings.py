@@ -488,6 +488,45 @@ def test_exact_offering_identity_rejects_alternate_source_line_and_variant():
 
 
 @pytest.mark.parametrize(
+    "provider_sport,canonical_sport",
+    [
+        ("CS2", "CS"),
+        ("VALORANT", "VAL"),
+        ("DOTA2", "DOTA"),
+        ("LEAGUE OF LEGENDS", "LOL"),
+    ],
+)
+def test_esports_aliases_use_same_exact_current_offering_identity(
+    provider_sport, canonical_sport
+):
+    source = prop(
+        provider="Underdog",
+        sport=provider_sport,
+        stat="Kills",
+        line=10.5,
+        external_id=f"esports-{provider_sport}",
+        available_directions=("OVER",),
+    )
+    row = canonicalize_player_props("Underdog", [source])[0]
+    assert row.sport == canonical_sport
+    current, reason = coverage.validate_selection(
+        provider="Underdog",
+        source_id=row.external_id,
+        event_id=row.game_id,
+        player=row.player_name,
+        sport=provider_sport,
+        stat=row.stat_type,
+        line=row.line_value,
+        direction="OVER",
+        line_variant=None,
+        game_time=row.game_time,
+    )
+    assert current is row and reason == ""
+    coverage.clear_scope("Underdog", provider_sport)
+    assert row not in coverage.rows.values()
+
+
+@pytest.mark.parametrize(
     "mutate,expected",
     [
         (lambda row: setattr(row, "fetched_at", datetime.utcnow() - timedelta(seconds=901)),
