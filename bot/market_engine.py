@@ -7295,13 +7295,19 @@ async def underdog_job(context) -> None:
                     _lifecycle_rejected.append({
                         "evaluation_id": _evaluation_id,
                         "disposition": (
-                            "blocked" if not _opportunity_write_ok else "rejected"
+                            "blocked"
+                            if not _opportunity_write_ok or not chat_ids
+                            else "rejected"
                         ),
                         "final_reason": (
                             "directional opportunity persistence failed"
                             if not _opportunity_write_ok
-                            else "directional opportunity did not pass existing "
-                            "delivery-candidate gates"
+                            else (
+                                "no configured recipients"
+                                if not chat_ids
+                                else "directional opportunity did not pass existing "
+                                "delivery-candidate gates"
+                            )
                         ),
                     })
 
