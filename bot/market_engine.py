@@ -7144,64 +7144,183 @@ async def underdog_job(context) -> None:
         # limit; existing per-candidate delivery gates still apply.
         _lifecycle_updates: list[dict] = []
         if _delivery_queue and db:
-            _lifecycle_rows: list[dict] = []
+            def _lifecycle_identity(
+                provider: object,
+                source_id: object,
+                event_id: object,
+                player_name: object,
+                sport: object,
+                stat_type: object,
+                line_value: object,
+                direction: object,
+                line_variant: object = "",
+            ) -> tuple:
+                try:
+                    _line_identity = round(float(line_value), 6)
+                except (TypeError, ValueError):
+                    _line_identity = None
+                return (
+                    str(provider or "").strip().casefold(),
+                    str(source_id or "").strip(),
+                    str(event_id or "").strip(),
+                    str(player_name or "").strip().casefold(),
+                    str(sport or "").strip().upper(),
+                    str(stat_type or "").strip().casefold(),
+                    _line_identity,
+                    str(direction or "").strip().upper(),
+                    str(line_variant or "").strip().casefold(),
+                )
+
+            _queue_lifecycle_ids: dict[tuple, list[str]] = {}
             for _candidate in _delivery_queue:
                 _candidate_snap = _candidate.get("snap")
                 _candidate_decision = _candidate.get("decision")
-                _candidate_validation = _candidate.get("validation")
-                _candidate_direction = str(
-                    getattr(_candidate_decision, "recommendation", "") or ""
-                ).upper()
                 _candidate_lifecycle_id = str(
                     _candidate.get("candidate_lifecycle_id") or uuid.uuid4().hex
                 )
                 _candidate["candidate_lifecycle_id"] = _candidate_lifecycle_id
-                _candidate["pick_identity_key"] = None
-                _candidate_event_id = str(
+                _queue_key = _lifecycle_identity(
+                    getattr(_candidate_snap, "provider", None) or "Underdog",
+                    _candidate.get("ext_id"),
                     getattr(_candidate_snap, "event", "")
-                    or getattr(_candidate_snap, "game_id", "")
-                    or ""
+                    or getattr(_candidate_snap, "game_id", ""),
+                    _candidate.get("player"),
+                    _candidate.get("sport"),
+                    _candidate.get("stat_type"),
+                    _candidate.get("line_val"),
+                    getattr(_candidate_decision, "recommendation", ""),
                 )
-                _validation_payload = getattr(
-                    _candidate_validation, "to_dict", lambda: {}
-                )()
-                _decision_payload = getattr(
-                    _candidate_decision, "to_dict", lambda: {}
-                )()
+                _queue_lifecycle_ids.setdefault(_queue_key, []).append(
+                    _candidate_lifecycle_id
+                )
+
+            _lifecycle_rows: list[dict] = []
+            _lifecycle_rejected: list[dict] = []
+            for _opportunity in _opportunity_batch:
+                _provider = str(_opportunity.get("provider") or "Underdog")
+                _source_id = str(_opportunity.get("external_id") or "")
+                _event_id = str(_opportunity.get("game_id") or "")
+                _player_name = str(_opportunity.get("player_name") or "")
+                _sport = str(_opportunity.get("sport") or "UNKNOWN")
+                _stat_type = str(_opportunity.get("stat_type") or "")
+                _line_value = _opportunity.get("line_value")
+                _direction = str(
+                    _opportunity.get("recommendation") or ""
+                ).upper()
+                _identity = _lifecycle_identity(
+                    _provider, _source_id, _event_id, _player_name,
+                    _sport, _stat_type, _line_value, _direction,
+                )
+                _matching_ids = _queue_lifecycle_ids.get(_identity) or []
+                _evaluation_id = (
+                    _matching_ids.pop(0) if _matching_ids else uuid.uuid4().hex
+                )
+                _passed_collection = bool(
+                    _evaluation_id in {
+                        item.get("candidate_lifecycle_id")
+                        for item in _delivery_queue
+                    }
+                )
                 _lifecycle_rows.append({
-                    "evaluation_id": _candidate_lifecycle_id,
-                    "provider": str(_candidate.get("provider") or "Underdog"),
-                    "source_id": str(_candidate.get("ext_id") or ""),
-                    "event_id": _candidate_event_id,
-                    "player_name": str(_candidate.get("player") or ""),
-                    "sport": str(_candidate.get("sport") or "UNKNOWN"),
-                    "stat_type": str(_candidate.get("stat_type") or ""),
+                    "evaluation_id": _evaluation_id,
+                    "provider": _provider,
+                    "source_id": _source_id,
+                    "event_id": _event_id,
+                    "player_name": _player_name,
+                    "sport": _sport,
+                    "stat_type": _stat_type,
                     "line_variant": "",
-                    "line_value": float(_candidate.get("line_val") or 0.0),
-                    "direction": _candidate_direction,
-                    "delivery_path": str(_candidate.get("path") or "underdog"),
+                    "line_value": _line_value,
+                    "direction": _direction,
+                    "delivery_path": (
+                        "underdog" if not _passed_collection else next(
+                            (
+                                str(item.get("path") or "underdog")
+                                for item in _delivery_queue
+                                if item.get("candidate_lifecycle_id") == _evaluation_id
+                            ),
+                            "underdog",
+                        )
+                    ),
                     "qualification_json": {
-                        "stage": "directional_candidate_collection",
-                        "passed_final_delivery_checks": False,
-                        "collection_path": str(_candidate.get("path") or "underdog"),
+                        "stage": "directional_decision",
+                        "passed_collection_gates": _passed_collection,
+                        "reason_codes": _opportunity.get("reason_codes"),
                     },
                     "evidence_snapshot_json": {
-                        "direction": _candidate_direction,
-                        "line": float(_candidate.get("line_val") or 0.0),
-                        "validation": _validation_payload,
-                        "decision": _decision_payload,
-                        "score_total": getattr(
-                            _candidate.get("score"), "total", None
+                        "direction": _direction,
+                        "line": _line_value,
+                        "confidence": _opportunity.get("confidence"),
+                        "reason_codes": _opportunity.get("reason_codes"),
+                        "downstream_intelligence": _opportunity.get(
+                            "downstream_intelligence"
                         ),
                     },
-                    "ranking_scope": f"sport:{str(_candidate.get('sport') or 'UNKNOWN').upper()}",
+                    "ranking_scope": f"sport:{_sport.upper()}",
                 })
+                if not _passed_collection:
+                    _lifecycle_rejected.append({
+                        "evaluation_id": _evaluation_id,
+                        "disposition": "rejected",
+                        "final_reason": (
+                            "directional opportunity did not pass existing "
+                            "delivery-candidate gates"
+                        ),
+                    })
+
+            # Preserve a lifecycle row for an eligible queue candidate if an
+            # opportunity snapshot could not be produced in this cycle.
+            for _candidate in _delivery_queue:
+                _candidate_lifecycle_id = _candidate.get("candidate_lifecycle_id")
+                if not any(
+                    row["evaluation_id"] == _candidate_lifecycle_id
+                    for row in _lifecycle_rows
+                ):
+                    _candidate_snap = _candidate.get("snap")
+                    _candidate_decision = _candidate.get("decision")
+                    _candidate_validation = _candidate.get("validation")
+                    _candidate_direction = str(
+                        getattr(_candidate_decision, "recommendation", "") or ""
+                    ).upper()
+                    _lifecycle_rows.append({
+                        "evaluation_id": _candidate_lifecycle_id,
+                        "provider": str(
+                            getattr(_candidate_snap, "provider", None) or "Underdog"
+                        ),
+                        "source_id": str(_candidate.get("ext_id") or ""),
+                        "event_id": str(
+                            getattr(_candidate_snap, "event", "")
+                            or getattr(_candidate_snap, "game_id", "")
+                            or ""
+                        ),
+                        "player_name": str(_candidate.get("player") or ""),
+                        "sport": str(_candidate.get("sport") or "UNKNOWN"),
+                        "stat_type": str(_candidate.get("stat_type") or ""),
+                        "line_variant": "",
+                        "line_value": _candidate.get("line_val"),
+                        "direction": _candidate_direction,
+                        "delivery_path": str(_candidate.get("path") or "underdog"),
+                        "qualification_json": {
+                            "stage": "directional_candidate_collection",
+                            "passed_collection_gates": True,
+                        },
+                        "evidence_snapshot_json": {
+                            "validation": getattr(
+                                _candidate_validation, "to_dict", lambda: {}
+                            )(),
+                        },
+                        "ranking_scope": (
+                            f"sport:{str(_candidate.get('sport') or 'UNKNOWN').upper()}"
+                        ),
+                    })
             try:
                 _record_lifecycle = getattr(
                     db, "record_candidate_lifecycle_batch", None
                 )
                 if callable(_record_lifecycle):
                     await _record_lifecycle(_lifecycle_rows)
+                    if _lifecycle_rejected:
+                        await db.update_candidate_lifecycle_batch(_lifecycle_rejected)
             except Exception as _lifecycle_exc:
                 # Observability must not change which candidates qualify or send.
                 logger.warning(
