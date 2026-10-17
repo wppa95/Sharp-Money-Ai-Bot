@@ -307,6 +307,7 @@ async def test_explicit_unavailable_direction_not_delivered_but_available_pick_i
     result = await delivery.deliver_underdog(
         source.player_name, source.team, source.sport, source.stat_type, 1.5, 1.5,
         game_time=source.game_time, source=provider, source_id=source.external_id,
+        line_variant=canonical.line_variant,
         decision=NS(recommendation="UNDER"), validation=NS(has_supporting_data=True),
     )
     assert not result.sent and "unavailable" in result.filtered_reason.lower()
@@ -314,6 +315,7 @@ async def test_explicit_unavailable_direction_not_delivered_but_available_pick_i
     result = await delivery.deliver_underdog(
         source.player_name, source.team, source.sport, source.stat_type, 1.5, 1.5,
         game_time=source.game_time, source=provider, source_id=source.external_id,
+        line_variant=canonical.line_variant,
         decision=NS(recommendation="OVER"), validation=NS(has_supporting_data=True),
     )
     assert result.sent
