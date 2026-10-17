@@ -5338,7 +5338,6 @@ async def underdog_job(context) -> None:
         _empty_drained = await drain_db_persistence_worker()
         if _persistence_ok and _empty_drained:
             _offering_coverage.mark_scope_ready("Underdog")
-        await drain_db_persistence_worker()
         _release_underdog_scan_slot()
         _job_activity_end("underdog")
         if _health:
