@@ -143,6 +143,7 @@ async def _log_actionable_opportunity(
 
     now = datetime.utcnow()
     opportunity_game_id = game_id or f"game-{external_id}"
+    game_time = now + timedelta(hours=3)
     await db.track_prop_records(
         [{
             "external_id": external_id,
@@ -151,7 +152,7 @@ async def _log_actionable_opportunity(
             "sport": "MLB",
             "stat_type": stat_type,
             "line_value": line_value,
-            "game_time": now + timedelta(hours=3),
+            "game_time": game_time,
             "game_id": opportunity_game_id,
             "provider": provider,
         }]
@@ -169,13 +170,31 @@ async def _log_actionable_opportunity(
             confidence=85,
             provider=provider,
             game_id=opportunity_game_id,
+            game_time=game_time,
             detected_at=now,
             alert_sent=False,
         ))
         await session.commit()
+    seed_current_offering(
+        provider=provider,
+        source_id=external_id,
+        event_id=opportunity_game_id,
+        player_name=player_name,
+        sport="MLB",
+        team="TEAM",
+        stat_type=stat_type,
+        line_value=line_value,
+        direction="OVER",
+        game_time=game_time,
+        fetched_at=now,
+        replace_scope=False,
+    )
+    return game_time
 
 
-async def _deliver_traceable_play(db, *, source_id: str, event_id: str, path: str):
+async def _deliver_traceable_play(
+    db, *, source_id: str, event_id: str, path: str, game_time: datetime
+):
     from alerts import AlertDelivery
 
     delivery = AlertDelivery(db, MagicMock(), [123])
@@ -205,8 +224,10 @@ async def _deliver_traceable_play(db, *, source_id: str, event_id: str, path: st
             ),
             decision=_directional_decision("OVER"),
             score=SimpleNamespace(total=90, stars=4),
+            source="Underdog",
             source_id=source_id,
             event_id=event_id,
+            game_time=game_time,
             delivery_path=path,
         )
 
@@ -219,7 +240,7 @@ async def test_successful_play_persists_exact_source_and_event_and_marks_opportu
     from database import PropOpportunityLog, TelegramDeliveryAudit
     from sqlalchemy import select
 
-    await _log_actionable_opportunity(
+    game_time = await _log_actionable_opportunity(
         db, external_id="play-source-1", game_id="game-1", line_value=1.5
     )
     result = await _deliver_traceable_play(
@@ -227,6 +248,7 @@ async def test_successful_play_persists_exact_source_and_event_and_marks_opportu
         source_id="play-source-1",
         event_id="game-1",
         path="line_change",
+        game_time=game_time,
     )
 
     assert isinstance(result, DeliveryResult)
@@ -270,7 +292,7 @@ async def test_successful_play_marks_only_the_exact_source_opportunity(db):
     from database import PropOpportunityLog
     from sqlalchemy import select
 
-    await _log_actionable_opportunity(
+    game_time = await _log_actionable_opportunity(
         db, external_id="play-source-a", game_id="game-a", line_value=1.5
     )
     await _log_actionable_opportunity(db, external_id="play-source-b")
@@ -279,6 +301,7 @@ async def test_successful_play_marks_only_the_exact_source_opportunity(db):
         source_id="play-source-a",
         event_id="game-a",
         path="new",
+        game_time=game_time,
     )
 
     async with db.session() as session:
@@ -301,7 +324,7 @@ async def test_failed_play_is_audited_but_not_marked_delivered(db):
     from alerts import AlertDelivery
     from sqlalchemy import select
 
-    await _log_actionable_opportunity(
+    game_time = await _log_actionable_opportunity(
         db,
         external_id="failed-play",
         game_id="failed-game",
@@ -327,8 +350,10 @@ async def test_failed_play_is_audited_but_not_marked_delivered(db):
             ),
             decision=_directional_decision("OVER"),
             score=SimpleNamespace(total=90, stars=4),
+            source="Underdog",
             source_id="failed-play",
             event_id="failed-game",
+            game_time=game_time,
             delivery_path="standing",
         )
 
