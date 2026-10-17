@@ -50,20 +50,20 @@ class TestReentryDetection:
         # Verify the re-entry comment is present (ensures we're checking the right code)
         assert "is_reentry" in src, "Re-entry detection variable not found in market_engine.py"
 
-    def test_reentry_triggers_qualified_increment(self):
+    def test_reentry_triggers_directional_increment(self):
         """
-        The re-entry block increments _n_qualified when is_reentry_qualified=True.
+        The re-entry block increments the directional-decision counter.
         This confirms re-entry props are counted in the pipeline stats.
         """
         import inspect, market_engine
         src = inspect.getsource(market_engine)
-        # After is_reentry_qualified = True, _n_qualified should be incremented
-        assert "_n_qualified += 1" in src
+        # After is_reentry_qualified = True, the directional counter increments
+        assert "_n_directional += 1" in src
         # And should_alert = True must follow
-        idx_qual = src.index("_n_qualified += 1")
+        idx_qual = src.index("_n_directional += 1")
         idx_alert = src.index("should_alert = True", idx_qual)
         assert idx_alert > idx_qual, (
-            "should_alert = True must come AFTER _n_qualified += 1 in the re-entry block"
+            "should_alert = True must come AFTER the directional counter increment"
         )
 
 
@@ -82,7 +82,8 @@ class TestScanCycleLog:
         expected_cols = {
             "id", "scan_ts", "fetched", "removed", "futures", "active",
             "unchanged", "new_props", "line_changed", "cold_start",
-            "analyzed", "qualified", "alert_delivered",
+            "analyzed", "qualified", "directional_decisions",
+            "fully_qualified", "queue_admitted", "alert_delivered",
         }
         actual_cols = {c.key for c in ScanCycleLog.__table__.columns}
         missing = expected_cols - actual_cols
@@ -118,6 +119,9 @@ class TestScanCycleLog:
             cold_start      = 0,
             analyzed        = 80,
             qualified       = 5,
+            directional_decisions = 5,
+            fully_qualified = 3,
+            queue_admitted  = 2,
             alert_delivered = 2,
         )
 
@@ -129,9 +133,55 @@ class TestScanCycleLog:
         assert summary["new_props"]       == 45
         assert summary["line_changed"]    == 35
         assert summary["analyzed"]        == 80
-        assert summary["qualified"]       == 5
+        assert summary["directional_decisions"] == 5
+        assert summary["qualified"]       == 3
+        assert summary["fully_qualified"] == 3
+        assert summary["queue_admitted"] == 2
+        assert summary["legacy_directional_decisions"] == 0
         assert summary["alert_delivered"] == 2
 
+        await engine.dispose()
+
+    @pytest.mark.asyncio
+    async def test_legacy_qualified_count_is_directional_not_backfilled(self, tmp_path):
+        """Old qualified values stay intact but are never presented as qualified picks."""
+        from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
+        from sqlalchemy.orm import sessionmaker
+        from database import Base, ScanCycleLog, Database
+
+        engine = create_async_engine(
+            f"sqlite+aiosqlite:///{tmp_path / 'test_scl_legacy.db'}", echo=False
+        )
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        Session = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+        db = Database.__new__(Database)
+        db.session = Session
+        db._engine = engine
+        now = datetime.utcnow()
+        async with db.session() as session:
+            session.add(ScanCycleLog(
+                scan_ts=now,
+                fetched=10,
+                removed=0,
+                futures=0,
+                active=10,
+                unchanged=0,
+                new_props=10,
+                line_changed=0,
+                cold_start=0,
+                analyzed=10,
+                qualified=7,
+                alert_delivered=0,
+            ))
+            await session.commit()
+
+        summary = await db.get_scan_cycle_summary(since_hours=24)
+        assert summary["directional_decisions"] == 7
+        assert summary["legacy_directional_decisions"] == 7
+        assert summary["qualified"] == 0
+        assert summary["fully_qualified"] == 0
+        assert summary["queue_admitted"] == 0
         await engine.dispose()
 
     @pytest.mark.asyncio
@@ -259,7 +309,11 @@ class TestFunnelHTMLEscaping:
             "new_props":     45,
             "line_changed":  35,
             "analyzed":      80,
+            "directional_decisions": 8,
+            "legacy_directional_decisions": 0,
             "qualified":     5,
+            "fully_qualified": 5,
+            "queue_admitted": 3,
             "alert_delivered": 2,
         })
         mock_db.get_funnel_summary = AsyncMock(return_value={
@@ -275,6 +329,9 @@ class TestFunnelHTMLEscaping:
         assert "4,600"         in msg,   "Fetched count missing"
         assert "4,350"         in msg,   "Active count missing"
         assert "Delivered to Telegram" in msg, "Delivery count missing"
+        assert "Directional decisions" in msg
+        assert "Fully qualified candidates" in msg
+        assert "Durable queue admissions" in msg
 
 
 # ══════════════════════════════════════════════════════════════════════
