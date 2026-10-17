@@ -7304,6 +7304,7 @@ async def underdog_job(context) -> None:
                         direction=str(_dq_direction or ""),
                     )
                     _n_fully_qualified += 1
+                    _dq["_queue_buffered"] = True
                     if _dq_record is not None:
                         _dq_record.alert_outcome = "queue_buffered"
                     _lifecycle_updates.append({
@@ -7476,8 +7477,7 @@ async def underdog_job(context) -> None:
                             }
                             for item in _delivery_queue
                             if item.get("candidate_lifecycle_id")
-                            and item.get("record") is not None
-                            and item["record"].alert_outcome == "queue_persist_failed"
+                            and item.get("_queue_buffered")
                         ])
                     except Exception:
                         logger.debug(
@@ -7502,6 +7502,31 @@ async def underdog_job(context) -> None:
                     max(0, _n_dq_deferred - _n_dq_queued),
                     ", ".join(_dq_sent_log) or "none",
                     "; ".join(_dq_deferred_log[:10]),
+                )
+        elif _delivery_queue:
+            _blocked_reason = (
+                "no configured recipients"
+                if not chat_ids
+                else "opportunity persistence failed"
+            )
+            for _candidate in _delivery_queue:
+                _candidate_record = _candidate.get("record")
+                if _candidate_record is not None:
+                    _candidate_record.alert_outcome = "delivery_blocked"
+            try:
+                await db.update_candidate_lifecycle_batch([
+                    {
+                        "evaluation_id": item.get("candidate_lifecycle_id"),
+                        "disposition": "blocked",
+                        "final_reason": _blocked_reason,
+                    }
+                    for item in _delivery_queue
+                    if item.get("candidate_lifecycle_id")
+                ])
+            except Exception as _lifecycle_exc:
+                logger.warning(
+                    "underdog_job: blocked disposition update failed: %s",
+                    type(_lifecycle_exc).__name__,
                 )
 
         _cycle_timing.finish("priority_selection")
