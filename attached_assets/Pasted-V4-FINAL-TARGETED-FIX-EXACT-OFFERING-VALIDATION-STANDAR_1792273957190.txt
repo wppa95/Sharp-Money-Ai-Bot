@@ -1,0 +1,154 @@
+V4 FINAL TARGETED FIX — EXACT OFFERING VALIDATION + STANDARD-LINE PRIORITY
+
+Implement this narrowly scoped fix to Sharp Money V4. This is an implementation task, not an audit-only task. Fix the code, add regression tests, run the required validation, and report the results. Do not expand the scope.
+
+Confirmed live defect
+
+V4 sent this alert:
+
+- Sport: MLB
+- Player: Junior Caminero
+- Stat: Batter Strikeouts
+- Platform: Underdog
+- Alerted selection: UNDER 1.5
+
+But the actual offerings checked by the user were:
+
+- Underdog: 0.5, OVER only.
+- PrizePicks: 0.5 Goblin, OVER only.
+- PrizePicks: 1.5 Demon, OVER only.
+- PrizePicks: 2.5 Demon, OVER only.
+
+Neither platform offered the UNDER selection in the alert. Neither platform offered a standard line for this stat in the offerings observed by the user.
+
+The bot must never recommend an unavailable selection or misrepresent a Goblin/Demon line as standard.
+
+1. Enforce exact offering validation before queue admission and sending
+
+Trace the existing candidate qualification, durable queue admission, and final delivery paths. Implement the smallest safe general fix.
+
+Before a pick is admitted to the durable delivery queue or sent to Telegram, validate it against the freshest available source offering.
+
+Validation must include:
+
+- Correct originating platform and provider/source identity.
+- Correct event identity.
+- Correct player identity.
+- Correct sport and market/stat identity.
+- Exact original line.
+- Direction actually offered by that platform.
+- PrizePicks line variant/classification, where applicable.
+- Current offering availability, freshness, and event eligibility.
+
+A historical hit rate, directional score, cached cross-platform comparison, or another platform's offering must never establish that a proposed selection is currently available.
+
+If source data explicitly shows that the proposed direction is unavailable, reject it with a clear persisted reason such as "DIRECTION_NOT_OFFERED".
+
+If the exact selection cannot be verified from sufficiently fresh source data, fail closed. Do not send it as a confirmed playable pick.
+
+Never:
+
+- Change UNDER to OVER automatically.
+- Change the offered line to make a pick qualify.
+- Substitute a different platform's line.
+- Infer that both directions are available just because a line exists.
+- Infer a standard line from a Goblin/Demon offering.
+
+This must be enforced in the actual selection and delivery pipeline, not merely by changing the Telegram message formatter.
+
+2. Standard-line priority — PrizePicks and Underdog
+
+Standard, non-Goblin/non-Demon lines are the primary selection priority.
+
+- Treat standard lines on PrizePicks and Underdog as equal primary options.
+- Do not favor one primary platform over the other solely because of its name.
+- Correctly identify each platform's actual line and classification.
+- A standard line means an actual standard offering from that platform, not a line inferred from another app or from historical data.
+- Standard lines must receive priority over otherwise eligible PrizePicks Goblin/Demon alternatives within the same comparable candidate-selection scope.
+- Do not let a Goblin/Demon candidate displace a valid standard-line candidate merely because its historical rate, score, or line difference looks more attractive.
+- Do not exclude Goblin/Demon offerings globally. They remain secondary options when no suitable standard-line selection is available, subject to exact-offering verification and all existing qualification rules.
+- If neither platform offers a standard line for a player/stat/event, do not manufacture one or relabel a Goblin/Demon line as standard.
+- In that situation, consider a verified Goblin/Demon selection only as a clearly classified secondary option if it independently passes the existing qualification rules. Otherwise, send no pick for that market.
+- If the only offered direction is OVER, no UNDER pick may be sent for that offering, regardless of its classification or historical hit rate.
+
+Apply this consistently to all supported sports, players, markets, and platforms. Do not hardcode Junior Caminero or MLB as a special case.
+
+3. Preserve platform independence and cross-platform comparisons
+
+PrizePicks and Underdog remain equal primary platforms.
+
+Keep the following distinct for each platform:
+
+- Provider/source ID.
+- Event ID.
+- Player and market identity.
+- Original line.
+- Offered direction.
+- Line classification/variant.
+- Source freshness and availability.
+- Qualification and delivery records.
+
+Cross-platform comparisons remain informational. They can explain differences between available offerings, but cannot validate a selection that the originating platform does not offer.
+
+Do not suppress a valid standard selection on one platform solely because the other platform lacks that line or direction.
+
+Do not merge Goblin/Demon lines into standard-line identities. Do not let one line, direction, or classification validate a different one.
+
+4. Required regression tests
+
+Add synthetic-fixture tests for all of the following:
+
+1. Underdog offers 0.5 OVER only; proposed UNDER 1.5 is rejected.
+2. PrizePicks offers 0.5 Goblin OVER, 1.5 Demon OVER, and 2.5 Demon OVER; none validates an UNDER selection.
+3. No standard line is offered on either platform; the bot does not invent or label a standard line.
+4. A valid standard Underdog line and a valid standard PrizePicks line receive equal primary priority.
+5. A valid standard-line candidate takes priority over an otherwise eligible Goblin/Demon alternative within the same comparable selection scope.
+6. If neither platform has a suitable standard line, a verified Goblin/Demon selection may be considered as a secondary option, accurately classified and only if it passes existing qualification rules.
+7. A valid OVER selection remains eligible when its exact offering and existing qualification rules pass.
+8. A valid selection on one platform remains eligible when the other platform does not offer the same selection.
+9. A different line, direction, player, market, event, source, or PrizePicks variant cannot validate a candidate.
+10. Missing, stale, removed, or unverifiable source offerings cannot validate a pick as currently selectable.
+11. An unavailable selection never enters the durable delivery queue, never produces a successful-pick audit, and never sets the corresponding "alert_sent" flag.
+12. Standard-line priority does not create an extra pick, duplicate an alert, or bypass existing deduplication.
+13. Existing platform independence, supported sports, Central-time eligibility, immediate qualified-pick delivery, reminders, and separate line-change notices continue to work.
+
+Use synthetic fixtures only. Do not send test or synthetic Telegram messages and do not make manual provider requests.
+
+5. Strict scope and safety constraints
+
+- Do not change general qualification thresholds or historical hit-rate calculations.
+- Do not change existing sport-specific history requirements.
+- Do not add providers or re-enable The Odds API.
+- Do not change shared provider quotas, scheduler intervals, or database architecture unless a minimal change is essential to enforce this validation.
+- Do not reset the database, rewrite historical flags, or backfill old picks.
+- Do not generate 2-man or 3-man slips. Individual picks only.
+- Do not add Strong Bet labels, stars, tiers, or unsupported confidence claims.
+- Preserve the existing footer exactly: "Monitoring player props across multiple sports. Not betting advice."
+- Do not push to GitHub or deploy to Railway in this task.
+- Do not restart the live bot unnecessarily.
+- Do not begin another broad audit or unrelated refactor.
+
+6. Validation required in this same task
+
+After implementing the fix:
+
+1. Run the focused regression tests.
+2. Run the complete test suite.
+3. Run "python -m compileall -q bot".
+4. Run "git diff --check".
+5. Fix regressions introduced by this change and rerun the relevant checks.
+
+7. Final report
+
+Report:
+
+- The actual code-level root cause of the unavailable UNDER alert.
+- The exact selection validation enforced before queue admission and sending.
+- How standard-line priority is implemented without excluding Goblin/Demon alternatives.
+- All files changed.
+- Exact focused and full test counts, including failures.
+- Compile and diff-check results.
+- Confirmation that no historical records were reset or backfilled.
+- Any remaining limitation in validating live source offerings.
+
+Stop after implementation and validation. Do not start another audit, change unrelated behavior, push to GitHub, or deploy to Railway.
