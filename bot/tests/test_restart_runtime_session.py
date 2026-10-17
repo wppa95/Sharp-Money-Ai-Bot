@@ -12,6 +12,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from engine.health import HealthTracker
 import market_engine
+from engine.offering_coverage import coverage
 
 
 def test_startup_clears_sidecar_runtime_state_but_keeps_restart_history(tmp_path: Path):
@@ -63,6 +64,7 @@ async def test_runtime_reset_cancels_child_tasks_and_clears_process_state():
         "_active_jobs": dict(market_engine._active_jobs),
         "_ud_scan_state": dict(market_engine._ud_scan_state),
         "_ud_known_keys": set(market_engine._ud_known_keys),
+        "coverage_ready_scopes": coverage.ready_scopes(),
     }
 
     async def wait_forever():
@@ -85,6 +87,7 @@ async def test_runtime_reset_cancels_child_tasks_and_clears_process_state():
     market_engine._active_jobs["underdog"] = 1.0
     market_engine._ud_scan_state[("player", "stat")] = object()
     market_engine._ud_known_keys.add(("player", "stat"))
+    coverage.mark_scope_ready("Underdog")
 
     try:
         await market_engine.reset_monitoring_runtime_state()
@@ -98,6 +101,7 @@ async def test_runtime_reset_cancels_child_tasks_and_clears_process_state():
         assert market_engine._prizepicks_sport_cursor == 0
         assert market_engine._fpr_deferred_pending is False
         assert market_engine._fpr_execution_running is False
+        assert not coverage.ready_scopes()
     finally:
         # Avoid changing module state for tests that run after this one.
         market_engine._prizepicks_cycle_task = original["_prizepicks_cycle_task"]
@@ -108,3 +112,6 @@ async def test_runtime_reset_cancels_child_tasks_and_clears_process_state():
         market_engine._active_jobs.update(original["_active_jobs"])
         market_engine._ud_scan_state.update(original["_ud_scan_state"])
         market_engine._ud_known_keys.update(original["_ud_known_keys"])
+        coverage.reset_readiness()
+        for provider, sport in original["coverage_ready_scopes"]:
+            coverage.mark_scope_ready(provider, sport)
