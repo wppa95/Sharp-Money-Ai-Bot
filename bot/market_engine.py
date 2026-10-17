@@ -7306,7 +7306,14 @@ async def underdog_job(context) -> None:
                     "player_name": _player_name,
                     "sport": _sport,
                     "stat_type": _stat_type,
-                    "line_variant": "",
+                    "line_variant": str(
+                        getattr(
+                            (_matched_candidate or {}).get("snap"),
+                            "line_variant",
+                            "",
+                        )
+                        or ""
+                    ),
                     "line_value": _line_value,
                     "direction": _direction,
                     "delivery_path": (
@@ -7375,7 +7382,9 @@ async def underdog_job(context) -> None:
                         "player_name": str(_candidate.get("player") or ""),
                         "sport": str(_candidate.get("sport") or "UNKNOWN"),
                         "stat_type": str(_candidate.get("stat_type") or ""),
-                        "line_variant": "",
+                        "line_variant": str(
+                            getattr(_candidate_snap, "line_variant", "") or ""
+                        ),
                         "line_value": _candidate.get("line_val"),
                         "direction": _candidate_direction,
                         "delivery_path": str(_candidate.get("path") or "underdog"),
