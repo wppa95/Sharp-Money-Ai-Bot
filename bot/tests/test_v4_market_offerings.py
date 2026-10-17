@@ -355,6 +355,7 @@ async def _attempt_queued_pick(monkeypatch, source, direction, *, line=None):
     db.get_telegram_delivery_state = AsyncMock(
         return_value={"tracked": True, "directional": True}
     )
+    db.mark_opportunity_alert_sent = AsyncMock()
     delivery = AlertDelivery(db, MagicMock(), [123])
     delivery._audit_telegram_attempt = AsyncMock(return_value=True)
     buffer = []
