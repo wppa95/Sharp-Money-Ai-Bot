@@ -4692,7 +4692,9 @@ class Database:
                     select(PropLineHistory.id)
                     .where(
                         PropLineHistory.provider == "PrizePicks",
-                        PropLineHistory.external_id == external_id,
+                        PropLineHistory.external_id.in_(
+                            _provider_source_id_variants(external_id, provider)
+                        ),
                         PropLineHistory.game_id == event_id,
                         PropLineHistory.player_name == player_name,
                         PropLineHistory.sport == sport,
@@ -5031,7 +5033,9 @@ class Database:
                         select(PropLineHistory.id).where(
                             PropLineHistory.provider == "PrizePicks",
                             PropLineHistory.product == PLAYER_PROPS_PRODUCT,
-                            PropLineHistory.external_id == source_id,
+                            PropLineHistory.external_id.in_(
+                                _provider_source_id_variants(source_id, provider)
+                            ),
                             PropLineHistory.game_id == event_id,
                             PropLineHistory.player_name == player_name,
                             PropLineHistory.sport == sport,
@@ -5407,7 +5411,11 @@ class Database:
                     select(PropLineHistory)
                     .where(
                         PropLineHistory.provider == "PrizePicks",
-                        PropLineHistory.external_id == item.get("source_id"),
+                        PropLineHistory.external_id.in_(
+                            _provider_source_id_variants(
+                                str(item.get("source_id") or ""), provider
+                            )
+                        ),
                         PropLineHistory.game_id == item.get("event_id"),
                         PropLineHistory.player_name == item.get("player_name"),
                         PropLineHistory.sport == item.get("sport"),
