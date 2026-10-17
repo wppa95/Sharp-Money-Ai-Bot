@@ -355,6 +355,9 @@ class TestIndependentPrizePicks:
     async def test_incomplete_sport_persists_successes_but_withholds_pending_feed(
         self, monkeypatch
     ):
+        from engine.offering_coverage import coverage
+
+        coverage.reset_readiness()
         successful_prop = SimpleNamespace(
             player_name="Complete Player",
             team="TM",
@@ -417,6 +420,8 @@ class TestIndependentPrizePicks:
             for row in market_engine._propline_pending_props.values()
         )
         assert market_engine._propline_pending_props
+        assert coverage.is_scope_ready("PrizePicks", "NBA")
+        assert not coverage.is_scope_ready("PrizePicks", "MLB")
 
     def test_available_lines_show_verified_prizepicks_or_explicit_unavailable(self):
         available = _format_available_lines_block(15.5, pp_line=14.5)

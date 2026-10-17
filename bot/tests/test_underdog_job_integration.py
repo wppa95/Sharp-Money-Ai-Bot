@@ -533,6 +533,9 @@ class TestJobHealthTracking:
         When fetch_pickem returns an empty list, the job still records a successful
         run so /health doesn't show the job as 'never ran'.
         """
+        from engine.offering_coverage import coverage
+
+        coverage.reset_readiness()
         health = self._make_health()
 
         registry = MagicMock()
@@ -548,6 +551,7 @@ class TestJobHealthTracking:
         info = health.get_job_info("underdog_job")
         assert info.get("run_count", 0) >= 1, "record_job_run not called for empty response"
         assert info.get("fail_count", 0) == 0, "record_job_fail should not be called for empty response"
+        assert coverage.is_scope_ready("Underdog")
 
     @pytest.mark.asyncio
     async def test_no_underdog_snaps_records_job_run(self):
@@ -575,7 +579,9 @@ class TestJobHealthTracking:
     async def test_successful_cycle_records_job_run(self):
         """A normal successful cycle increments run_count exactly once."""
         from alerts import DeliveryResult
+        from engine.offering_coverage import coverage
 
+        coverage.reset_readiness()
         health = self._make_health()
         snap   = _make_snap()
         db     = _make_db()
@@ -585,10 +591,14 @@ class TestJobHealthTracking:
         info = health.get_job_info("underdog_job")
         assert info.get("run_count", 0) >= 1, "record_job_run not called after successful cycle"
         assert info.get("fail_streak", 0) == 0
+        assert coverage.is_scope_ready("Underdog")
 
     @pytest.mark.asyncio
     async def test_fetch_exception_records_job_fail(self):
         """When fetch_pickem raises, record_job_fail is called."""
+        from engine.offering_coverage import coverage
+
+        coverage.reset_readiness()
         health = self._make_health()
 
         registry = MagicMock()
@@ -605,6 +615,7 @@ class TestJobHealthTracking:
         assert "API down" in (info.get("last_error") or "")
         # run_count must NOT be incremented on failure
         assert info.get("run_count", 0) == 0
+        assert not coverage.is_scope_ready("Underdog")
 
     @pytest.mark.asyncio
     async def test_processing_exception_records_job_fail(self):
