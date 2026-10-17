@@ -1306,6 +1306,52 @@ class TelegramPickDeliveryAttempt(Base):
     reason = Column(String(256), nullable=True)
 
 
+class CandidateLifecycleRecord(Base):
+    """Immutable pick identity with monotonic qualification/delivery disposition."""
+
+    __tablename__ = "candidate_lifecycle_records"
+
+    evaluation_id = Column(String(32), primary_key=True)
+    pick_identity_key = Column(String(64), nullable=False, index=True)
+    provider = Column(String(32), nullable=False, index=True)
+    source_id = Column(String(128), nullable=False)
+    event_id = Column(String(128), nullable=False)
+    player_name = Column(String(128), nullable=False)
+    sport = Column(String(32), nullable=False, index=True)
+    stat_type = Column(String(64), nullable=False)
+    line_variant = Column(String(64), nullable=False, default="")
+    line_value = Column(Float, nullable=False)
+    direction = Column(String(8), nullable=False)
+    delivery_path = Column(String(32), nullable=False)
+    disposition = Column(String(32), nullable=False, default="directional")
+    final_reason = Column(String(256), nullable=True)
+    candidate_rank = Column(Integer, nullable=True)
+    ranking_scope = Column(String(96), nullable=True)
+    qualification_json = Column(Text, nullable=True)
+    evidence_snapshot_json = Column(Text, nullable=True)
+    queue_delivery_id = Column(Integer, nullable=True, index=True)
+    directional_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    qualified_at = Column(DateTime, nullable=True)
+    queue_admitted_at = Column(DateTime, nullable=True)
+    delivered_at = Column(DateTime, nullable=True)
+    delivery_audit_key = Column(String(256), nullable=True)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+    __table_args__ = (
+        Index(
+            "ix_candidate_lifecycle_identity_created",
+            "pick_identity_key",
+            "created_at",
+        ),
+        Index(
+            "ix_candidate_lifecycle_disposition_updated",
+            "disposition",
+            "updated_at",
+        ),
+    )
+
+
 class TelegramPickDeliveryGroup(Base):
     """Persisted round-robin cursor for provider/sport fairness."""
 
@@ -1917,7 +1963,12 @@ class ScanCycleLog(Base):
       fetched → removed → futures → active (non-removed, non-futures)
       active → unchanged (stable lines, skipped) + new + line_changed + cold_start
       new + line_changed + cold_start → analyzed (scored)
-      analyzed → qualified (passed alert gates) → alert_delivered (Telegram sent)
+      analyzed → directional_decisions → fully_qualified → queue_admitted
+      → alert_delivered (immediate Telegram send)
+
+    ``qualified`` is a deprecated compatibility column. Historical values and
+    new writes both preserve the old directional-decision count there; reports
+    must use the explicit stage columns below.
     """
     __tablename__ = "scan_cycle_log"
 
@@ -1936,7 +1987,10 @@ class ScanCycleLog(Base):
     cold_start      = Column(Integer,  nullable=False, default=0)  # scored during cold-start pass
     # Stage 4+ — scoring & delivery
     analyzed        = Column(Integer,  nullable=False, default=0)  # total scored this cycle
-    qualified       = Column(Integer,  nullable=False, default=0)  # passed all alert gates
+    qualified       = Column(Integer,  nullable=False, default=0)  # deprecated directional-count alias
+    directional_decisions = Column(Integer, nullable=True)
+    fully_qualified = Column(Integer, nullable=True)
+    queue_admitted  = Column(Integer, nullable=True)
     alert_delivered = Column(Integer,  nullable=False, default=0)  # successfully sent to Telegram
     actionable_by_sport = Column(Text, nullable=True)  # JSON: sport -> scan-actionable count
     removed_by_sport    = Column(Text, nullable=True)  # JSON: sport -> feed-removal count
@@ -2170,6 +2224,7 @@ class Database:
         await self._migrate_slip_journal_leg_v1()
         await self._migrate_scan_cycle_log_v1()
         await self._migrate_scan_cycle_log_v2()
+        await self._migrate_scan_cycle_log_v3()
         # player_risk_records is created by create_all (new table); no column migration needed
         logger.info("Database initialised at %s", self._url)
 
@@ -10634,6 +10689,9 @@ class Database:
         cold_start: int = 0,
         analyzed: int = 0,
         qualified: int = 0,
+        directional_decisions: Optional[int] = None,
+        fully_qualified: Optional[int] = None,
+        queue_admitted: Optional[int] = None,
         alert_delivered: int = 0,
         actionable_by_sport: Optional[dict] = None,
         removed_by_sport: Optional[dict] = None,
@@ -10654,6 +10712,9 @@ class Database:
                 cold_start      = cold_start,
                 analyzed        = analyzed,
                 qualified       = qualified,
+                directional_decisions = directional_decisions,
+                fully_qualified = fully_qualified,
+                queue_admitted  = queue_admitted,
                 alert_delivered = alert_delivered,
                 actionable_by_sport = json.dumps(actionable_by_sport or {}),
                 removed_by_sport    = json.dumps(removed_by_sport or {}),
@@ -10689,6 +10750,20 @@ class Database:
             except Exception as exc:
                 if "duplicate column name" not in str(exc).lower():
                     logger.debug("scan_cycle_log v2 migration skipped: %s", exc)
+
+    async def _migrate_scan_cycle_log_v3(self) -> None:
+        """Add explicit funnel stages without rewriting legacy scan counts."""
+        for statement in (
+            "ALTER TABLE scan_cycle_log ADD COLUMN directional_decisions INTEGER",
+            "ALTER TABLE scan_cycle_log ADD COLUMN fully_qualified INTEGER",
+            "ALTER TABLE scan_cycle_log ADD COLUMN queue_admitted INTEGER",
+        ):
+            try:
+                async with self._engine.begin() as conn:
+                    await conn.execute(text(statement))
+            except Exception as exc:
+                if "duplicate column name" not in str(exc).lower():
+                    logger.debug("scan_cycle_log v3 migration skipped: %s", exc)
 
     async def get_scan_cycle_summary(
         self,
@@ -10742,7 +10817,26 @@ class Database:
                     func.sum(ScanCycleLog.line_changed).label("line_changed"),
                     func.sum(ScanCycleLog.cold_start).label("cold_start"),
                     func.sum(ScanCycleLog.analyzed).label("analyzed"),
-                    func.sum(ScanCycleLog.qualified).label("qualified"),
+                    func.sum(
+                        case(
+                            (
+                                ScanCycleLog.directional_decisions.is_not(None),
+                                ScanCycleLog.directional_decisions,
+                            ),
+                            else_=ScanCycleLog.qualified,
+                        )
+                    ).label("directional_decisions"),
+                    func.sum(
+                        case(
+                            (
+                                ScanCycleLog.directional_decisions.is_(None),
+                                ScanCycleLog.qualified,
+                            ),
+                            else_=0,
+                        )
+                    ).label("legacy_directional_decisions"),
+                    func.sum(ScanCycleLog.fully_qualified).label("fully_qualified"),
+                    func.sum(ScanCycleLog.queue_admitted).label("queue_admitted"),
                     func.sum(ScanCycleLog.alert_delivered).label("alert_delivered"),
                 )
                 .where(scan_filter)
@@ -10754,6 +10848,11 @@ class Database:
                     "first_scan_ts": None,
                     "last_scan_ts": None,
                     "session_scoped": session_started_at is not None,
+                    "directional_decisions": 0,
+                    "legacy_directional_decisions": 0,
+                    "qualified": 0,
+                    "fully_qualified": 0,
+                    "queue_admitted": 0,
                 }
             actionable_by_sport: dict[str, int] = {}
             removed_by_sport: dict[str, int] = {}
@@ -10797,9 +10896,16 @@ class Database:
                 "line_changed":     row.line_changed or 0,
                 "cold_start":       row.cold_start or 0,
                 "analyzed":         row.analyzed or 0,
-                "qualified":        row.qualified or 0,
+                "directional_decisions": row.directional_decisions or 0,
+                "legacy_directional_decisions": (
+                    row.legacy_directional_decisions or 0
+                ),
+                "qualified":        row.fully_qualified or 0,
+                "fully_qualified":  row.fully_qualified or 0,
+                "queue_admitted":   row.queue_admitted or 0,
                 "alert_delivered":  row.alert_delivered or 0,
                 "actionable_by_sport": actionable_by_sport,
+                "directional_by_sport": actionable_by_sport,
                 "removed_by_sport":    removed_by_sport,
                 "enrichment_status": (
                     getattr(latest_enrichment, "enrichment_status", None)
