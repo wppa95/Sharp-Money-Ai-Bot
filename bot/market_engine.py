@@ -1428,6 +1428,8 @@ async def reset_monitoring_runtime_state() -> None:
     _snapshot_cache.clear()
     from engine.evidence_memory import clear as clear_evidence_memory
     clear_evidence_memory()
+    from engine.offering_coverage import coverage as _offering_coverage
+    _offering_coverage.reset_readiness()
     _confirmation_db = None
     _propline_provider = None
     _propline_current_observations.clear()
@@ -1744,6 +1746,10 @@ async def propline_request_scan_job(context) -> None:
                         context,
                         props,
                     )
+                    if bookmaker == "prizepicks":
+                        _offering_coverage.mark_scope_ready(
+                            "PrizePicks", str(sport)
+                        )
                     if queued_history_targets:
                         logger.info(
                             "propline_request_scan: queued %d new player-history "
@@ -5247,10 +5253,12 @@ async def underdog_job(context) -> None:
         _cycle_timing.finish("active_pool")
         logger.info("underdog_cycle_timing: %s", _cycle_timing.summary(0, 0))
         _job_activity_end("underdog")
+        _empty_drained = await drain_db_persistence_worker()
+        if _empty_drained:
+            _offering_coverage.mark_scope_ready("Underdog")
         if _health:
             _health.record_provider_fetch("Underdog")
             _health.record_job_run("underdog_job")   # empty response = successful run
-        await drain_db_persistence_worker()
         _release_underdog_scan_slot()
         return
 
@@ -5327,6 +5335,9 @@ async def underdog_job(context) -> None:
         logger.debug("underdog_job: no Underdog pick'em snapshots in response")
         _cycle_timing.finish("active_pool")
         logger.info("underdog_cycle_timing: %s", _cycle_timing.summary(0, 0))
+        _empty_drained = await drain_db_persistence_worker()
+        if _persistence_ok and _empty_drained:
+            _offering_coverage.mark_scope_ready("Underdog")
         await drain_db_persistence_worker()
         _release_underdog_scan_slot()
         _job_activity_end("underdog")
@@ -8452,6 +8463,12 @@ async def underdog_job(context) -> None:
         logger.error(
             "underdog_job: persistence worker did not drain before scan completion"
         )
+    if (
+        _persistence_ok
+        and _snapshot_failed_records == 0
+        and _snapshot_persisted == _snapshot_intended
+    ):
+        _offering_coverage.mark_scope_ready("Underdog")
     _cycle_timing.finish("final_bookkeeping")
     logger.info(
         "underdog_cycle_timing: %s",

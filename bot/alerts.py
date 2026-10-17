@@ -2776,7 +2776,12 @@ async def telegram_pick_delivery_job(context) -> None:
         logger.error("Durable Telegram pick delivery is unavailable: database contract missing")
         return
 
-    item = await claim()
+    from engine.offering_coverage import coverage
+
+    ready_scopes = coverage.ready_scopes()
+    if not ready_scopes:
+        return
+    item = await claim(ready_scopes=set(ready_scopes))
     if not item:
         return
     delivery_id = int(item["id"])
@@ -2869,7 +2874,6 @@ async def telegram_pick_delivery_job(context) -> None:
             )
             return
 
-        from engine.offering_coverage import coverage
         current_offering, offering_error = coverage.validate_selection(
             provider=str(item.get("provider") or ""),
             source_id=str(item.get("source_id") or ""),
