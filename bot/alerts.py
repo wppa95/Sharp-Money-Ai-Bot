@@ -2210,42 +2210,51 @@ class AlertDelivery:
 
         _ud_line_value = float(new_line or 0)
         from engine.offering_coverage import coverage
-        _offering = coverage.match(
-            provider=source, player=player_name, sport=sport, stat=stat_type,
-            line=_ud_line_value, game_time=game_time,
-            source_id=str(source_id or ""),
+        _is_actionable_pick = bool(
+            (standing or new_prop) and not market_move_only and not removed
         )
-        if _offering is not None:
-            coverage.mark(_offering, "QUALIFIED")
-            if _offering.available_directions and _direction not in _offering.available_directions:
-                coverage.mark(_offering, "DELIVERY_BLOCKED", "direction unavailable on originating platform")
+        if _is_actionable_pick:
+            _offering, _offering_error = coverage.validate_selection(
+                provider=source,
+                source_id=str(source_id or ""),
+                event_id=str(event_id or ""),
+                player=player_name,
+                sport=sport,
+                stat=stat_type,
+                line=_ud_line_value,
+                direction=_direction,
+                line_variant=(
+                    str(line_variant or "")
+                    if line_variant is not None
+                    else None
+                ),
+                game_time=game_time,
+            )
+            if _offering_error:
                 return DeliveryResult(
-                    sent=False, filtered=True,
-                    filtered_reason="Direction unavailable on originating platform",
+                    sent=False,
+                    filtered=True,
+                    filtered_reason=_offering_error,
                 )
+            coverage.mark(_offering, "QUALIFIED")
+        else:
+            _offering = coverage.match(
+                provider=source, player=player_name, sport=sport, stat=stat_type,
+                line=_ud_line_value, game_time=game_time,
+                source_id=str(source_id or ""),
+            )
         _line_variant = str(
             line_variant
-            or
-            getattr(_offering, "line_variant", "")
-            or (
-                evidence_snapshot.get("line_variant", "")
-                if isinstance(evidence_snapshot, dict) else ""
+            if line_variant is not None
+            else (
+                getattr(_offering, "line_variant", "")
+                or (
+                    evidence_snapshot.get("line_variant", "")
+                    if isinstance(evidence_snapshot, dict) else ""
+                )
             )
             or ""
         )
-        if (
-            source_upper == "PRIZEPICKS"
-            and line_variant is None
-            and not (
-                isinstance(evidence_snapshot, dict)
-                and "line_variant" in evidence_snapshot
-            )
-        ):
-            return DeliveryResult(
-                sent=False,
-                filtered=True,
-                filtered_reason="PrizePicks line-variant identity is missing",
-            )
         if candidate_lifecycle_id:
             evidence_snapshot = {
                 **(evidence_snapshot or {}),

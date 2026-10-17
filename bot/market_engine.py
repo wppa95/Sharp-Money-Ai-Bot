@@ -1725,10 +1725,15 @@ async def propline_request_scan_job(context) -> None:
                     except Exception:
                         pass
                     from engine.line_change_notifications import observe_persisted_batch
+                    from engine.offering_coverage import coverage as _offering_coverage
+                    _offering_coverage.clear_scope(source_provider, str(sport))
+                    _canonical_feed_props = canonicalize_player_props(
+                        source_provider, props
+                    )
                     observe_persisted_batch(
                         db, getattr(context, "bot", None),
                         list(getattr(config, "allowed_user_ids", ()) or ()),
-                        canonicalize_player_props(source_provider, props),
+                        _canonical_feed_props,
                         observation_scope=("propline", feed_key),
                     )
                     _cache_propline_evidence(
@@ -5214,6 +5219,11 @@ async def underdog_job(context) -> None:
         return
     if provider_health is not None and _underdog_connector is not None:
         provider_health.record_success("Underdog")
+
+    # A successful response is the current selectable inventory. Remove prior
+    # rows before recording it so changed/removed lines cannot remain eligible.
+    from engine.offering_coverage import coverage as _offering_coverage
+    _offering_coverage.clear_scope("Underdog")
 
     _cycle_timing.finish("fetch_parse")
     _cycle_timing.start("active_pool")
