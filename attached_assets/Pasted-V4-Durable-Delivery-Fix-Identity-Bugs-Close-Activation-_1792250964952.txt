@@ -1,0 +1,106 @@
+V4 Durable Delivery — Fix Identity Bugs, Close Activation Blockers, Validate, and Restart
+
+The read-only pre-activation review found concrete identity defects and untested queue edge cases. Correct them before activation. After all required fixes and validation pass, restart the existing Sharp Money Bot so it loads the corrected code.
+
+Do not restart before the fixes and required validation are complete. Do not push to GitHub or deploy to Railway.
+
+1. Fix side-specific prior-success deduplication
+
+The durable queue's prior-success check omits direction.
+
+- A confirmed delivery for one direction must not suppress a valid candidate for the opposite direction.
+- Match the complete canonical pick identity, including platform/source identity, provider event, player, sport, stat/market, original line, direction, and applicable PrizePicks line variant.
+- Reuse existing identity conventions where possible. Inspect the current code before changing identity semantics.
+- Add regression tests showing that a successful UNDER does not suppress an otherwise valid OVER candidate, and vice versa.
+- Preserve duplicate protection for the exact same pick.
+
+2. Fix successful-audit reporting joins
+
+The reporting helper currently links a successful ACTIONABLE_PICK audit to an opportunity using fields that omit player, original line, and direction.
+
+- Use identity-complete matching consistent with the canonical pick identity.
+- A successful audit for a different player, line, or direction must not establish delivery for the target opportunity.
+- Ensure historical rows that cannot be matched exactly remain unconfirmed rather than being guessed into a match.
+- Add tests for mismatched player, original line, direction, source, event, and applicable line variant.
+- Do not rewrite historical production flags or audit rows.
+
+3. Correct pacing after partial broadcasts
+
+When some recipients accept a broadcast and another recipient receives RetryAfter, the worker currently marks the pick sent without extending persisted global pacing.
+
+- Preserve the no-duplicate policy for recipients who already received the message.
+- Persist the relevant RetryAfter cooldown so subsequent queued broadcasts do not immediately continue at an unsafe rate.
+- Preserve per-recipient failure details for review.
+- Add tests for full success, full RetryAfter failure, partial success with RetryAfter, and restart persistence of the applicable cooldown.
+- Do not automatically resend a broadcast to recipients whose delivery is ambiguous.
+
+Do not broaden scope into redesigning every notification type unless inspection proves a shared limiter is necessary for safety. Clearly report whether LINE CHANGE and reminder traffic remain outside persisted global pacing.
+
+4. Prevent unbounded queue waiters and starvation
+
+- Inspect the repeating worker callback. Avoid creating an unbounded number of tasks waiting on the coordinator lock when a previous callback is still running. Prefer a single-flight or equivalent bounded mechanism.
+- Adjust within-group ordering so continuously arriving high-ranked candidates cannot indefinitely starve older eligible candidates. Preserve rank as useful prioritization without allowing unbounded starvation.
+- Add deterministic tests for single-flight behavior and aging/fairness.
+- Do not lower qualification thresholds or drop qualified picks merely to reduce queue length.
+
+5. Process concurrency and claims
+
+The queue claim is not compare-and-swap safe across multiple bot processes.
+
+- If the intended deployment is single-process only, document and enforce that operational constraint where feasible.
+- Do not claim multi-process safety unless it is proven.
+- Add an appropriate claim-exclusivity test if the current architecture supports it without unsafe production changes. Otherwise, document the limitation and the explicit single-process requirement.
+- Do not add distributed infrastructure or introduce a broad database redesign for this task.
+- The restart procedure must leave exactly one Sharp Money Bot process running.
+
+6. Preserve the existing strategy and data
+
+- Do not change pick qualification, sports coverage, platform parity, history rules, direction logic, line-change behavior, or reminder scheduling.
+- Do not import the historical 519 failures into the queue or fabricate historical evidence.
+- Do not reset or backfill the database, send test messages, inject synthetic production picks, or issue provider requests.
+- Do not push to GitHub or deploy to Railway.
+- Preserve the existing footer exactly: "Monitoring player props across multiple sports. Not betting advice."
+
+7. Validate before restarting
+
+Run:
+
+- All targeted tests for the changed behavior.
+- The full test suite if practical.
+- "python -m compileall -q bot".
+- "git diff --check".
+
+If any required test fails, fix the underlying issue and rerun the affected tests. Report the final results, not superseded failed runs as the final status.
+
+Before restarting, confirm that the intended existing SQLite database path is known and that the restart will reuse it. Do not reset, replace, or recreate the database.
+
+8. Restart the bot after successful validation
+
+Once the fixes are complete and all required validation passes:
+
+1. Confirm the intended existing SQLite database path and record a read-only baseline of key table counts and existing delivery records.
+2. Stop the existing Sharp Money Bot process cleanly.
+3. Restart it through the normal "python bot/main.py" workflow so it loads the corrected code.
+4. Confirm exactly one Sharp Money Bot process is running. Do not start a second bot process.
+5. Confirm startup completes without errors, the four durable-delivery tables exist, and existing database records remain intact.
+6. Confirm through existing health diagnostics that "telegram_pick_delivery" has run after startup, using "bot/data/health.json" fields such as "jobs.telegram_pick_delivery.last_run_ts" and "run_count" if available.
+7. Do not send test Telegram messages, inject picks, or make provider requests to verify worker activity.
+8. Report whether any queue work was actually pending, whether any messages were sent during normal operation, and whether live delivery behavior remains unverified. Do not claim live Telegram delivery is verified unless actual normal-operation evidence establishes it.
+9. If the database path cannot be verified, tests fail, startup risks data loss, or safe single-process operation cannot be established, do not restart. Report the blocker instead.
+
+9. Final report
+
+Provide:
+
+- Exact files changed.
+- Identity and deduplication corrections.
+- Pacing and partial-broadcast behavior.
+- Queue fairness and single-flight results.
+- Multi-process limitation and how single-process operation is enforced.
+- Final focused/full test counts, compileall result, and diff-check result.
+- Database path verification and before/after preservation checks.
+- Restart status, active process count, startup errors, and worker activity.
+- Remaining risks, including ambiguous delivery outcomes and notification types outside persisted global pacing.
+- Whether normal Telegram delivery has been verified or remains unverified.
+
+Stop after implementation, validation, and the permitted restart. Do not push to GitHub or deploy to Railway.
