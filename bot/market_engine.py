@@ -7209,6 +7209,12 @@ async def underdog_job(context) -> None:
         # limit; existing per-candidate delivery gates still apply.
         _lifecycle_updates: list[dict] = []
         if (_lifecycle_opportunity_rows or _delivery_queue) and db:
+            from engine.offering_coverage import prioritize_standard_line_candidates
+            _delivery_queue_all = list(_delivery_queue)
+            _delivery_queue, _ud_secondary_candidates = (
+                prioritize_standard_line_candidates(_delivery_queue_all)
+            )
+
             def _lifecycle_identity(
                 provider: object,
                 source_id: object,
@@ -7238,7 +7244,7 @@ async def underdog_job(context) -> None:
 
             _queue_lifecycle_ids: dict[tuple, list[str]] = {}
             _queue_candidate_by_id: dict[str, dict] = {}
-            for _candidate in _delivery_queue:
+            for _candidate in _delivery_queue_all:
                 _candidate_snap = _candidate.get("snap")
                 _candidate_decision = _candidate.get("decision")
                 _candidate_lifecycle_id = str(
@@ -7262,6 +7268,15 @@ async def underdog_job(context) -> None:
 
             _lifecycle_rows: list[dict] = []
             _lifecycle_rejected: list[dict] = []
+            for _secondary in _ud_secondary_candidates:
+                _lifecycle_rejected.append({
+                    "evaluation_id": _secondary.get("candidate_lifecycle_id"),
+                    "disposition": "rejected",
+                    "final_reason": (
+                        "STANDARD_LINE_PRIORITY: eligible standard offering takes "
+                        "priority within the same Underdog event/player/market/direction"
+                    ),
+                })
             for _opportunity in _lifecycle_opportunity_rows:
                 _provider = str(_opportunity.get("provider") or "Underdog")
                 _source_id = str(_opportunity.get("external_id") or "")
@@ -7336,7 +7351,7 @@ async def underdog_job(context) -> None:
 
             # Preserve a lifecycle row for an eligible queue candidate if an
             # opportunity snapshot could not be produced in this cycle.
-            for _candidate in _delivery_queue:
+            for _candidate in _delivery_queue_all:
                 _candidate_lifecycle_id = _candidate.get("candidate_lifecycle_id")
                 if not any(
                     row["evaluation_id"] == _candidate_lifecycle_id
