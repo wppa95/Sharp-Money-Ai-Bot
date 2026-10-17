@@ -20,22 +20,10 @@ from typing import Optional
 
 
 def _format_game_time_et(dt: datetime) -> str:
-    """Convert a naive-UTC datetime to a readable date/time in ET.
-
-    Returns e.g. ``"Sep 22, 8:40 PM ET"`` for Telegram display.
-    Falls back to a UTC date/time if the display-zone conversion fails.
-    UTC is kept internally everywhere; this is display-only.
-    """
+    """Compatibility name; display UTC/aware instants in Missouri Central Time."""
     try:
-        from zoneinfo import ZoneInfo
-        if dt.tzinfo is not None and dt.utcoffset() is not None:
-            dt_et = dt.astimezone(ZoneInfo("America/New_York"))
-        else:
-            dt_et = dt.replace(tzinfo=ZoneInfo("UTC")).astimezone(
-                ZoneInfo("America/New_York")
-            )
-        # %-I strips the leading zero on Linux ("8:40 PM ET" not "08:40 PM ET")
-        return dt_et.strftime("%b %-d, %-I:%M %p ET")
+        from reporting import to_reporting_timezone
+        return to_reporting_timezone(dt).strftime("%b %-d, %-I:%M %p %Z")
     except Exception:
         try:
             dt_utc = (

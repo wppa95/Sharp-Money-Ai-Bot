@@ -4163,6 +4163,16 @@ class Database:
                 )
                 .values(alert_sent=True, alert_sent_at=audit.attempted_at)
             )
+            # The original PLAY and its separate reminder state share one
+            # transaction. No migration, second database, or per-pick job.
+            if int(result.rowcount or 0) > 0 and evidence_snapshot is not None:
+                from engine.game_reminders import build_record
+                reminder = build_record(audit, attempted_at or datetime.utcnow())
+                if reminder is not None:
+                    await s.execute(
+                        _sqlite_insert(TelegramDeliveryAudit).values(**reminder)
+                        .prefix_with("OR IGNORE")
+                    )
             await s.commit()
             if int(result.rowcount or 0) == 0:
                 logger.warning(
@@ -4172,6 +4182,64 @@ class Database:
                 )
                 return False
             return True
+
+    async def get_pending_game_reminders(self, now, *, cursor=0, limit=100):
+        """Bound due-first work plus a rotating slice for event updates."""
+        from sqlalchemy import func
+        async with self.session() as s:
+            base = select(TelegramDeliveryAudit).where(
+                TelegramDeliveryAudit.alert_kind == "GAME_REMINDER",
+                TelegramDeliveryAudit.outcome == "pending",
+            )
+            due = func.json_extract(
+                TelegramDeliveryAudit.evidence_snapshot_json, "$.due_utc"
+            )
+            rows = list((await s.scalars(
+                base.where(due <= now.isoformat()).order_by(due).limit(limit // 2)
+            )).all())
+            remaining = limit - len(rows)
+            page = list((await s.scalars(
+                base.where(
+                    due > now.isoformat(), TelegramDeliveryAudit.id > cursor,
+                ).order_by(TelegramDeliveryAudit.id).limit(remaining)
+            )).all())
+            if not page and cursor:
+                page = list((await s.scalars(
+                    base.where(due > now.isoformat())
+                    .order_by(TelegramDeliveryAudit.id).limit(remaining)
+                )).all())
+            return rows + page
+
+    async def claim_game_reminder(self, row_id):
+        """Atomic at-most-once transport claim, retained over restarts."""
+        async with self.session() as s:
+            result = await s.execute(
+                update(TelegramDeliveryAudit).where(
+                    TelegramDeliveryAudit.id == row_id,
+                    TelegramDeliveryAudit.alert_kind == "GAME_REMINDER",
+                    TelegramDeliveryAudit.outcome == "pending",
+                ).values(outcome="sending")
+            )
+            await s.commit()
+            return bool(result.rowcount)
+
+    async def update_game_reminder(self, row_id, *, outcome, data=None, counts=None):
+        values = {"outcome": outcome}
+        if data is not None:
+            values["evidence_snapshot_json"] = json.dumps(data, sort_keys=True)
+        if counts is not None:
+            values.update(recipients_sent=counts["sent"], recipients_failed=counts["failed"])
+        async with self.session() as s:
+            await s.execute(
+                update(TelegramDeliveryAudit).where(
+                    TelegramDeliveryAudit.id == row_id,
+                    TelegramDeliveryAudit.alert_kind == "GAME_REMINDER",
+                    TelegramDeliveryAudit.outcome == (
+                        "sending" if counts is not None else "pending"
+                    ),
+                ).values(**values)
+            )
+            await s.commit()
 
     async def get_telegram_delivery_state(
         self,

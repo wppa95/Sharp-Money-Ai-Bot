@@ -14,16 +14,12 @@ from config import config
 
 
 def reporting_timezone() -> ZoneInfo:
-    """Return the configured reporting timezone, falling back safely to UTC."""
-    name = (
-        getattr(config, "REPORTING_TIMEZONE", None)
-        or getattr(config, "REPORTING_TIMEZONE", None)
-        or "UTC"
-    )
+    """Return the configured reporting timezone, defaulting to Missouri time."""
+    name = getattr(config, "REPORTING_TIMEZONE", None) or "America/Chicago"
     try:
         return ZoneInfo(str(name))
     except (ZoneInfoNotFoundError, ValueError):
-        return ZoneInfo("UTC")
+        return ZoneInfo("America/Chicago")
 
 
 def reporting_now() -> datetime:
@@ -35,7 +31,7 @@ def current_reporting_day_bounds(
     now: datetime | None = None,
 ) -> tuple[datetime, datetime]:
     """Return [start, end) of the current reporting day as naive UTC values."""
-    local_now = (now or reporting_now()).astimezone(reporting_timezone())
+    local_now = to_reporting_timezone(now or reporting_now())
     local_start = local_now.replace(
         hour=0, minute=0, second=0, microsecond=0
     )
@@ -67,5 +63,5 @@ def is_current_reporting_day(
     event_local = to_reporting_timezone(value)
     if event_local is None:
         return False
-    local_now = (now or reporting_now()).astimezone(reporting_timezone())
+    local_now = to_reporting_timezone(now or reporting_now())
     return event_local.date() == local_now.date()

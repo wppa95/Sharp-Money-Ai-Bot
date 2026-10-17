@@ -58,6 +58,20 @@ _DELIVERY_LINE_MAX_AGE = timedelta(hours=6)
 _DELIVERY_CLOCK_SKEW = timedelta(minutes=5)
 
 
+def _reminder_snapshot(game_time, direction, line_variant="", source_event_id=""):
+    from engine.timing import _naive_utc
+    from datetime import timezone
+    value = _naive_utc(game_time)
+    return {
+        "game_time_utc": (
+            value.replace(tzinfo=timezone.utc).isoformat() if value else None
+        ),
+        "direction": str(direction or "").upper(),
+        "line_variant": str(line_variant or ""),
+        "source_event_id": str(source_event_id or ""),
+    }
+
+
 def _is_fresh_delivery_line(fetched_at: object) -> bool:
     """Return whether a provider line is recent enough for a betting alert.
 
@@ -669,8 +683,8 @@ def _has_strong_underdog_evidence(
 ) -> bool:
     """Apply the terminal direction/sport rule without importing market_engine.
 
-    Main league sports need completed-player history meeting the thresholds in
-    every required window. Other sports need an OVER/UNDER direction but do
+    MLB/NFL need at least six completed games, without a complete-window rule.
+    Other sports need an OVER/UNDER direction but do
     not require completed-result history.
     """
     decision_direction = str(
@@ -704,12 +718,13 @@ def _has_strong_underdog_evidence(
         if validation is not None
         else (decision, intelligence_trace)
     )
-    if not history_supports_delivery(*history_values):
+    if not history_supports_delivery(*history_values, min_samples=6):
         return False
     if not has_qualifying_directional_pick(
         decision,
         decision_direction,
         sport=sport,
+        evidence=validation,
     ):
         return False
 
@@ -722,13 +737,13 @@ def _has_strong_underdog_evidence(
         n_supplemental = int(
             getattr(validation, "n_supplemental_games", 0) or 0
         )
-        if source_lower in {"real", "primary"} and n_real >= 5:
+        if source_lower in {"real", "primary"} and n_real >= 6:
             return True
-        if source_lower == "propline" and n_supplemental >= 5:
+        if source_lower == "propline" and n_supplemental >= 6:
             return True
         if source_lower in {"real+propline", "primary+propline"}:
-            return n_real + n_supplemental >= 5
-    if history_supports_delivery(decision, intelligence_trace):
+            return n_real + n_supplemental >= 6
+    if history_supports_delivery(decision, intelligence_trace, min_samples=6):
         return True
     for obj in (decision, intelligence_trace):
         if isinstance(obj, dict):
@@ -1097,7 +1112,8 @@ def format_pp_alert(
         parts.append(f"🏟️  <b>Game:</b>       {pp.game_description}")
 
     if pp.start_time:
-        parts.append(f"🕐 <b>Start:</b>      {pp.start_time.strftime('%b %d %H:%M')} UTC")
+        from alerts_multiplatform import _format_game_time_et
+        parts.append(f"🕐 <b>Start:</b>      {_format_game_time_et(pp.start_time)}")
 
     parts += [
         "",
@@ -1105,6 +1121,7 @@ def format_pp_alert(
         *_risk_section(risk_factors),
         "",
         f"<i>Line and market context are shown for research.</i>",
+        "Monitoring player props across multiple sports. Not betting advice.",
     ]
 
     return "\n".join(parts)
@@ -1660,6 +1677,11 @@ class AlertDelivery:
             )
             return DeliveryResult(sent=False, filtered=True, filtered_reason=timing_reason)
 
+        from reporting import is_current_reporting_day
+        if not is_current_reporting_day(game_time):
+            return DeliveryResult(sent=False, filtered=True,
+                                  filtered_reason="Not current Central reporting day")
+
         # 2. Canonical actionable qualification. Scope, timing, deduplication,
         # flood protection, and delivery failures remain independent
         # safety/integrity protections.
@@ -1684,6 +1706,7 @@ class AlertDelivery:
             _pp_history,
             _pp_direction,
             sport=_pp_sport,
+            evidence=getattr(opp, "validation", None),
         ):
             return DeliveryResult(
                 sent=False,
@@ -1762,6 +1785,10 @@ class AlertDelivery:
             **_pp_profile,
             "line": _pp_line_value,
             "evidence_available": bool(evidence_available),
+            **_reminder_snapshot(
+                game_time, _pp_direction, getattr(opp.pp_line, "line_variant", ""),
+                getattr(opp.pp_line, "event_id", "") or getattr(opp.pp_line, "game_id", ""),
+            ),
         }
         _audit_ok = await self._audit_telegram_attempt(
             provider="PrizePicks",
@@ -1934,6 +1961,11 @@ class AlertDelivery:
                     player_name, stat_type, timing_reason,
                 )
                 return DeliveryResult(sent=False, filtered=True, filtered_reason=timing_reason)
+
+            from reporting import is_current_reporting_day
+            if not is_current_reporting_day(game_time):
+                return DeliveryResult(sent=False, filtered=True,
+                                      filtered_reason="Not current Central reporting day")
 
         # Both primary platforms attempt every eligible individual pick.
         # Legacy Underdog-only caps must not weaken one primary platform.
@@ -2228,7 +2260,14 @@ class AlertDelivery:
             outcome="sent" if alert_sent else "failed",
             recipients_sent=counts["sent"],
             recipients_failed=counts["failed"],
-            evidence_snapshot=evidence_snapshot,
+            evidence_snapshot={
+                **evidence_snapshot,
+                **_reminder_snapshot(
+                    game_time, _direction,
+                    getattr(_offering, "line_variant", ""),
+                    getattr(_offering, "game_id", "") or event_id,
+                ),
+            },
         )
         if (
             alert_sent

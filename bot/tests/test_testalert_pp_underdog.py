@@ -50,6 +50,13 @@ from engine.pp_scoring import PPAnalysisScore, score_pp_edge
 # Shared fixtures
 # ---------------------------------------------------------------------------
 
+@pytest.fixture(autouse=True)
+def isolate_calendar_policy_from_legacy_transport_mocks(monkeypatch):
+    # These transport/formatting mocks omit event times. Real Central-day
+    # eligibility for both sources is covered in test_v4_final_policy.
+    monkeypatch.setattr("reporting.is_current_reporting_day", lambda *_a, **_k: True)
+
+
 def _make_pp_line(
     player_name: str = "Anthony Edwards",
     stat_type: str = "Points",
@@ -493,7 +500,7 @@ class TestDeliverUnderdog:
     )
     @pytest.mark.parametrize(
         ("data_source", "n_real_games", "n_supplemental_games"),
-        [("real+propline", 3, 2), ("propline", 0, 5)],
+        [("real+propline", 3, 3), ("propline", 0, 6)],
     )
     async def test_gridiron_completed_history_can_deliver(
         self, sport, data_source, n_real_games, n_supplemental_games

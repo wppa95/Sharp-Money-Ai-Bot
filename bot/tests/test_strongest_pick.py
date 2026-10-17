@@ -329,7 +329,7 @@ def test_sport_queue_order_prefers_season_direction_over_recent_window(
     ]
 
 
-def test_strong_mode_excludes_mediocre_directional_history():
+def test_direction_with_six_actual_games_needs_no_all_window_cutoff():
     weak = _candidate("Underdog", "Jo Adell", "Hits", confidence=80, line=0.5)
     weak["sport"] = "MLB"
     weak["decision"] = _decision_with_windows(
@@ -339,7 +339,7 @@ def test_strong_mode_excludes_mediocre_directional_history():
     assert select_strongest_actionable_picks(
         [weak],
         require_strong=True,
-    ) == []
+    ) == [weak]
 
 
 def test_strong_mode_keeps_consistent_history_and_ranks_it_first():
@@ -403,12 +403,12 @@ def test_strong_mode_uses_computed_hit_rates_when_decision_omits_windows():
     "direction,rates,expected",
     [
         ("OVER", [0.75] * 6, True),
-        ("OVER", [0.75, 0.75, 0.75, 0.75, 0.74, 0.75], False),
+        ("OVER", [0.75, 0.75, 0.75, 0.75, 0.74, 0.75], True),
         ("UNDER", [0.25] * 6, True),
-        ("UNDER", [0.25, 0.25, 0.25, 0.25, 0.26, 0.25], False),
+        ("UNDER", [0.25, 0.25, 0.25, 0.25, 0.26, 0.25], True),
     ],
 )
-def test_strong_pick_applies_history_cutoffs_across_main_leagues(
+def test_supported_direction_does_not_require_all_window_cutoffs(
     sport,
     direction,
     rates,
@@ -467,7 +467,7 @@ def test_direction_only_sports_ignore_confidence_without_game_history(
 
 
 @pytest.mark.parametrize("sport", ["WNBA", "NHL"])
-def test_history_required_sports_still_need_propline_history(sport):
+def test_wnba_and_nhl_no_longer_require_history(sport):
     candidate = _candidate(
         "Underdog",
         "Jordan Lee",
@@ -485,7 +485,7 @@ def test_history_required_sports_still_need_propline_history(sport):
     assert select_strongest_actionable_picks(
         [candidate],
         require_strong=True,
-    ) == []
+    ) == [candidate]
 
 
 @pytest.mark.parametrize("sport", ["CFB", "FIFA", "KBO"])
@@ -510,8 +510,8 @@ def test_other_sports_need_only_direction_not_propline_history(sport):
     ) == [candidate]
 
 
-@pytest.mark.parametrize("sport", ["MLB", "NFL", "NBA"])
-def test_strict_history_sports_still_need_complete_history(sport):
+@pytest.mark.parametrize("sport,expected", [("MLB", False), ("NFL", False), ("NBA", True)])
+def test_mlb_nfl_still_need_real_history(sport, expected):
     candidate = _candidate(
         "Underdog",
         "Jordan Lee",
@@ -529,4 +529,4 @@ def test_strict_history_sports_still_need_complete_history(sport):
     assert select_strongest_actionable_picks(
         [candidate],
         require_strong=True,
-    ) == []
+    ) == ([candidate] if expected else [])

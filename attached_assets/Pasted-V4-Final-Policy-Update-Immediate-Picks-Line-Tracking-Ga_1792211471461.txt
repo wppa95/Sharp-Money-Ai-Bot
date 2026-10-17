@@ -1,0 +1,162 @@
+V4 Final Policy Update — Immediate Picks, Line Tracking, Game Reminders, and Correct Timezones
+
+Implement the following policy changes in the existing V4 codebase. These requirements supersede conflicting instructions in earlier prompts.
+
+Preserve the completed pipeline repairs, including immediate persisted-batch evaluation, DOTA history-cache hydration, separate LINE CHANGE notifications, source isolation, and deduplication. Do not refactor unrelated components.
+
+1. Game-day eligibility and timezone
+
+Use "America/Chicago" as the bot's configured reporting and display timezone. This is Missouri's Central Time zone and automatically handles daylight saving time.
+
+Required behavior:
+
+- Only send picks for games scheduled on the current calendar day in "America/Chicago".
+- Block picks for games scheduled on the next Central Time calendar day until that day begins.
+- Do not calculate the reporting day using UTC dates or a hardcoded UTC-5 offset.
+- Convert provider event start times from their actual timezone or UTC timestamp into "America/Chicago" before displaying them or making reporting-day decisions.
+- If a provider supplies a timestamp with an explicit timezone or UTC offset, respect it. Do not assume a naive timestamp is already Central Time without verifying the provider's convention.
+- Preserve started-event protection, pregame checks, line freshness, source identity, valid selectable sides, existing qualification gates, and deduplication.
+
+2. Send qualified picks immediately
+
+A qualified pick for a game scheduled on the current Central Time reporting day must be sent as soon as it becomes available.
+
+- Remove any arbitrary two-hour-before-game restriction that delays or blocks the initial pick.
+- Do not wait for later provider requests, another sport's feed, or a reminder timer before delivering a qualified pick.
+- Start tracking the pick and its verified line immediately so subsequent line movements can be detected.
+- Keep PrizePicks and Underdog as equal primary platforms with their own source IDs, lines, event identities, histories, and delivery records.
+- Send individual picks only. Do not create or send two-man or three-man slips.
+
+3. Add a separate two-hour game reminder
+
+The initial pick and the two-hour reminder are two separate notifications with different purposes.
+
+Initial pick:
+
+- Send immediately when the pick qualifies.
+- Begin line tracking immediately.
+- Do not delay the initial pick to synchronize with the reminder.
+
+Reminder:
+
+- Schedule a separate reminder for two hours before the actual game start.
+- Calculate the reminder time from the verified event timestamp converted correctly into "America/Chicago".
+- Display the game start and reminder times in Central Time.
+- Associate the reminder with the original pick, platform, event, player, market, and verified selection.
+- Do not create a second betting pick, alter the original pick, or count the reminder as a new qualified pick.
+- Deduplicate reminders so scheduler restarts or repeated evaluations cannot send duplicates.
+- Cancel or update a pending reminder when the associated event or selection is no longer valid, using the existing safety and lifecycle rules.
+- If a pick first qualifies less than two hours before game time, send the pick immediately. Do not delay it or send a misleading late two-hour reminder. Record that the scheduled reminder time has already passed.
+- Do not send reminders after the game has started.
+- Use the existing scheduler and database architecture where possible. Avoid unnecessary new scheduler jobs, overlapping tasks, or unbounded queues.
+
+4. Fix incorrect game start times
+
+The current bot sometimes displays a game starting at 3:00 PM when its actual local start is 2:00 PM. This causes missed games and incorrect reminder timing. Treat this as a priority defect.
+
+Trace the complete time path:
+
+1. Provider event timestamp and timezone.
+2. Parsing and normalization.
+3. Stored event start time.
+4. Current-day eligibility calculation.
+5. Telegram pick formatting.
+6. Reminder scheduling.
+7. Reminder message formatting.
+
+Requirements:
+
+- Identify the actual source of the one-hour discrepancy. Do not simply subtract an hour from all event times.
+- Store or retain an unambiguous event timestamp, preferably UTC-aware, and convert to "America/Chicago" for display and local-day calculations.
+- Handle CDT and CST correctly, including daylight-saving transitions.
+- Avoid double-converting timestamps that are already timezone-aware.
+- Verify the conventions for each affected provider or sport rather than assuming all feeds format times identically.
+- If an event timestamp is missing or ambiguous and cannot be safely resolved, do not fabricate a start time or schedule an unreliable reminder. Log the issue and apply existing safety behavior.
+- Display the correct Central Time start on the original pick and its reminder.
+
+5. History requirements — latest policy
+
+Remove the previously requested stricter MLB and NFL historical-window requirements.
+
+MLB and NFL:
+
+- Require more than five actual historical games for the historical-evidence portion of qualification.
+- Six real historical games or more meets this minimum; five or fewer does not.
+- Do not require every L5/L10/L20/L30/H2H or six-window hit-rate calculation to be populated.
+- Missing L20/L30 windows must not automatically reject a pick when the minimum historical-game requirement is met.
+- Preserve existing unrelated qualification thresholds and safety checks.
+
+NBA, WNBA, NHL, and all other supported sports:
+
+- History may be limited or unavailable.
+- Do not impose a universal five-game or six-window minimum.
+- A pick may qualify without historical results if a valid, supported OVER or UNDER direction can be established through the existing permitted evaluation logic.
+- Missing history must not manufacture a direction or automatically authorize a pick.
+- Continue enforcing source integrity, selectable-line validation, freshness, event-state checks, existing qualification rules, and deduplication.
+- Use L5/L10/L20/L30/H2H, average, median, and context when actually available. Clearly preserve unavailable windows as unavailable rather than fabricating values.
+- Do not lower unrelated qualification thresholds simply to increase alert volume.
+
+Ensure the same intended history policy is applied to PrizePicks and Underdog.
+
+6. Keep line movement tracking independent
+
+- Begin tracking a qualified pick as soon as its initial pick is available.
+- Send later verified movements as separate "LINE CHANGE" notifications.
+- Include the platform, previous line, current line, player, market, and direction where available.
+- Only compare observations belonging to the same platform, source identity, event, player, sport, stat, and line classification.
+- Movement alone must never create a new betting pick or change the original pick's selection.
+- Preserve existing audit-based deduplication, coalescing, reversal handling, and original-pick immutability.
+- Ensure the new reminder workflow does not interfere with movement tracking.
+
+7. Preserve existing architecture and safety boundaries
+
+- Keep PrizePicks and Underdog equal primary platforms.
+- Keep the current provider configuration and quota protections.
+- Do not re-enable The Odds API or add new providers.
+- Do not reset databases, perform destructive backfills, or introduce unnecessary migrations.
+- Do not weaken existing event-state, source, freshness, selectable-side, or deduplication protections.
+- Preserve existing MLB mappings and grading logic except for the explicitly changed history minimum.
+- Preserve serialized batch evaluation, complete-batch persistence barriers, and safe shutdown behavior.
+- Keep the footer exactly:
+  "Monitoring player props across multiple sports. Not betting advice."
+
+8. Required regression tests
+
+Add or update tests to verify:
+
+1. A qualified pick for today's game is sent immediately even when game time is more than two hours away.
+2. Tomorrow's game remains blocked until the reporting date changes in "America/Chicago".
+3. UTC timestamps are converted to the correct Central Time date and displayed start time.
+4. CDT/CST transitions do not create one-hour errors or incorrect reporting dates.
+5. Both platforms follow the same current-day and immediate-delivery rules.
+6. A separate reminder is scheduled exactly two hours before the event when that time is still in the future.
+7. A pick qualifying inside the final two hours is sent immediately without a misleading late reminder.
+8. Restarting or reevaluating does not duplicate a reminder.
+9. MLB/NFL picks with six or more real historical games are not rejected solely because L20/L30 or other windows are unavailable.
+10. MLB/NFL picks with five or fewer historical games fail the historical minimum.
+11. Other sports are not blocked solely because history is missing or incomplete, but still require a valid supported direction and all other existing gates.
+12. LINE CHANGE notifications remain independent of initial picks and reminders.
+13. Line movements never mutate original pick lines, directions, or delivery records.
+
+9. Validation and final report
+
+Run:
+
+- Focused regression tests for timezone conversion, current-day eligibility, reminders, history requirements, line movement, and delivery.
+- "python -m pytest bot/tests -q"
+- "python -m compileall -q bot"
+- "git diff --check"
+
+Inspect the final diff for unintended changes. Report:
+
+- Exact test totals and failures.
+- Changed files.
+- The root cause of the one-hour game-time discrepancy.
+- Evidence that displayed times and reminder timestamps are correct in "America/Chicago".
+- Evidence that reminders are independent of initial picks and line tracking.
+- Confirmation that MLB/NFL use the more-than-five-games rule and other sports do not have a blanket history minimum.
+- Any remaining limitations.
+
+Do not push to GitHub or deploy to Railway. Do not interrupt unrelated running workflows or modify production data. Complete and validate the corrections in the existing workspace before another deployment.
+
+The goal is immediate same-day pick delivery, immediate line tracking, accurate Missouri Central Time game starts, separate two-hour reminders, and history requirements that match the latest policy.

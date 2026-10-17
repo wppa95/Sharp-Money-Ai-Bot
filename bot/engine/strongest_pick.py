@@ -309,8 +309,8 @@ def is_strong_actionable_pick(
 ) -> bool:
     """Return whether a candidate meets the shared strongest-pick contract.
 
-    Main league sports need complete directional history meeting the shared
-    75% OVER / 25% UNDER thresholds. Other sports need an OVER/UNDER direction.
+    MLB/NFL need six verified completed games. Other sports need a supported
+    OVER/UNDER direction without a blanket historical sample/window minimum.
     """
     direction = _direction(candidate)
     if direction not in {"OVER", "UNDER"}:
@@ -333,9 +333,11 @@ def is_strong_actionable_pick(
         if validation is not None
         else (history, candidate.get("decision"))
     )
-    if not history_supports_delivery(*history_values):
+    if not history_supports_delivery(*history_values, min_samples=6):
         return False
-    return has_qualifying_pick_history(history, direction)
+    return has_qualifying_directional_pick(
+        history, direction, sport=sport, evidence=validation,
+    )
 
 
 def _ranking_key(candidate: dict) -> tuple[float, ...]:

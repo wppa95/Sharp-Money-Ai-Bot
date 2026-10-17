@@ -21,7 +21,7 @@ def test_optional_sport_accepts_explicit_direction_without_history():
 def test_history_sport_requires_completed_history():
     comparison = SimpleNamespace(recommendation="UNDER")
 
-    assert not _is_watch_candidate_eligible(comparison, "NHL")
+    assert not _is_watch_candidate_eligible(comparison, "NFL")
 
 
 def test_optional_sport_rejects_claimed_but_unverified_evidence():

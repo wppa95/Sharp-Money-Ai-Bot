@@ -7,7 +7,8 @@ description: Market movement can remain monitoring context, but cannot create a 
 
 Market movement alone cannot create a directional betting recommendation.
 Missing optional player-result history must not block an otherwise qualified
-direction; essential documented main-league history requirements remain.
+direction; MLB/NFL alone require at least six verified actual games, not full
+historical windows.
 Never fabricate result windows, rates, evidence, or a direction from a move.
 Factual LINE CHANGE notifications are separate from independently qualified picks.
 

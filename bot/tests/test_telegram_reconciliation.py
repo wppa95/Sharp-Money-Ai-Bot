@@ -177,6 +177,9 @@ async def _deliver_traceable_play(db, *, source_id: str, event_id: str, path: st
 
     delivery = AlertDelivery(db, MagicMock(), [123])
     with (
+        # Isolate original source/audit linkage: these legacy mocks omit
+        # start timestamps and must not create separate reminder rows.
+        patch("reporting.is_current_reporting_day", return_value=True),
         patch(
             "alerts.broadcast_alert",
             new_callable=AsyncMock,
@@ -195,7 +198,7 @@ async def _deliver_traceable_play(db, *, source_id: str, event_id: str, path: st
                 has_supporting_data=True,
                 data_source="propline",
                 n_real_games=0,
-                n_supplemental_games=5,
+                n_supplemental_games=6,
             ),
             decision=_directional_decision("OVER"),
             score=SimpleNamespace(total=90, stars=4),
@@ -248,7 +251,7 @@ async def test_successful_play_persists_exact_source_and_event_and_marks_opportu
     evidence = json.loads(audit.evidence_snapshot_json)
     assert evidence["schema_version"] == 1
     assert evidence["source"] == "propline"
-    assert evidence["sample_count"] == 5
+    assert evidence["sample_count"] == 6
     assert opportunity.alert_sent is True
     report = await db.get_telegram_reconciliation(since_hours=24)
     ud = report["by_provider"]["Underdog"]
@@ -298,6 +301,7 @@ async def test_failed_play_is_audited_but_not_marked_delivered(db):
     await _log_actionable_opportunity(db, external_id="failed-play")
     delivery = AlertDelivery(db, MagicMock(), [123])
     with (
+        patch("reporting.is_current_reporting_day", return_value=True),
         patch(
             "alerts.broadcast_alert",
             new_callable=AsyncMock,
@@ -311,7 +315,7 @@ async def test_failed_play_is_audited_but_not_marked_delivered(db):
                 has_supporting_data=True,
                 data_source="propline",
                 n_real_games=0,
-                n_supplemental_games=5,
+                n_supplemental_games=6,
             ),
             decision=_directional_decision("OVER"),
             score=SimpleNamespace(total=90, stars=4),

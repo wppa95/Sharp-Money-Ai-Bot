@@ -64,7 +64,7 @@ def test_immediate_timing_still_rejects_unsafe_events(game_time, status):
 
 
 @pytest.mark.parametrize("provider", ["Underdog", "PrizePicks"])
-async def test_actual_sender_accepts_fresh_future_qualified_pick(db, monkeypatch, provider):
+async def test_actual_sender_blocks_later_reporting_day(db, monkeypatch, provider):
     current = prop(provider)
     record = dict(
         provider=provider, external_id=current.external_id,
@@ -88,9 +88,9 @@ async def test_actual_sender_accepts_fresh_future_qualified_pick(db, monkeypatch
         decision=NS(recommendation="OVER"), validation=None,
         source=provider, source_id=current.external_id, event_id=current.game_id,
     )
-    assert result.sent and result.authoritative_recorded
-    assert send.await_count == 1
-    assert "Monitoring player props across multiple sports. Not betting advice." in send.call_args.args[2]
+    assert not result.sent and result.filtered
+    assert "Central reporting day" in result.filtered_reason
+    send.assert_not_awaited()
 
 
 def test_short_verified_optional_history_does_not_impose_five_games():

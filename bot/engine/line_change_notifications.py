@@ -67,9 +67,11 @@ def format_line_change(previous, current) -> str:
     ])
 
 
-def observe_persisted_batch(db, bot, chat_ids, props) -> None:
+def observe_persisted_batch(db, bot, chat_ids, props, *, observation_scope=None) -> None:
     """Nonblocking producer; coalesce pending moves without delaying evaluation."""
     global _worker
+    from .game_reminders import observe
+    observe(props, scope=observation_scope)
     if db is None or bot is None or not chat_ids:
         return
     for current in props:

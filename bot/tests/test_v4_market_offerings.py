@@ -296,6 +296,9 @@ async def test_explicit_unavailable_direction_not_delivered_but_available_pick_i
     db.get_telegram_delivery_state = AsyncMock(return_value={"tracked": True, "directional": True})
     monkeypatch.setattr(alert_scope_filter, "check", lambda *a, **k: FilterResult(allowed=True))
     monkeypatch.setattr(engine.timing, "is_game_alertable", lambda *a, **k: (True, ""))
+    # Isolate selectable-side safety from this fixture's intentionally
+    # tomorrow-dated inventory. Calendar behavior has separate real-gate tests.
+    monkeypatch.setattr("reporting.is_current_reporting_day", lambda *_a, **_k: True)
     monkeypatch.setattr(alerts, "_has_strong_underdog_evidence", lambda **k: True)
     broadcaster = AsyncMock(return_value={"sent": 1, "failed": 0})
     monkeypatch.setattr(alerts, "broadcast_alert", broadcaster)

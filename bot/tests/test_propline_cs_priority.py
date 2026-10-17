@@ -263,7 +263,7 @@ def test_gridiron_allows_mixed_primary_and_propline_results(sport):
         has_supporting_data=True,
         data_source="real+propline",
         n_real_games=3,
-        n_supplemental_games=2,
+        n_supplemental_games=3,
     )
     decision = SimpleNamespace(**_directional_history())
 
@@ -288,7 +288,7 @@ def test_gridiron_accepts_sufficient_settled_propline_history(sport):
         has_supporting_data=True,
         data_source="propline",
         n_real_games=0,
-        n_supplemental_games=5,
+        n_supplemental_games=6,
     )
     decision = SimpleNamespace(**_directional_history())
 
@@ -470,8 +470,8 @@ def test_historical_average_is_not_delivery_evidence_for_strict_sports(sport):
     ) is False
 
 
-@pytest.mark.parametrize("sport", ["MLB", "NBA", "WNBA"])
-def test_primary_basketball_and_baseball_sports_require_history(sport):
+@pytest.mark.parametrize("sport,expected", [("MLB", False), ("NBA", True), ("WNBA", True)])
+def test_latest_sport_history_policy(sport, expected):
     decision = SimpleNamespace(
         recommendation="OVER",
         evidence_source=None,
@@ -480,11 +480,11 @@ def test_primary_basketball_and_baseball_sports_require_history(sport):
     assert market_engine._has_delivery_evidence(
         sport=sport,
         decision=decision,
-    ) is False
+    ) is expected
     assert _has_strong_underdog_evidence(
         sport=sport,
         decision=decision,
-    ) is False
+    ) is expected
 
 
 def test_telegram_delivery_requires_strong_over_in_every_window():

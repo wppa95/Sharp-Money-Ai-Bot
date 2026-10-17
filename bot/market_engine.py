@@ -1400,6 +1400,8 @@ async def reset_monitoring_runtime_state() -> None:
     _prizepicks_processing_tasks.clear()
     from engine.line_change_notifications import reset as reset_line_changes
     await reset_line_changes()
+    from engine.game_reminders import reset as reset_game_reminders
+    reset_game_reminders()
     _prizepicks_processing_lock = None
     _prizepicks_sport_cursor = 0
     _propline_request_cursor = 0
@@ -1726,6 +1728,7 @@ async def propline_request_scan_job(context) -> None:
                         db, getattr(context, "bot", None),
                         list(getattr(config, "allowed_user_ids", ()) or ()),
                         canonicalize_player_props(source_provider, props),
+                        observation_scope=("propline", feed_key),
                     )
                     _cache_propline_evidence(
                         props,
@@ -3990,9 +3993,8 @@ def _has_delivery_evidence(
 ) -> bool:
     """Return whether a directional candidate may enter Telegram delivery.
 
-    Main league sports must pass the directional hit-rate threshold in each
-    required history window and have completed primary-player results or
-    explicitly settled PropLine history. Other sports require an OVER/UNDER
+    MLB/NFL require at least six verified completed games, not full windows.
+    Other sports require an OVER/UNDER
     direction but no completed-result history. Disallowed football-family
     sports are suppressed here and again by ``AlertDelivery``.
     """
@@ -4032,12 +4034,13 @@ def _has_delivery_evidence(
         if validation is not None
         else (decision, intelligence_trace)
     )
-    if not history_supports_delivery(*history_values):
+    if not history_supports_delivery(*history_values, min_samples=6):
         return False
     if not has_qualifying_directional_pick(
         decision,
         direction,
         sport=sport,
+        evidence=validation,
     ):
         return False
 
@@ -4048,16 +4051,16 @@ def _has_delivery_evidence(
             getattr(validation, "n_supplemental_games", 0) or 0
         )
         if (
-            (source in {"real", "primary"} and n_real >= 5)
-            or (source == "propline" and n_supplemental >= 5)
+            (source in {"real", "primary"} and n_real >= 6)
+            or (source == "propline" and n_supplemental >= 6)
             or (
                 source in {"real+propline", "primary+propline"}
-                and n_real + n_supplemental >= 5
+                and n_real + n_supplemental >= 6
             )
         ):
             return True
 
-    if history_supports_delivery(decision, intelligence_trace):
+    if history_supports_delivery(decision, intelligence_trace, min_samples=6):
         return True
 
     for obj in (decision, intelligence_trace):
@@ -5433,6 +5436,7 @@ async def underdog_job(context) -> None:
     observe_persisted_batch(
         db, getattr(context, "bot", None), list(config.allowed_user_ids),
         _canonical_underdog_props,
+        observation_scope=("native_underdog",),
     )
 
     try:

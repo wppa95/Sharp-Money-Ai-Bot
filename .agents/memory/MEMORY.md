@@ -141,7 +141,7 @@
 - [Underdog event timing](underdog-event-timing.md) — join event metadata only through explicit provider IDs; unknown timing must remain delivery-blocked.
 - [Telegram funnel boundary](telegram-funnel-boundary.md) — Telegram delivery requires tracked + directional durable rows; keep `/picks` and monitoring populations independent.
 - [Sleeper test fixtures](sleeper-test-fixtures.md) — cache non-fixture current seasons as empty so date-dependent NFL lookups stay deterministic.
-- [Strong pick quality gate](strong-pick-quality-gate.md) — MLB/NBA/NFL/WNBA/NHL require 75%/25% across six windows; other sports need OVER/UNDER direction only, not confidence or history.
+- [Strong pick quality gate](strong-pick-quality-gate.md) — MLB/NFL need six actual games, not complete windows; other sports have optional history and need supported direction.
 - [Telegram transport error handling](telegram-transport-errors.md) — python-telegram-bot wraps httpx read failures in NetworkError; classify the cause as transient polling noise.
 - [Grader backlog fairness](grader-backlog-fairness.md) — id-only settlement rotation can starve evidence-backed sports behind unresolved football rows; prefer cheap sport-priority ordering over correlated evidence scans.
 - [PropLine handoff pacing](propline-handoff-pacing.md) — a quota-paced PropLine fetch must not block the live monitor; preserve completed handoffs for the next cycle.

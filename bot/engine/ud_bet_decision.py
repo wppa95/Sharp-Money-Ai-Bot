@@ -431,7 +431,10 @@ def make_ud_bet_decision(
         return _historical_fallback("No settled player-game hit-rate window available")
 
     # ── Gate 2: sufficient sample size ───────────────────────────────────────
-    primary = _primary_window(hit_rates)
+    from engine.delivery_evidence import is_history_optional_sport
+    primary = _primary_window(
+        hit_rates, min_games=1 if is_history_optional_sport(sport) else _MIN_GAMES_PRIMARY,
+    )
     if primary is None:
         return _historical_fallback(
             f"Insufficient settled sample ({hit_rates.total_games} result(s))"
@@ -494,8 +497,8 @@ def _historical_average_direction(
     return None
 
 
-def _primary_window(hit_rates: "PlayerHitRates") -> "Optional[WindowStats]":
-    """Return the smallest window with ≥ _MIN_GAMES_PRIMARY games."""
+def _primary_window(hit_rates: "PlayerHitRates", *, min_games: int = _MIN_GAMES_PRIMARY) -> "Optional[WindowStats]":
+    """Return the smallest available window meeting the sport's sample floor."""
     for w in (
         hit_rates.l5,
         hit_rates.l10,
@@ -504,7 +507,7 @@ def _primary_window(hit_rates: "PlayerHitRates") -> "Optional[WindowStats]":
         hit_rates.l30,
         hit_rates.season,
     ):
-        if w is not None and w.games >= _MIN_GAMES_PRIMARY:
+        if w is not None and w.games >= min_games:
             return w
     return None
 

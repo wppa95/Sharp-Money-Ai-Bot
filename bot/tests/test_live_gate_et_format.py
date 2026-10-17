@@ -153,11 +153,11 @@ class TestFormatGameTimeEt:
         result = fn(dt)
         assert isinstance(result, str)
 
-    def test_output_contains_et(self):
+    def test_output_contains_central_zone(self):
         fn = self._fn()
         dt = datetime(2026, 8, 7, 20, 40, 0)
         result = fn(dt)
-        assert "ET" in result, f"Expected 'ET' in result, got: {result!r}"
+        assert "CDT" in result, f"Expected 'CDT' in result, got: {result!r}"
 
     def test_output_contains_am_or_pm(self):
         fn = self._fn()
@@ -191,29 +191,22 @@ class TestFormatGameTimeEt:
         fn = self._fn()
         dt = datetime(2026, 8, 7, 0, 0, 0)  # midnight UTC = 8 PM ET previous day
         result = fn(dt)
-        assert "ET" in result
+        assert "CDT" in result
 
     def test_aware_offset_is_converted_before_et_display(self):
         fn = self._fn()
         dt = datetime(2026, 8, 7, 19, 0, tzinfo=timezone(timedelta(hours=-4)))
-        assert fn(dt) == "Aug 7, 7:00 PM ET"
+        assert fn(dt) == "Aug 7, 6:00 PM CDT"
 
     def test_utc_date_boundary_uses_prior_et_date(self):
         fn = self._fn()
         dt = datetime(2026, 8, 7, 1, 0, tzinfo=timezone.utc)
-        assert fn(dt) == "Aug 6, 9:00 PM ET"
+        assert fn(dt) == "Aug 6, 8:00 PM CDT"
 
     def test_fallback_displays_aware_timestamp_as_utc(self, monkeypatch):
-        import zoneinfo
-
-        real_zone_info = zoneinfo.ZoneInfo
-
-        def fail_et_zone(name):
-            if name == "America/New_York":
-                raise zoneinfo.ZoneInfoNotFoundError(name)
-            return real_zone_info(name)
-
-        monkeypatch.setattr(zoneinfo, "ZoneInfo", fail_et_zone)
+        def fail_conversion(value):
+            raise ValueError("fixture display conversion failure")
+        monkeypatch.setattr("reporting.to_reporting_timezone", fail_conversion)
         fn = self._fn()
         dt = datetime(2026, 8, 7, 1, 0, tzinfo=timezone.utc)
         assert fn(dt) == "Aug 7, 1:00 AM UTC"

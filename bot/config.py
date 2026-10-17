@@ -47,9 +47,7 @@ class Config:
 
     # ── External APIs ─────────────────────────────────────────────────────────
     # All user-facing "today"/calendar-day reports use this timezone.
-    REPORTING_TIMEZONE: str = os.environ.get(
-        "REPORTING_TIMEZONE", "America/Chicago"
-    )
+    REPORTING_TIMEZONE: str = "America/Chicago"
     # PrizePicks uses a public API — no key required. Field reserved for future
     # authenticated endpoints.
     PRIZEPICKS_API_KEY: str = os.environ.get("PRIZEPICKS_API_KEY", "")

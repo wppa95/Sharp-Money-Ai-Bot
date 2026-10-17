@@ -13,8 +13,15 @@ New individual betting picks require independently verified current selectable
 lines and the existing qualification/safety checks. A movement alone cannot
 create a pick. Underdog and PrizePicks have equal status.
 
-**Why:** The user's pick-to-delivery follow-up explicitly separates movement
-notifications from picks, superseding older market-move suppression.
+Two-hour game reminders are a third message purpose within operational notices.
+They refer to an original verified selection and event; they never create a
+second pick or modify its line, direction, qualification, or delivery record.
+Reminder restarts/repeated evaluation must not duplicate notifications, and
+invalidated selections/events must cancel or update pending reminders.
+
+**Why:** The user explicitly separates immediate picks, factual movements, and
+two-hour game reminders. Synchronizing these messages would delay picks or
+misrepresent notifications as new bets.
 
 **How to apply:** Keep source/event/transition-aware notification dedup separate
 from betting-pick dedup, immutable delivery evidence, grading, and performance.

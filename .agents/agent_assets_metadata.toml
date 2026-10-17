@@ -78,3 +78,17 @@ mtime_ms = 1792210958236
 storage_uri = "gcs://replit-rams-assets-spock/rams/assets/repl:0f126d34-12f4-4521-91c1-5cf2228d2bcd/adf9667a-f902-40d0-bd39-4bee3a43911a/44d6582c-410e-4d29-a05d-45d707e5c9c3"
 storage_version_token = "1792210972632604"
 content_type = "text/markdown"
+
+[[outputs]]
+id = "Lp7mTqmjJ0CG6DcjNSsbr"
+uri = "file://docs/v4-final-policy-verification.md"
+type = "text"
+title = "V4 final policy verification"
+description = "Implementation changes, timestamp and reminder evidence, safety limitations, exact files changed, and final verification results."
+logical_id = "2405344b-b7d6-4930-b552-50ae8b414217"
+content_hash = "sha256:4d9e6f0dfd8e70c5a3308fabdf179354bd16336334854398bf965150f5a398d9"
+size = 12509
+mtime_ms = 1792214329632
+storage_uri = "gcs://replit-rams-assets-spock/rams/assets/repl:0f126d34-12f4-4521-91c1-5cf2228d2bcd/2405344b-b7d6-4930-b552-50ae8b414217/61bb382b-89af-444e-b447-3c3b22bbdb8a"
+storage_version_token = "1792214431440624"
+content_type = "text/markdown"

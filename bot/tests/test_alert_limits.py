@@ -12,6 +12,12 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 
+@pytest.fixture(autouse=True)
+def isolate_day_gate_for_legacy_cap_transport_tests(monkeypatch, request):
+    """These mocks omit event times; actual calendar behavior has dedicated tests."""
+    if request.node.name != "test_future_event_still_requires_evidence_without_calendar_wait":
+        monkeypatch.setattr("reporting.is_current_reporting_day", lambda *args, **kwargs: True)
+
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _make_db(
@@ -351,7 +357,7 @@ async def test_underdog_timing_filter_blocks():
 
 @pytest.mark.asyncio
 async def test_future_event_still_requires_evidence_without_calendar_wait():
-    """Removing the calendar wait must not waive main-league evidence."""
+    """Tomorrow is blocked independently of direction and history."""
     db = _make_db()
     delivery = _make_delivery(db)
 
@@ -367,7 +373,7 @@ async def test_future_event_still_requires_evidence_without_calendar_wait():
 
     assert result.sent is False
     assert result.filtered is True
-    assert "Canonical direction/evidence gate" in result.filtered_reason
+    assert "Central reporting day" in result.filtered_reason
     delivery._bot.send_message.assert_not_awaited()
 
 

@@ -23,13 +23,13 @@ _NESTED_KEYS = (
     "bet_evidence_json",
 )
 
-_STRICT_HISTORY_SPORTS = frozenset({"MLB", "NFL", "NBA", "WNBA", "NHL"})
+_STRICT_HISTORY_SPORTS = frozenset({"MLB", "NFL"})
 
 
 def is_history_optional_sport(sport: Any) -> bool:
     """Return whether *sport* uses the direction-only rule.
 
-    MLB, NBA, NFL, WNBA, and NHL require complete completed-result history.
+    Only MLB and NFL require at least six verified completed games.
     Other named sports require only an OVER/UNDER direction and do not require
     completed player-game results.
 
@@ -429,8 +429,13 @@ def has_qualifying_directional_pick(
     direction: Any = None,
     *,
     sport: Any = None,
+    evidence: Any = None,
 ) -> bool:
-    """Require direction for all sports and completed history for main leagues."""
+    """Require a supported direction; MLB/NFL additionally need six real games.
+
+    Window completeness and window hit-rate thresholds are not eligibility
+    requirements. Other evaluation and source-integrity gates remain separate.
+    """
     recommendation = str(
         direction
         or (
@@ -445,7 +450,7 @@ def has_qualifying_directional_pick(
 
     if is_history_optional_sport(sport):
         return True
-    return has_qualifying_pick_history(value, recommendation)
+    return history_supports_delivery(value, evidence, min_samples=6)
 
 
 def has_directional_history_fields(value: Any) -> bool:

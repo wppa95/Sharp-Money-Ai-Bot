@@ -361,7 +361,7 @@ async def test_prizepicks_delivery_allows_qualified_events_beyond_two_hours():
 
 
 @pytest.mark.asyncio
-async def test_prizepicks_strict_delivery_has_no_reporting_day_wait():
+async def test_prizepicks_strict_delivery_blocks_another_reporting_day():
     delivery = _delivery()
     with (
         patch("reporting.is_current_reporting_day", return_value=False),
@@ -376,5 +376,6 @@ async def test_prizepicks_strict_delivery_has_no_reporting_day_wait():
             evidence_available=True,
         )
 
-    assert result.sent is True
-    broadcast.assert_awaited_once()
+    assert result.sent is False
+    assert "Central reporting day" in result.filtered_reason
+    broadcast.assert_not_awaited()

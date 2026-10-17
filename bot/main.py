@@ -2335,7 +2335,7 @@ async def _grade_opportunities_job(context) -> None:
 
 
 async def _heartbeat_job(context) -> None:
-    """Run every 60 s for process-health bookkeeping only."""
+    """Run health bookkeeping and bounded reminders on the existing minute job."""
     ht = get_health_tracker()
     try:
         if ht is not None:
@@ -2346,6 +2346,15 @@ async def _heartbeat_job(context) -> None:
         logger.exception("_heartbeat_job: error: %s", _exc)
         if ht is not None:
             ht.record_job_fail("heartbeat_job", str(_exc))
+    try:
+        from engine.game_reminders import run_due_reminders
+        async with asyncio.timeout(25):
+            await run_due_reminders(
+                context.bot_data.get("db"), context.bot,
+                list(config.allowed_user_ids),
+            )
+    except Exception:
+        logger.exception("Bounded game reminder drain failed")
 
 
 # ── Background jobs ────────────────────────────────────────────────────────────

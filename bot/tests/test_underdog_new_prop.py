@@ -152,7 +152,7 @@ async def _run_job(snapshots, db, *, deliver_result=None, hit_rates=None):
 @pytest.mark.asyncio
 async def test_low_line_new_prop_requires_real_game_results(caplog):
     """Snapshot history alone cannot qualify a new-prop Telegram PLAY."""
-    snaps = [_snap("Aaron Judge", "Home Runs", 0.5)]
+    snaps = [_snap("Aaron Judge", "Home Runs", 0.5, sport="MLB")]
     db = _make_db(known_keys=set(), prop_history=_fake_history(6))
 
     with caplog.at_level(logging.INFO, logger="market_engine"):
@@ -278,7 +278,7 @@ async def test_removal_never_treated_as_new():
 async def test_new_prop_without_real_results_is_not_marked_sent(caplog):
     """A mocked delivery result cannot mark a proxy-only new prop as sent."""
     from alerts import DeliveryResult
-    snaps = [_snap("Aaron Judge", "Home Runs", 0.5)]
+    snaps = [_snap("Aaron Judge", "Home Runs", 0.5, sport="MLB")]
     db = _make_db(known_keys=set(), prop_history=_fake_history(6))
 
     sent_result = DeliveryResult(sent=True, recipients_sent=1)
