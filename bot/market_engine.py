@@ -7147,6 +7147,7 @@ async def underdog_job(context) -> None:
         # checks the durable opportunity ledger and fails closed when this row
         # is not present, so writing this batch after Telegram made every first
         # alert from the cycle self-block.
+        _lifecycle_opportunity_rows = list(_opportunity_batch)
         if _opportunity_batch:
             if not db:
                 _opportunity_write_ok = False
@@ -7183,7 +7184,7 @@ async def underdog_job(context) -> None:
         # are attempted in priority order. Ranking does not impose a rolling send
         # limit; existing per-candidate delivery gates still apply.
         _lifecycle_updates: list[dict] = []
-        if _opportunity_batch and db:
+        if (_lifecycle_opportunity_rows or _delivery_queue) and db:
             def _lifecycle_identity(
                 provider: object,
                 source_id: object,
@@ -7238,7 +7239,7 @@ async def underdog_job(context) -> None:
 
             _lifecycle_rows: list[dict] = []
             _lifecycle_rejected: list[dict] = []
-            for _opportunity in _opportunity_batch:
+            for _opportunity in _lifecycle_opportunity_rows:
                 _provider = str(_opportunity.get("provider") or "Underdog")
                 _source_id = str(_opportunity.get("external_id") or "")
                 _event_id = str(_opportunity.get("game_id") or "")
@@ -7293,9 +7294,13 @@ async def underdog_job(context) -> None:
                 if not _passed_collection:
                     _lifecycle_rejected.append({
                         "evaluation_id": _evaluation_id,
-                        "disposition": "rejected",
+                        "disposition": (
+                            "blocked" if not _opportunity_write_ok else "rejected"
+                        ),
                         "final_reason": (
-                            "directional opportunity did not pass existing "
+                            "directional opportunity persistence failed"
+                            if not _opportunity_write_ok
+                            else "directional opportunity did not pass existing "
                             "delivery-candidate gates"
                         ),
                     })
