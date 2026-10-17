@@ -5158,6 +5158,59 @@ class Database:
             await s.commit()
         return saved_ids
 
+    @staticmethod
+    async def _update_lifecycle_from_delivery(
+        session: AsyncSession,
+        delivery: TelegramPickDelivery,
+        *,
+        disposition: str,
+        reason: Optional[str],
+        now: datetime,
+    ) -> None:
+        try:
+            evidence = json.loads(delivery.evidence_snapshot_json or "{}")
+        except (TypeError, ValueError):
+            evidence = {}
+        lifecycle_id = (
+            evidence.get("candidate_lifecycle_id")
+            if isinstance(evidence, dict) else None
+        )
+        if not lifecycle_id:
+            return
+        identity_key = _candidate_lifecycle_identity_key(
+            provider=delivery.provider,
+            source_id=delivery.source_id,
+            event_id=delivery.event_id,
+            player_name=delivery.player_name,
+            sport=delivery.sport,
+            stat_type=delivery.stat_type,
+            line_value=delivery.line_value,
+            direction=delivery.direction,
+            line_variant=delivery.line_variant,
+        )
+        lifecycle = await session.get(
+            CandidateLifecycleRecord, str(lifecycle_id)
+        )
+        if lifecycle is None or lifecycle.pick_identity_key != identity_key:
+            return
+        terminal = {
+            "delivered", "delivery_unconfirmed", "rejected", "blocked",
+            "queue_persist_failed", "delivery_failed", "delivery_unknown",
+            "expired", "invalidated",
+        }
+        if lifecycle.disposition in terminal:
+            return
+        lifecycle.disposition = disposition
+        lifecycle.final_reason = str(reason)[:256] if reason else None
+        lifecycle.updated_at = now
+        if disposition in {"qualified", "queue_admitted", "delivered"}:
+            lifecycle.qualified_at = lifecycle.qualified_at or now
+        if disposition == "queue_admitted":
+            lifecycle.queue_admitted_at = lifecycle.queue_admitted_at or now
+            lifecycle.queue_delivery_id = int(delivery.id)
+        if disposition == "delivered":
+            lifecycle.delivered_at = lifecycle.delivered_at or now
+
     @_retry_sqlite_write
     async def claim_next_telegram_pick_delivery(
         self,
@@ -5185,6 +5238,13 @@ class Database:
                 stale.final_reason = "process_interrupted_unknown"
                 stale.last_error_class = "ProcessInterrupted"
                 stale.updated_at = now
+                await self._update_lifecycle_from_delivery(
+                    s,
+                    stale,
+                    disposition="delivery_unknown",
+                    reason="Send outcome unknown after restart; not retried to avoid duplicates",
+                    now=now,
+                )
                 await s.execute(
                     update(TelegramPickDeliveryAttempt)
                     .where(
@@ -5556,6 +5616,29 @@ class Database:
             else:
                 row.status = status
                 row.final_reason = reason
+            if status != "retry_scheduled":
+                lifecycle_disposition = {
+                    "sent": (
+                        "delivery_unconfirmed"
+                        if row.final_reason == "telegram_sent_audit_write_unconfirmed"
+                        else "delivered"
+                    ),
+                    "failed": (
+                        "delivery_unknown"
+                        if "unknown" in str(reason or "").casefold()
+                        else "delivery_failed"
+                    ),
+                    "expired": "expired",
+                    "invalidated": "invalidated",
+                }.get(status)
+                if lifecycle_disposition:
+                    await self._update_lifecycle_from_delivery(
+                        s,
+                        row,
+                        disposition=lifecycle_disposition,
+                        reason=reason,
+                        now=now,
+                    )
             await s.commit()
             return True
 
@@ -5576,7 +5659,15 @@ class Database:
             row.status = status
             row.final_reason = str(reason)[:256]
             row.lease_until = None
-            row.updated_at = datetime.utcnow()
+            now = datetime.utcnow()
+            row.updated_at = now
+            await self._update_lifecycle_from_delivery(
+                s,
+                row,
+                disposition=status,
+                reason=reason,
+                now=now,
+            )
             attempt = await s.scalar(
                 select(TelegramPickDeliveryAttempt)
                 .where(
