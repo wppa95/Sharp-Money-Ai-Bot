@@ -316,7 +316,7 @@ async def test_explicit_unavailable_direction_not_delivered_but_available_pick_i
         line_variant=canonical.line_variant,
         decision=NS(recommendation="UNDER"), validation=NS(has_supporting_data=True),
     )
-    assert not result.sent and "unavailable" in result.filtered_reason.lower()
+    assert not result.sent and result.filtered_reason == "DIRECTION_NOT_OFFERED"
     broadcaster.assert_not_awaited()
     result = await delivery.deliver_underdog(
         source.player_name, source.team, source.sport, source.stat_type, 1.5, 1.5,
