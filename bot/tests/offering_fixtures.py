@@ -23,7 +23,10 @@ def seed_current_offering(
 ):
     """Seed one exact, fresh source offer; never use this in live-provider tests."""
     from engine.offering_coverage import coverage
-    from engine.player_props_pipeline import CanonicalPlayerProp
+    from engine.player_props_pipeline import (
+        CanonicalPlayerProp,
+        canonicalize_player_props,
+    )
 
     if replace_scope:
         coverage.clear_scope(provider, sport)
@@ -43,4 +46,4 @@ def seed_current_offering(
         raw=None,
         available_directions=(str(direction).upper(),),
     )
-    return coverage.canonicalize_player_props(provider, [prop])[0]
+    return canonicalize_player_props(provider, [prop])[0]
