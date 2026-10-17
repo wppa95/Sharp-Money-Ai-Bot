@@ -265,6 +265,48 @@ async def test_prizepicks_queue_rejects_non_exact_source_identity(tmp_path, mism
 
 
 @pytest.mark.asyncio
+async def test_lifecycle_rejection_reason_is_final_and_identity_is_immutable(tmp_path):
+    db = await _make_db(tmp_path, "candidate_rejection.sqlite3")
+    try:
+        evaluation_id = "b" * 32
+        candidate = _item(source_id="ud-source", event_id="ud-event")
+        await db.record_candidate_lifecycle_batch([{
+            "evaluation_id": evaluation_id,
+            "provider": "Underdog",
+            "source_id": candidate["source_id"],
+            "event_id": candidate["event_id"],
+            "player_name": candidate["player_name"],
+            "sport": candidate["sport"],
+            "stat_type": candidate["stat_type"],
+            "line_variant": "",
+            "line_value": candidate["line_value"],
+            "direction": candidate["direction"],
+            "delivery_path": "new",
+        }])
+        async with db.session() as session:
+            lifecycle = await session.get(CandidateLifecycleRecord, evaluation_id)
+            original_identity = lifecycle.pick_identity_key
+        await db.update_candidate_lifecycle_batch([{
+            "evaluation_id": evaluation_id,
+            "disposition": "rejected",
+            "final_reason": "direction/evidence gate",
+        }])
+        await db.update_candidate_lifecycle_batch([{
+            "evaluation_id": evaluation_id,
+            "disposition": "delivered",
+            "final_reason": None,
+        }])
+        async with db.session() as session:
+            lifecycle = await session.get(CandidateLifecycleRecord, evaluation_id)
+            assert lifecycle.disposition == "rejected"
+            assert lifecycle.final_reason == "direction/evidence gate"
+            assert lifecycle.pick_identity_key == original_identity
+            assert lifecycle.delivered_at is None
+    finally:
+        await _close_db(db)
+
+
+@pytest.mark.asyncio
 async def test_prizepicks_queue_and_success_audit_advance_exact_lifecycle(tmp_path):
     db = await _make_db(tmp_path, "pp_lifecycle.sqlite3")
     try:
