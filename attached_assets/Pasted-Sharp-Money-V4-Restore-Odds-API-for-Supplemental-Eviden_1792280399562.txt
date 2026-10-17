@@ -1,0 +1,180 @@
+Sharp Money V4 — Restore Odds API for Supplemental Evidence, History, and Settlement
+
+Implement the Odds API restoration in the existing Sharp Money AI Bot V4 repository. This is an implementation task, not an audit-only task.
+
+The API is believed to have a free allowance of 500 requests per month. Design a conservative shared request budget, spread requests across the full 24-hour day, and rotate across all supported sports. Verify the actual endpoints, account-plan coverage, and quota behavior from existing configuration and documentation where available.
+
+1. Inspect the existing integration first
+
+Trace the current and historical Odds API implementation, configuration, provider registry, request-budget controls, database models, history/evidence pipeline, and HIT/MISS/PUSH settlement flow.
+
+Determine what was disabled, removed, or disconnected and restore the existing intended integration wherever possible. Reuse the repository's established architecture instead of creating a competing provider or duplicate pipeline.
+
+Use only documented endpoints and response fields that actually support the requested data. Do not assume Odds API provides player-level historical results or settlement data for every sport, market, or plan.
+
+Do not expose or print API credentials. Do not make live API requests during this task.
+
+2. Restore supplemental history and evidence
+
+Use Odds API only to supplement missing, valid historical evidence when the configured endpoints actually provide suitable data.
+
+- Support the existing L5/L10/L20/L30 and other currently supported evidence calculations when valid player-level history is available.
+- Match the exact player, sport, market/stat, event, and relevant time period.
+- Preserve timestamps, event identity, source attribution, and original results.
+- Normalize provider-specific player names and market names carefully. Do not merge records based only on similar names.
+- Reuse the existing evidence pipeline and shared database.
+- If valid player-level evidence is unavailable, record that limitation and let the existing qualification rules determine whether the pick qualifies.
+- Never manufacture player history or substitute team-level odds, moneylines, spreads, or totals for player-performance results.
+- Do not treat an offered betting price or projected value as an actual player result.
+
+3. Restore verified HIT/MISS/PUSH settlement
+
+Restore settlement support only where reliable final results are available from supported sources.
+
+- Grade against the original pick's exact platform, player, event, sport, stat, line, and direction.
+- Preserve the original line, direction, and PrizePicks Goblin/Demon variant.
+- Follow existing rules for pushes, voids, postponed events, abandoned events, and incomplete results.
+- Do not settle from an odds line, projection, or unverified outcome.
+- Leave ambiguous or unavailable results ungraded and eligible for the existing retry/reconciliation process.
+- Prevent duplicate settlement, double-counting, and overwriting a verified grade with incomplete or conflicting data.
+- Do not claim Odds API can settle every sport or market unless the actual available data supports it.
+
+4. Enforce one shared monthly request budget
+
+Assume the free allowance is 500 requests per month until the actual plan or configuration can be verified.
+
+- Target approximately 450 requests per month initially, preserving a buffer of about 50 requests.
+- Count all requests that consume the same provider quota, including requests for any sport, endpoint, history/evidence lookup, and settlement lookup.
+- Use one shared budget manager rather than separate per-sport counters that can collectively exceed the allowance.
+- Persist request usage across restarts using the existing architecture if possible. Do not reset the monthly count when the bot restarts.
+- Track the quota period and roll over only at the correct period boundary. Do not assume the provider's quota period resets on the first day of the calendar month if the account uses another reset date.
+- If actual remaining quota is available through documented metadata, reconcile it with local tracking without double-counting.
+- If usage or remaining quota is unknown, fail safely rather than generating a burst of requests.
+- If an unavoidable request could exceed the safe budget, defer it and report the limitation.
+
+Do not change the separate PropLine quota, Underdog polling budget, or other providers' request limits.
+
+5. Spread Odds API calls across all 24 hours
+
+Use a scheduler that distributes requests across the entire day instead of making many calls at startup.
+
+- With a 500-call monthly allowance, the absolute average over a 30-day month is about 16.7 requests per day.
+- At the recommended 450-call target, the average is 15 requests per day, or approximately one request every 96 minutes over a 24-hour period.
+- Calculate the actual interval from the safe monthly target, quota period, remaining allowance, and days remaining.
+- Spread calls evenly over 24 hours, including overnight hours.
+- Do not spend the day's allowance immediately after startup.
+- A restart must not reset the request counter or trigger an immediate request burst.
+- Respect rate limits, cooldowns, retry-after values, and provider errors. Never create retry storms.
+- Retry only when appropriate and when the shared budget permits.
+- Do not let an unsuccessful call silently trigger repeated requests.
+
+Use Central Time for human-readable diagnostics, while maintaining unambiguous internal timestamps and quota-period calculations.
+
+6. Rotate across all supported sports and markets
+
+The goal is broad, fair coverage across all sports supported by the configured Odds API plan and relevant to the existing V4 use cases.
+
+- Inspect the documented endpoints to determine whether one request can return data for multiple sports or whether each sport requires a separate request.
+- Do not assume an all-sports endpoint exists.
+- If separate calls are necessary, rotate fairly across every supported sport instead of permanently prioritizing a small subset.
+- Within supported sports, consider the available relevant markets and genuine history gaps.
+- Prioritize genuine missing-evidence needs and pending settlement needs when appropriate, while maintaining a transparent rotating schedule across the remaining supported sports.
+- Avoid repeatedly requesting data that is already fresh and complete.
+- Use existing caches and deduplication where possible.
+- Do not silently remove sports from the rotation. If the limited monthly budget cannot cover every sport frequently, report the tradeoff and implement a fair, visible rotation.
+- Do not claim a sport or market is covered until the endpoint and plan actually support it.
+
+One request must be treated as one request for budgeting purposes unless the provider's documented quota accounting proves otherwise. Do not assume a batch operation is free or counts as only one request without verification.
+
+7. Keep PrizePicks and Underdog offerings authoritative
+
+PrizePicks remains sourced through PropLine. Underdog remains sourced through its native feed.
+
+Odds API must never:
+
+- Supply, invent, or override currently offered PrizePicks or Underdog lines.
+- Decide whether either platform currently offers a specific player, stat, line, direction, or variant.
+- Bypass exact-offering validation.
+- Create picks merely because an Odds API market exists.
+- Replace the original platform, line, direction, or PrizePicks Goblin/Demon variant.
+- Override provider/sport startup-readiness gates.
+
+The existing exact-offering validation must continue to run before queue admission and before delivery. A pick must remain pending until the relevant primary provider/sport feed is ready.
+
+8. Shared database and record integrity
+
+Route all newly acquired usable history and settlement evidence through the existing shared database and established provider interfaces.
+
+- Preserve existing records and historical grades.
+- Reuse existing tables, models, identifiers, and deduplication keys where possible.
+- Prevent duplicate observations and duplicate grading across polling cycles.
+- Keep source attribution and original pick identity.
+- Do not reset, truncate, rebuild, or backfill the database.
+- Do not introduce a new database architecture or migration unless technically essential. If a migration is genuinely unavoidable, stop and explain why before applying it.
+- Do not change hosting or Railway persistence architecture as part of this task.
+
+9. Preserve existing V4 behavior
+
+Do not change:
+
+- Existing qualification thresholds or evidence requirements.
+- Direction logic or market coverage.
+- Standard-line versus Goblin/Demon priority.
+- PrizePicks/Underdog platform independence.
+- Duplicate prevention and existing delivery behavior.
+- Central Time and current-day event rules.
+- Immediate delivery of qualified picks.
+- Two-hour reminders and separate line-change notices.
+- Existing PropLine and Underdog scheduling or quotas.
+- Any existing startup-readiness or exact-offering validation behavior.
+
+The bot must continue sending individual qualified picks only. Never create or send two-leg or three-leg slips. Do not add Strong Bet labels, stars, tiers, or unsupported confidence scores.
+
+Use the exact footer:
+
+Monitoring player props across multiple sports. Not betting advice.
+
+10. Required regression tests
+
+Add or update tests using mocked provider responses. Do not make live API calls during tests.
+
+Test at least:
+
+1. Valid player-level history supplements genuine evidence gaps.
+2. Unsupported or unavailable player history fails safely.
+3. Correct HIT/MISS/PUSH settlement against the original line and direction.
+4. Pushes are not counted as wins or losses.
+5. Incomplete, postponed, void, or ambiguous results remain ungraded as appropriate.
+6. Duplicate observations and repeated settlement do not double-count.
+7. Conflicting or stale data cannot overwrite verified results.
+8. Odds API data never creates or validates a current PrizePicks or Underdog offering.
+9. Existing exact-offering validation remains enforced.
+10. Provider/sport startup-readiness gates remain enforced.
+11. The shared monthly request budget is enforced across all sports and endpoints.
+12. Request usage survives process restart and does not reset at startup.
+13. Calls are distributed across 24 hours and do not burst after restart.
+14. Cooldowns, retry-after values, failed requests, and unknown quota states are handled safely.
+15. All supported sports rotate fairly under the limited budget.
+16. Fresh cached data avoids unnecessary duplicate requests.
+17. Existing tests and behavior for all supported sports and markets remain intact.
+
+11. Final verification and report
+
+Implement the restoration, then run relevant focused tests, the complete test suite, "python -m compileall -q bot", and "git diff --check". Fix regressions before reporting completion.
+
+Do not restart the live bot, send Telegram messages, change secrets, commit, push to GitHub, or deploy to Railway.
+
+Report:
+
+1. What was disabled and what was restored.
+2. Exact files changed.
+3. The actual endpoints and response fields used.
+4. Which sports, markets, history data, and settlement data are genuinely supported, including plan limitations.
+5. How history enters the existing evidence pipeline.
+6. How settlement preserves original pick identity and prevents duplicate grading.
+7. The monthly budget target, quota-period handling, request interval, and all-sports rotation design.
+8. Focused and full-suite test results.
+9. Confirmation that startup-readiness and exact-offering validation remain intact.
+10. Any remaining limitations or unresolved issues.
+
+Stop after implementation and verification. Do not push or deploy. I will review the final report before pushing the changes to Railway.
