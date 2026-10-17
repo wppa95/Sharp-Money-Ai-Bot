@@ -694,6 +694,8 @@ async def test_durable_worker_rechecks_live_offered_direction_before_telegram(mo
         available_directions=("OVER",),
     )
     canonicalize_player_props("Underdog", [source])
+    from engine.offering_coverage import coverage
+    coverage.mark_scope_ready("Underdog")
     fetched_at = datetime.utcnow()
     qualification = {
         "qualified": True,
