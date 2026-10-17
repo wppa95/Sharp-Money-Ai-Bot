@@ -5264,8 +5264,9 @@ class Database:
         now: Optional[datetime] = None,
         lease_seconds: float = 180.0,
         pacing_seconds: float = 3.2,
+        ready_scopes: Optional[set[tuple[str, str]]] = None,
     ) -> Optional[dict]:
-        """Claim one ready pick, using persisted round-robin provider/sport order."""
+        """Claim one ready pick in fair order, optionally limiting claims to loaded feeds."""
         now = now or datetime.utcnow()
         async with self.session() as s:
             active = (
@@ -5323,6 +5324,30 @@ class Database:
                     )
                 )
             ).scalars().all()
+            if ready_scopes is not None:
+                from engine.sport_policy import player_sport_key
+
+                allowed_scopes = {
+                    (
+                        str(provider or "").strip().casefold(),
+                        player_sport_key(sport) if sport else "",
+                    )
+                    for provider, sport in ready_scopes
+                    if str(provider or "").strip()
+                }
+                ready = [
+                    row
+                    for row in ready
+                    if (
+                        (str(row.provider or "").strip().casefold(), "")
+                        in allowed_scopes
+                        or (
+                            str(row.provider or "").strip().casefold(),
+                            player_sport_key(row.sport),
+                        )
+                        in allowed_scopes
+                    )
+                ]
             if not ready:
                 await s.commit()
                 return None

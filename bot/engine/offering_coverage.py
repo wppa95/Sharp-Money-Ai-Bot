@@ -88,6 +88,37 @@ class OfferingCoverage:
         self.index: dict[tuple, set] = {}
         self.raw_markets: Counter = Counter()
         self.raw_rejections: dict[tuple, str] = {}
+        self._ready_scopes: set[tuple[str, str]] = set()
+
+    @staticmethod
+    def _scope(provider: str, sport: str = "") -> tuple[str, str]:
+        from engine.sport_policy import player_sport_key
+
+        return (
+            str(provider or "").strip().casefold(),
+            player_sport_key(sport) if sport else "",
+        )
+
+    def reset_readiness(self) -> None:
+        """Start a new runtime session with no provider snapshots trusted."""
+        self._ready_scopes.clear()
+
+    def mark_scope_ready(self, provider: str, sport: str = "") -> None:
+        """Mark a complete persisted source snapshot available for delivery."""
+        scope = self._scope(provider, sport)
+        if scope[0]:
+            self._ready_scopes.add(scope)
+
+    def is_scope_ready(self, provider: str, sport: str = "") -> bool:
+        provider_key, sport_key = self._scope(provider, sport)
+        return (
+            (provider_key, "") in self._ready_scopes
+            or (provider_key, sport_key) in self._ready_scopes
+        )
+
+    def ready_scopes(self) -> frozenset[tuple[str, str]]:
+        """Return provider-wide and provider/sport snapshots ready for claims."""
+        return frozenset(self._ready_scopes)
 
     def raw(self, provider: str, sport: str, market: str, source_id: str,
             reason: str = "") -> None:
@@ -142,6 +173,12 @@ class OfferingCoverage:
 
         provider_key = str(provider or "").casefold()
         sport_key = player_sport_key(sport) if sport else ""
+        if sport_key:
+            self._ready_scopes.discard((provider_key, sport_key))
+        else:
+            self._ready_scopes = {
+                scope for scope in self._ready_scopes if scope[0] != provider_key
+            }
         for key, row in list(self.rows.items()):
             if str(getattr(row, "provider", "")).casefold() != provider_key:
                 continue
