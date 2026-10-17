@@ -305,10 +305,10 @@ def test_gridiron_accepts_sufficient_settled_propline_history(sport):
 
 
 @pytest.mark.parametrize(
-    "sport",
-    ["NFL", "CFB"],
+    "sport,expected",
+    [("NFL", False), ("CFB", True)],
 )
-def test_gridiron_rejects_insufficient_propline_history(sport):
+def test_main_league_history_floor_and_optional_short_history(sport, expected):
     validation = SimpleNamespace(
         has_supporting_data=True,
         data_source="propline",
@@ -321,12 +321,12 @@ def test_gridiron_rejects_insufficient_propline_history(sport):
         sport=sport,
         validation=validation,
         decision=decision,
-    ) is False
+    ) is expected
     assert market_engine._has_delivery_evidence(
         sport=sport,
         validation=validation,
         decision=decision,
-    ) is False
+    ) is expected
 
 
 @pytest.mark.parametrize(

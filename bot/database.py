@@ -750,7 +750,7 @@ def _telegram_delivery_key(
         "event_id": str(event_id or "").strip(),
         "stat_type": str(stat_type or "").strip(),
     }
-    if values["alert_kind"] != "ACTIONABLE_PICK":
+    if values["alert_kind"] not in {"ACTIONABLE_PICK", "LINE_CHANGE"}:
         return None
     if not all(values.values()) or line_value is None:
         return None
@@ -3916,6 +3916,20 @@ class Database:
         """
         async with self.session() as s:
             return len(await self._confirmed_telegram_play_audits(s))
+
+    async def has_telegram_notification(self, **identity) -> bool:
+        """Source/event/transition-aware notification dedup across restarts."""
+        key = _telegram_delivery_key(**identity)
+        if key is None:
+            return False
+        async with self.session() as s:
+            row = await s.scalar(
+                select(TelegramDeliveryAudit.id).where(
+                    TelegramDeliveryAudit.delivery_key == key,
+                    TelegramDeliveryAudit.outcome == "sent",
+                ).limit(1)
+            )
+            return row is not None
 
     async def log_telegram_delivery(
         self,

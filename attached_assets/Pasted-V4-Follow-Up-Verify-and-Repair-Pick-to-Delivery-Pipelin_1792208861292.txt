@@ -1,0 +1,78 @@
+V4 Follow-Up: Verify and Repair Pick-to-Delivery Pipeline
+
+Work in the existing Replit workspace only. The equal-platform and ingestion repairs have been completed and verified. Preserve those repairs. Do not repeat the broad audit or rewrite working components.
+
+1. Verify the complete pick lifecycle
+
+Trace real PrizePicks and Underdog observations through:
+
+"OBSERVED → NORMALIZED → STORED → EVALUATION_ELIGIBLE → EVALUATED → EVIDENCE_CHECK / HISTORY → ANALYZED → DIRECTIONAL → QUALIFIED → ALERT_CREATED → DELIVERY_ELIGIBLE → TELEGRAM_SENT"
+
+Identify exactly where a fresh, valid prop stops. Determine whether it is expected to stop or is being incorrectly discarded, delayed, or blocked.
+
+- Keep PrizePicks and Underdog as equal primary platforms.
+- Preserve each platform's own IDs, events, selectable lines, directions, and source identity.
+- Use real persisted records and existing runtime logs. Do not create synthetic picks or claim success from tests alone.
+- Verify qualification and delivery independently for each platform, if real eligible observations are available.
+- Do not force a direction, bypass a qualification rule, or lower any existing threshold to produce an alert.
+
+2. Correct alert timing
+
+A qualified individual pick should be eligible for Telegram delivery as soon as it passes the existing qualification and safety checks.
+
+- Remove any unintended requirement to wait until a fixed number of hours before the game.
+- Preserve valid event-start checks, stale-line protections, deduplication, and delivery safety.
+- Determine whether evaluation or delivery is waiting unnecessarily for later provider requests or other sports to finish.
+- If complete batches can safely enter evaluation immediately after successful persistence, implement the smallest safe change. Preserve quota limits, locks, SQLite write safety, and per-platform isolation.
+- Do not introduce overlapping jobs, duplicate alerts, unbounded queues, or artificial success states.
+
+3. Separate line movement from new picks
+
+A line movement must produce a separately labeled "LINE CHANGE" notification, not an ordinary new "BET PICK".
+
+Where verified data exists, show the platform, previous line, new line, player, market, and direction. Do not silently replace the original pick's line or direction.
+
+A movement alone must not create a new pick. A new pick may be emitted only when the current selectable line is verified and the existing rules independently permit a new qualification. Preserve source-specific deduplication and historical audit records.
+
+4. Make history informative, not a universal blocker
+
+Historical evidence should strengthen or weaken an otherwise qualified pick, not automatically prevent its alert solely because some history is missing.
+
+- Use L5, L10, L20, L30, H2H, averages, medians, and relevant context when actual data is available.
+- Do not invent or extrapolate missing sample sizes.
+- Preserve correct OVER and UNDER calculations. Pushes must never count as directional wins.
+- Missing history alone must not block an otherwise qualified pick unless a documented, essential safety or market-specific requirement genuinely demands it.
+- Invalid or unverified current lines, unsupported sides, stale data, and ambiguous event identity must remain blockers where appropriate.
+- Preserve all existing qualification thresholds unrelated to this change.
+
+5. Verify DOTA history refresh
+
+The read-only replay for Ame demonstrated that 13 stored games can support a real OVER evaluation. Verify whether the normal background history worker persists refreshed snapshots and makes the refreshed evaluation available to the pipeline.
+
+If it fails, identify and repair the smallest demonstrated root cause. Do not fetch unnecessary remote data, invent history, or change the player's line or scoring rules.
+
+6. Validate without risking working behavior
+
+- Preserve the confirmed equal-platform policy and actual shared-worker adapter binding.
+- Preserve the 866 newly stored PrizePicks rows and the existing Underdog observations; do not reset, backfill, or delete production data.
+- Do not re-enable The Odds API or add providers, migrations, or unrelated features.
+- Preserve existing MLB mappings, thresholds, scoring, delivery behavior, and database semantics except for a demonstrated shared defect that must be fixed for correctness.
+- Continue to send individual picks only. Do not generate 2-man or 3-man slips.
+- Keep the footer: "Monitoring player props across multiple sports. Not betting advice."
+
+Run targeted tests for every changed behavior, then the full test suite, Python compilation, and "git diff --check".
+
+Required final report
+
+State:
+
+1. Each lifecycle stage reached by real PrizePicks and Underdog observations, with counts and timestamps where available.
+2. Whether a real newly qualified pick was delivered through Telegram for either platform. If not, identify the exact remaining blocker; do not simulate a delivery.
+3. Whether line movement is separately labeled and deduplicated.
+4. Whether missing history still blocks otherwise qualified picks, and any justified exceptions.
+5. Whether the normal DOTA worker persisted refreshed snapshots.
+6. Whether batch-to-evaluation handoff was changed and how safety was preserved.
+7. Tests run and actual results, separating automated tests from live verification.
+8. Changed files, remaining risks, and any unresolved issues.
+
+No GitHub push, Railway deployment, destructive backfill, database reset, or unrelated cleanup. Stop after verification and report the findings.

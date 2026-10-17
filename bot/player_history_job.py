@@ -1157,6 +1157,10 @@ async def player_history_collector_job(context) -> None:
             finally:
                 if _history_slot_acquired and _release_history_slot is not None:
                     _release_history_slot()
+        # A remote refresh can return only the newest two series while SQLite
+        # already holds a full sample. Publish the durable union, not just that
+        # short remote page, to the cache-only live evaluation path.
+        await _hydrate_completed_history_cache(db, completed_targets)
         no_result_targets = sum(no_result_by_sport.values())
         if no_result_targets:
             logger.info(
@@ -1196,6 +1200,27 @@ async def player_history_collector_job(context) -> None:
         )
     except Exception as exc:
         logger.exception("player_history_collector_job: %s", exc)
+
+
+async def _hydrate_completed_history_cache(db, targets) -> None:
+    reader = getattr(db, "get_player_results_bulk", None)
+    if not targets or not asyncio.iscoroutinefunction(reader):
+        return
+    from engine.evidence_memory import put_player_result_batch
+    unique_targets = list(dict.fromkeys(targets))
+    try:
+        # Bounded groups keep the evidence read from monopolizing SQLite.
+        for start in range(0, len(unique_targets), 100):
+            rows = await asyncio.wait_for(
+                reader(unique_targets[start:start + 100], limit=40), timeout=30,
+            )
+            put_player_result_batch(rows)
+        logger.info(
+            "player_history_collector_job: durable history cache refreshed targets=%d",
+            len(unique_targets),
+        )
+    except Exception as exc:
+        logger.warning("Durable history cache refresh failed: %s", type(exc).__name__)
 
 
 async def _persist_propline_player_history_rows(db, target, result) -> int:

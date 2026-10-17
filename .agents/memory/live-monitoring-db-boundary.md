@@ -9,6 +9,17 @@ Live monitoring must compare the current provider feed with in-memory state. Pla
 
 **How to apply:** Background collectors bulk-hydrate bounded caches after the scan releases its slot. Candidate paths use direct identity lookups; a cache miss yields no evidence/PASS and never falls back to SQLite or a remote provider.
 
+A short remote refresh must not hide the larger verified sample already in
+SQLite from the cache-only monitoring path.
+
+**Why:** A short DOTA refresh hid still-valid stored results, so live evaluations
+reported insufficient history despite the central database's larger sample.
+A refreshed page and the full stored history are different populations.
+
+**How to apply:** Background enrichment should republish the bounded durable
+history union for refreshed targets, without another provider request or
+per-candidate live database reads.
+
 History collection is a storage/enrichment worker, not a monitoring job. It must not register in monitoring activity or health/display state, wait behind scans and start late, or overlap any scan/rescan.
 
 **Why:** A collector shown as active made monitoring displays appear incomplete, and long provider fallbacks could survive into the next live cadence even though the scan itself used memory.

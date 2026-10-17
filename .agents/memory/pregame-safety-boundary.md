@@ -3,8 +3,15 @@ name: Pregame delivery boundary
 description: Where strict event-state safety applies without corrupting historical reporting
 ---
 
-Production Telegram delivery and current opportunity displays require a known pregame event when start time or provider state is incomplete, and actionable pick delivery is limited to events on the current configured reporting calendar day. Missing timestamps are not an actionable-delivery exception for any sport; only an explicit pregame provider state can make a missing timestamp safe. Historical alert reports must not apply this current-state filter; once an alert was sent, it remains reportable even after the event starts or the source row lacks timing metadata.
+Production Telegram delivery requires a known pregame event. Qualified individual
+picks may alert immediately, without a two-hour maximum or same-reporting-day
+restriction. Missing timestamps require an explicit pregame provider state.
+Historical alert reports remain independent of the current event state.
 
-**Why:** Applying a current pregame filter to delivered-alert history hid valid past alerts and broke provider/source reporting. Several active Underdog feeds omit scheduled_at; allowing those rows through with blank or stale status produced post-start/post-game picks, and a 24-hour timing window admitted tomorrow's slate before today's reporting day ended. On 2026-09-28, the user confirmed Telegram alerts should remain limited to the current reporting day.
+**Why:** The user explicitly removed fixed-hours-before-game delays in the
+pick-to-delivery follow-up, superseding the prior same-day restriction. They
+retained started-event, stale-line, source identity, and delivery safety checks.
 
-**How to apply:** Keep strict known-pregame and same-reporting-day validation on every actionable Telegram path. Treat monitoring/evidence persistence separately from delivery, and leave `/alerts`, grading, tracking, and other historical views independent of present event state.
+**How to apply:** Keep strict pregame validation on actionable Telegram paths,
+but do not delay a qualified fresh pick until a calendar day or countdown window.
+Keep `/alerts`, grading, and historical reports independent of present event state.

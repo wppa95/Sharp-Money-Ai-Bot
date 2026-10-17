@@ -12,7 +12,7 @@
 - [Learning label classification](learning-labels.md) — classify_miss() in calibration.py; Variance (conf≥75,S/A) must never update weights; Model (<50 or PASS tier) is the only learnable error type; stored in PropOpportunityLog.error_type.
 - [Alert dedup dict format](alert-dedup-dict.md) — delivery dedup identity includes provider/source/event/direction, with compact legacy aliases retained for restart compatibility.
 - [Prop Intelligence Engine](prop-intelligence.md) — engine/prop_intelligence.py: 5-layer pure-function intelligence (historical/role/matchup/sport-adapters/recommendation); Candidate.with_prop_intelligence(result) applies bounded deltas; _sample_strength suppresses variance bonus for n < 3; no imports from ud_scoring/ud_bet_decision.
-- [Two-layer alert architecture](two-layer-alert-architecture.md) — 📈 MARKET MOVE DETECTED stored internally only (no Telegram); 🎯 ACTIONABLE BET PICK is sole user-facing alert; removal suppressed; availability status; per-sport diagnostics; DK/FD disabled; 2672 tests.
+- [Two-layer alert architecture](two-layer-alert-architecture.md) — factual LINE CHANGE notifications are separate from independently qualified individual picks and never create PLAYs.
 - [V1.3 freeze stability pass](v13-freeze.md) — market moves suppressed from Telegram (spam fix); game-passed gate; flip/reversal cooldown (DB-based, 600s); move_detected diagnostic stage; UD_FLIP_COOLDOWN config; 2672 tests passing.
 - [V2.0 incremental fix pass Aug 2026](v20-fix-pass.md) — 6 targeted fixes: type guard in _fetch_and_compute_hit_rates; futures separated from _sport_raw into _sport_futures; /status sport keys filter market qualifiers (winner/championship/etc); DK/FD show "disabled" not "OK·never"; cmd_analyze wrapped in try/except; /alerts window 24h→72h; 2672 tests passing.
 - [Sleeper Stats integration](sleeper-integration.md) — SleeperStatsProvider supplements ESPN gamelog for NFL only (1 game/week = per-game data); NBA/MLB weekly totals stored shadow-only; pick'em lines confirmed inaccessible (all endpoints 404); 55 new tests; 2727 total passing.
@@ -20,7 +20,7 @@
 - [Backfill grading](backfill-odds-confirmation.md) — /backfill grades pending props only after supported completed-result evidence is available.
 - [Slip journal + player memory](slip-journal.md) — SlipJournal/SlipJournalLeg tables; /slip create|add|grade|journal subcommands; /player hit-rate history; /slipstats pick+slip performance; get_pick_accuracy_by_sport; 3054 tests Aug 2026.
 - [V1.3 freeze gates + DK/FD removal](v13-freeze-gates.md) — MLB UNDER blocked at all 3 alert paths; C-tier added to line-change gate ("S","A","B","C"); DK/FD connectors removed; sport funnel breakdown in /funnel; 3070 tests Aug 2026.
-- [Market-only signals are non-actionable](market-signal-bypass.md) — line movement remains monitoring context; no directional recommendation or delivery without legitimate player-result evidence.
+- [Market-only signals are non-actionable](market-signal-bypass.md) — movement alone never creates a pick; missing optional history is not a universal delivery blocker.
 - [V3.1 stability pass](v31-stability-pass.md) — OOM fix: _MARKET_FIRST_ALERT TTL eviction, known_keys 60d filter, gc.collect, VmRSS measurement; state recovery: _init_state_from_db on cold start; 3090 tests Aug 2026.
 - [V3.1 cleanup pass — 5 gate fixes](v31-cleanup-pass.md) — BQ≥85 gate (MLB/NFL); relaxed non-strict stars/conf; _is_game_live_or_past helper (all 3 paths); ET time format; max_instances=1 explicit; 3129 tests Aug 2026.
 - [Telegram pick/result semantics](telegram-pick-grading.md) — delivered-only stats filter alert_sent; opportunity HIT/MISS already reflect OVER/UNDER direction; neutral tracking results stay separate.
@@ -77,7 +77,7 @@
 - [PropLine cycle pacing](propline-cycle-pacing.md) — primary PrizePicks monitoring fetches one configured sport per shared cycle; do not use the all-sports fetch in production.
 - [FIFA history alias](fifa-history-alias.md) — FIFA may reuse the soccer provider only when result labels remain FIFA; empty provider results stay N/A.
 - [Command report resilience](command-report-resilience.md) — one locked SQLite counter must not make a Telegram health/report command fail wholesale.
-- [Workflow process verification](workflow-process-verification.md) — after restarting a managed bot workflow, verify and reconcile process count before trusting scheduler or Telegram state.
+- [Workflow process verification](workflow-process-verification.md) — verify one bot process after restarts; preserve long-check logs in the ignored workspace, not only /tmp.
 - [Provider observation ordering](provider-observation-ordering.md) — persist raw provider observations before scoring; refresh metadata in place so failures cannot erase monitoring evidence.
 - [Pregame delivery boundary](pregame-safety-boundary.md) — actionable Telegram delivery fails closed on unknown event timing; historical alert reports remain state-independent.
 - [Delivery dedup claims](delivery-dedup-claims.md) — pre-delivery identity claims prevent concurrent duplicates but must be released whenever no Telegram alert was delivered.

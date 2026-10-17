@@ -350,8 +350,8 @@ async def test_underdog_timing_filter_blocks():
 
 
 @pytest.mark.asyncio
-async def test_underdog_strict_delivery_blocks_next_reporting_day():
-    """Actionable picks must not be sent for tomorrow's event slate."""
+async def test_future_event_still_requires_evidence_without_calendar_wait():
+    """Removing the calendar wait must not waive main-league evidence."""
     db = _make_db()
     delivery = _make_delivery(db)
 
@@ -367,7 +367,7 @@ async def test_underdog_strict_delivery_blocks_next_reporting_day():
 
     assert result.sent is False
     assert result.filtered is True
-    assert "current reporting day" in result.filtered_reason
+    assert "Canonical direction/evidence gate" in result.filtered_reason
     delivery._bot.send_message.assert_not_awaited()
 
 

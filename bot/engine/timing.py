@@ -98,7 +98,7 @@ def is_game_alertable(
     game_time: Optional[datetime],
     *,
     min_minutes: int,
-    max_minutes: int,
+    max_minutes: Optional[int],
     urgent_edge: float,
     edge: float,
     game_status: Optional[str] = None,
@@ -115,7 +115,8 @@ def is_game_alertable(
     game_status:  Optional provider event state; live/final states always block.
     require_known: Require a reliable pregame timestamp or explicit pregame state.
     min_minutes:  Minimum minutes before start to send (default 30).
-    max_minutes:  Maximum minutes before start to send (default 120).
+    max_minutes:  Maximum minutes before start, or None for immediate delivery
+                  of any safely pregame event.
     urgent_edge:  Edge % at or above which min_minutes gate is bypassed.
     edge:         Current edge % for this pick.
 
@@ -148,7 +149,7 @@ def is_game_alertable(
         return False, "🔴 Game already in progress"
 
     # Too far in the future
-    if minutes_to_start > max_minutes:
+    if max_minutes is not None and minutes_to_start > max_minutes:
         return False, (
             f"⏳ Game starts in {_fmt_mins(minutes_to_start)} "
             f"(window closes at {max_minutes}m)"

@@ -305,14 +305,16 @@ async def test_unknown_prizepicks_state_cannot_bypass_pregame_protection():
 
 
 @pytest.mark.asyncio
-async def test_underdog_delivery_blocks_events_beyond_two_hours():
+async def test_underdog_delivery_allows_qualified_events_beyond_two_hours():
     delivery = _delivery()
     game_time = datetime.utcnow() + timedelta(hours=3)
     with (
         patch("reporting.is_current_reporting_day", return_value=True),
         patch("alerts.config.ALERT_WINDOW_MAX_MINUTES", 120),
         patch("alert_scope_filter.check", return_value=SimpleNamespace(allowed=True)),
-        patch("alerts.broadcast_alert", new_callable=AsyncMock) as broadcast,
+        patch("alerts.send_discord_alert", new_callable=AsyncMock, return_value=False),
+        patch("alerts.broadcast_alert", new_callable=AsyncMock,
+              return_value={"sent": 1, "failed": 0}) as broadcast,
     ):
         result = await delivery.deliver_underdog(
             "UD Player",
@@ -332,20 +334,21 @@ async def test_underdog_delivery_blocks_events_beyond_two_hours():
              decision=_directional_decision("OVER"),
         )
 
-    assert result.sent is False
-    assert "window closes at 120m" in result.filtered_reason
-    broadcast.assert_not_awaited()
+    assert result.sent is True
+    broadcast.assert_awaited_once()
 
 
 @pytest.mark.asyncio
-async def test_prizepicks_delivery_blocks_events_beyond_two_hours():
+async def test_prizepicks_delivery_allows_qualified_events_beyond_two_hours():
     delivery = _delivery()
     game_time = datetime.utcnow() + timedelta(hours=3)
     with (
         patch("reporting.is_current_reporting_day", return_value=True),
         patch("alerts.config.ALERT_WINDOW_MAX_MINUTES", 120),
         patch("alert_scope_filter.check", return_value=SimpleNamespace(allowed=True)),
-        patch("alerts.broadcast_alert", new_callable=AsyncMock) as broadcast,
+        patch("alerts.send_discord_alert", new_callable=AsyncMock, return_value=False),
+        patch("alerts.broadcast_alert", new_callable=AsyncMock,
+              return_value={"sent": 1, "failed": 0}) as broadcast,
     ):
         result = await delivery.deliver_pp(
             _pp_opportunity(start_time=game_time),
@@ -353,18 +356,19 @@ async def test_prizepicks_delivery_blocks_events_beyond_two_hours():
             evidence_available=True,
         )
 
-    assert result.sent is False
-    assert "window closes at 120m" in result.filtered_reason
-    broadcast.assert_not_awaited()
+    assert result.sent is True
+    broadcast.assert_awaited_once()
 
 
 @pytest.mark.asyncio
-async def test_prizepicks_strict_delivery_rejects_event_outside_reporting_day():
+async def test_prizepicks_strict_delivery_has_no_reporting_day_wait():
     delivery = _delivery()
     with (
         patch("reporting.is_current_reporting_day", return_value=False),
         patch("alert_scope_filter.check", return_value=SimpleNamespace(allowed=True)),
-        patch("alerts.broadcast_alert", new_callable=AsyncMock) as broadcast,
+        patch("alerts.send_discord_alert", new_callable=AsyncMock, return_value=False),
+        patch("alerts.broadcast_alert", new_callable=AsyncMock,
+              return_value={"sent": 1, "failed": 0}) as broadcast,
     ):
         result = await delivery.deliver_pp(
             _pp_opportunity(start_time=_future(minutes=120)),
@@ -372,6 +376,5 @@ async def test_prizepicks_strict_delivery_rejects_event_outside_reporting_day():
             evidence_available=True,
         )
 
-    assert result.sent is False
-    assert "current reporting day" in result.filtered_reason.lower()
-    broadcast.assert_not_awaited()
+    assert result.sent is True
+    broadcast.assert_awaited_once()

@@ -64,3 +64,17 @@ mtime_ms = 1792208452957
 storage_uri = "gcs://replit-rams-assets-spock/rams/assets/repl:0f126d34-12f4-4521-91c1-5cf2228d2bcd/4810a666-6eca-420e-ad96-56c09b955b90/21866a3d-b197-4e90-85bb-9c45f88ad68a"
 storage_version_token = "1792208460370759"
 content_type = "text/markdown"
+
+[[outputs]]
+id = "bnFAj9qAlovFUzCrg3C2i"
+uri = "file://docs/v4-pick-delivery-verification.md"
+type = "text"
+title = "V4 Pick-to-Delivery Verification"
+description = "Actual lifecycle findings, live delivery evidence, remaining limits, test results, and the exact changed-file list."
+logical_id = "adf9667a-f902-40d0-bd39-4bee3a43911a"
+content_hash = "sha256:000a28008bf62240f4a3913a3d1fa8e246274d526f9f4de456936f5bac4a6c48"
+size = 11876
+mtime_ms = 1792210958236
+storage_uri = "gcs://replit-rams-assets-spock/rams/assets/repl:0f126d34-12f4-4521-91c1-5cf2228d2bcd/adf9667a-f902-40d0-bd39-4bee3a43911a/44d6582c-410e-4d29-a05d-45d707e5c9c3"
+storage_version_token = "1792210972632604"
+content_type = "text/markdown"

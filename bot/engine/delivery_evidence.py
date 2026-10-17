@@ -552,13 +552,14 @@ def optional_sport_evidence_is_usable(
     Direction-only eligibility permits a missing results payload for every
     history-optional sport, including KBO and NPB. If a payload explicitly
     claims evidence, that evidence must still be a supported completed source
-    with a sufficient sample. The sport parameter is retained for callers that
+    with an actual sample. A short sample is informational, not a universal
+    five-game delivery requirement. The sport parameter is retained for callers that
     share one interface across sport-specific checks.
     """
     available = history_is_available(*values)
     if not available:
         return True
-    return history_supports_delivery(*values, min_samples=min_samples)
+    return history_supports_delivery(*values, min_samples=1)
 
 
 def _nonnegative_int(value: Any) -> int | None:

@@ -1,39 +1,21 @@
 ---
 name: Two-layer alert architecture
-description: Detection layer vs. betting pick layer — two distinct Telegram alert formats, removal suppression, availability status, per-sport pipeline diagnostics.
+description: Factual LINE CHANGE notifications remain separate from independently qualified individual betting picks.
 ---
 
-## Rule
-Alert pipeline now has two separate Telegram categories:
+Verified source-owned movements may send factual `LINE CHANGE` notifications.
+They are not betting picks, must not replace the original pick's line or
+direction, and must not establish a delivered PLAY or grading outcome.
+Display the platform, observed old/new lines, player, market, and direction
+only when known. Keep removals internal.
 
-**A) `📈 MARKET MOVE DETECTED`** — `format_market_move_detected()` in `alerts_multiplatform.py`
-- Fires when a line moves ≥ MIN_UNDERDOG_LINE_CHANGE but does NOT pass the full scoring/confidence/tier gate
-- Lightweight: shows old→new line, movement amount, "Status: Tracking — evaluating for bet quality"
-- Routed via `deliver_underdog(..., market_move_only=True)` — new keyword-only param
+New individual betting picks require independently verified current selectable
+lines and the existing qualification/safety checks. A movement alone cannot
+create a pick. Underdog and PrizePicks have equal status.
 
-**B) `🎯 ACTIONABLE BET PICK`** — `format_underdog_change_alert()` header updated
-- Fires only when prop is fully qualified (stars gate + OVER/UNDER decision + tier confidence gate)
-- Shows availability status: 🟢 AVAILABLE NOW / 🟡 CLOSING SOON (≤30 min to game) / 🔴 GAME LIVE
-- Also used for standing opportunity alerts (was "UNDERDOG STANDING PLAY")
+**Why:** The user's pick-to-delivery follow-up explicitly separates movement
+notifications from picks, superseding older market-move suppression.
 
-## Removal alerts
-- Removal Telegram alerts **suppressed** entirely (doc #2/#3)
-- `is_qualified = False` for all removals; `should_alert` no longer includes `is_removed`
-- Lifecycle tracking (REMOVED state) still applied via `_lifecycle_removed` decoupled from `ud_result.sent`: queued when `is_removed and prev_record is not None`
-- Market availability window (first alert → removal) logged internally via `_MARKET_FIRST_ALERT` module-level dict
-
-## Per-sport pipeline diagnostics
-Three stage counters added to `underdog_job`:
-- `_sport_raw`: non-removed snaps from Underdog, per sport
-- `_sport_parsed`: after futures filter passes, per sport
-- `_sport_gated`: passed full betting gate (would send alert), per sport
-
-Emitted in `underdog_job [debug summary]` INFO line as a per-sport table.
-
-## Retired sportsbook sources
-DraftKings, FanDuel, and The Odds API are retired. Their historical rows may
-remain available for reporting, but they are not live alert sources and must
-not be reintroduced without an explicit user request.
-
-## Key invariant
-`_market_move_sent` is initialized at the per-prop variable block (alongside `ud_result`) so all code paths are safe regardless of which scoring branch runs.
+**How to apply:** Keep source/event/transition-aware notification dedup separate
+from betting-pick dedup, immutable delivery evidence, grading, and performance.
+Do not re-enable retired sportsbook providers or multi-pick delivery.

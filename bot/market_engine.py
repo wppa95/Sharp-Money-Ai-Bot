@@ -1398,6 +1398,8 @@ async def reset_monitoring_runtime_state() -> None:
     _player_result_fetch_cache.clear()
     _prizepicks_cycle_task = None
     _prizepicks_processing_tasks.clear()
+    from engine.line_change_notifications import reset as reset_line_changes
+    await reset_line_changes()
     _prizepicks_processing_lock = None
     _prizepicks_sport_cursor = 0
     _propline_request_cursor = 0
@@ -1719,6 +1721,12 @@ async def propline_request_scan_job(context) -> None:
                             _health.record_provider_fetch(source_provider)
                     except Exception:
                         pass
+                    from engine.line_change_notifications import observe_persisted_batch
+                    observe_persisted_batch(
+                        db, getattr(context, "bot", None),
+                        list(getattr(config, "allowed_user_ids", ()) or ()),
+                        canonicalize_player_props(source_provider, props),
+                    )
                     _cache_propline_evidence(
                         props,
                         provider=source_provider,
@@ -1746,6 +1754,7 @@ async def propline_request_scan_job(context) -> None:
                                     provider=source_provider,
                                 )
                             ] = prop
+                        _start_prizepicks_handoff(context)
                     if props:
                         _propline_empty_sport_until.pop(feed_key, None)
                         _propline_empty_feed_streak.pop(feed_key, None)
@@ -2591,6 +2600,29 @@ def _track_prizepicks_processing_task(task: asyncio.Task) -> None:
     task.add_done_callback(_finished)
 
 
+def _start_prizepicks_handoff(context) -> None:
+    """Drain complete persisted batches without waiting for subsequent requests."""
+    global _prizepicks_cycle_task
+    if not _propline_pending_props or getattr(context, "bot", None) is None:
+        return
+    if _prizepicks_cycle_task is not None and not _prizepicks_cycle_task.done():
+        return
+
+    async def drain():
+        while _propline_pending_props:
+            pending = list(_propline_pending_props.values())
+            _propline_pending_props.clear()
+            await _run_prizepicks_independent_cycle(
+                context, _fetched_props=pending, _fetched_sport="shared",
+                _fetched_persisted=True, background_processing=False,
+            )
+
+    _prizepicks_cycle_task = asyncio.create_task(
+        drain(), name="shared_monitoring_prizepicks"
+    )
+    _track_prizepicks_processing_task(_prizepicks_cycle_task)
+
+
 async def _run_prizepicks_independent_cycle(
     context,
     *,
@@ -3106,16 +3138,14 @@ async def _run_prizepicks_independent_cycle(
             source_provider="PrizePicks",
             opponent=getattr(prop, "opponent", None),
         )
-        decision = None
-        if hit_rates is not None:
-            decision = make_ud_bet_decision(
-                score=score,
-                validation=validation,
-                current_line=line,
-                prev_line=(previous if previous is not None and abs(line - previous) >= 0.01 else None),
-                hit_rates=hit_rates,
-                sport=sport,
-            )
+        decision = make_ud_bet_decision(
+            score=score,
+            validation=validation,
+            current_line=line,
+            prev_line=(previous if previous is not None and abs(line - previous) >= 0.01 else None),
+            hit_rates=hit_rates,
+            sport=sport,
+        )
         evaluated += 1
 
         external_id = str(
@@ -5398,6 +5428,12 @@ async def underdog_job(context) -> None:
         _ud_full_scan_running = False
         _job_activity_end("underdog")
         return
+
+    from engine.line_change_notifications import observe_persisted_batch
+    observe_persisted_batch(
+        db, getattr(context, "bot", None), list(config.allowed_user_ids),
+        _canonical_underdog_props,
+    )
 
     try:
         # Use the preceding fetched feed for normal-cycle comparisons.  On a
