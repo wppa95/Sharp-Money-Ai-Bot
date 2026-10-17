@@ -142,7 +142,7 @@ def test_canonical_provider_roles_are_exact():
     lines = commands._primary_player_prop_provider_lines(_health_monitor())
 
     assert lines == [
-        "  ⚪ <b>Player Props</b> — Underdog: available",
+        "  ⚪ <b>Player Props</b> — PrizePicks: primary (via PropLine); Underdog: secondary (enabled)",
     ]
 
 
@@ -155,7 +155,7 @@ def test_provider_roles_show_degraded_underdog_and_disabled_prizepicks():
     lines = commands._primary_player_prop_provider_lines(monitor)
     runtime = commands._primary_provider_runtime_lines(monitor)
 
-    assert lines[0] == "  🟡 <b>Player Props</b> — Underdog: available"
+    assert lines[0] == "  🟡 <b>Player Props</b> — PrizePicks: primary (via PropLine); Underdog: secondary (enabled)"
     assert "Fetch:" in runtime[0]
     assert "Underdog: degraded" in runtime[0]
     assert "1 failure" in runtime[0]
@@ -211,11 +211,11 @@ async def test_status_shows_provider_roles_and_separate_history_counts():
         await commands.cmd_status(update, context)
 
     message = update.message.reply_text.await_args.args[0]
-    assert "Player Props</b> — Underdog: available" in message
+    assert "Player Props</b> — PrizePicks: primary (via PropLine); Underdog: secondary" in message
     assert "Market Providers" in message
     assert "DraftKings/FanDuel" not in message
     assert "Underdog: 20" in message
-    assert "PrizePicks" not in message
+    assert "PrizePicks" in message
 
 
 @pytest.mark.asyncio
@@ -241,7 +241,7 @@ async def test_status_returns_health_when_one_db_counter_times_out():
     assert "Some database counters are temporarily unavailable" not in message
     assert "Alerts today: —" in message
     assert "Underdog: 20" in message
-    assert "PrizePicks" not in message
+    assert "PrizePicks" in message
 
 
 @pytest.mark.asyncio
@@ -299,8 +299,8 @@ async def test_dashboard_activity_section_keeps_provider_counts_separate():
     activity = messages[1]
     assert "Underdog" in activity
     assert "Observed: <code>70</code>" in activity
-    assert "PrizePicks" not in activity
-    assert "Observed: <code>30</code>" not in activity
+    assert "PrizePicks" in activity
+    assert "Observed: <code>30</code>" in activity
     assert activity.count("Provider Pipeline") == 1
 
 
@@ -319,10 +319,10 @@ async def test_providers_command_includes_live_primary_provider_health():
         await commands.cmd_providers(update, context)
 
     message = update.message.reply_text.await_args.args[0]
-    assert "Player Props</b> — Underdog: available" in message
+    assert "Player Props</b> — PrizePicks: primary (via PropLine); Underdog: secondary" in message
     assert "Fetch:" in message
     assert "Underdog: degraded" in message
-    assert "PrizePicks" not in message
+    assert "PrizePicks" in message
 
 
 def test_dashboard_report_does_not_merge_provider_breakdowns():
@@ -341,7 +341,7 @@ def test_dashboard_report_does_not_merge_provider_breakdowns():
 
     assert "Underdog" in message
     assert "Observed: <code>12</code>" in message
-    assert "PrizePicks" not in message
+    assert "PrizePicks" in message
     assert "Observed: <code>7</code>" not in message
     assert "UD <code>  5</code> · EV <code>  1</code>" in message
     assert "UD <code>2</code> · EV <code>1</code>" in message
@@ -691,13 +691,13 @@ async def test_real_underdog_registry_failure_and_recovery_reach_command_output(
     await run_job()
     degraded = await provider_message()
     assert monitor.get_health("Underdog").status == ProviderStatus.DEGRADED
-    assert "Player Props</b> — Underdog: available" in degraded
+    assert "Player Props</b> — PrizePicks: primary (via PropLine); Underdog: secondary" in degraded
     assert "Underdog: degraded" in degraded
 
     await run_job()
     recovered = await provider_message()
     assert monitor.get_health("Underdog").status == ProviderStatus.OK
-    assert "Player Props</b> — Underdog: available" in recovered
+    assert "Player Props</b> — PrizePicks: primary (via PropLine); Underdog: secondary" in recovered
     assert "Underdog: ok" in recovered
 
 
@@ -1196,7 +1196,7 @@ async def test_dashboard_keeps_provider_activity_when_one_count_read_times_out()
     activity = update.message.reply_text.await_args_list[1].args[0]
     assert "Provider Pipeline" in activity
     assert "Underdog" in activity
-    assert "PrizePicks" not in activity
+    assert "PrizePicks" in activity
 
 
 @pytest.mark.asyncio
@@ -1241,7 +1241,7 @@ async def test_current_provider_reports_do_not_present_pandascore():
 
     providers_message = update.message.reply_text.await_args.args[0]
     assert "Underdog" in providers_message
-    assert "PrizePicks" not in providers_message
+    assert "PrizePicks" in providers_message
     assert "PandaScore" not in providers_message
 
     update, context = _update_and_context()
@@ -1252,5 +1252,5 @@ async def test_current_provider_reports_do_not_present_pandascore():
         await commands.cmd_config(update, context)
 
     config_message = update.message.reply_text.await_args.args[0]
-    assert "PrizePicks" not in config_message
+    assert "PrizePicks" in config_message
     assert "PandaScore" not in config_message

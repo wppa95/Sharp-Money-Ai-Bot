@@ -756,7 +756,7 @@ class TestDashboardLabels:
         src = pathlib.Path(
             os.path.join(os.path.dirname(__file__), "..", "engine", "dashboard.py")
         ).read_text()
-        assert "Recently Tracked Props" in src
+        assert "Recently Tracked Props" not in src
 
     def test_dashboard_has_activity_summary(self):
         import pathlib

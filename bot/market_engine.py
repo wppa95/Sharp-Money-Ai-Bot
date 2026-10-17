@@ -1558,6 +1558,7 @@ async def propline_request_scan_job(context) -> None:
             for bookmaker in getattr(config, "propline_bookmakers", [])
             if str(bookmaker).strip()
         ) or ("prizepicks",)
+        bookmakers = tuple(sorted(bookmakers, key=lambda name: name != "prizepicks"))
         now = time.monotonic()
         eligible_indexes = [
             index
@@ -1629,6 +1630,30 @@ async def propline_request_scan_job(context) -> None:
                         )
                         failure_kind = "configuration"
                     if not succeeded:
+                        # A failed parse/quota/cooldown must be visible to
+                        # status consumers even when no observations exist.
+                        try:
+                            from providers.base import FailureType
+                            monitor = get_health_monitor()
+                            if monitor is not None:
+                                failure_type = {
+                                    "quota": FailureType.QUOTA,
+                                    "timeout": FailureType.TIMEOUT,
+                                    "parse": FailureType.PARSE_ERROR,
+                                    "blocked": FailureType.BLOCKED,
+                                }.get(failure_kind, FailureType.HTTP_ERROR)
+                                monitor.record_failure(
+                                    source_provider, failure_type,
+                                    error=f"Feed incomplete ({failure_kind or 'provider error'})",
+                                )
+                            tracker = get_health_tracker()
+                            if tracker is not None:
+                                tracker.record_pipeline_fail(
+                                    "provider_fetch", source_provider,
+                                    f"Feed incomplete ({failure_kind or 'provider error'})"
+                                )
+                        except Exception:
+                            pass
                         failed_feeds.append(feed_key)
                         if bookmaker == "prizepicks":
                             failed_prizepicks = True
@@ -1757,9 +1782,8 @@ async def propline_request_scan_job(context) -> None:
         if failed_prizepicks:
             logger.error(
                 "propline_request_scan: PrizePicks feed incomplete; "
-                "pending PrizePicks evaluation withheld"
+                "only failed batches withheld; successful persisted handoffs retained"
             )
-            _propline_pending_props.clear()
         return not failed_prizepicks
 
 
@@ -4595,7 +4619,7 @@ def _shared_monitoring_cycle(cycle_branch):
                         "shared_monitoring_cycle: PropLine ingestion failed: %s",
                         error,
                     )
-                elif task.result():
+                else:
                     # Hand off as soon as ingestion completes, even while an
                     # Underdog scan is still running. The PP processing lock
                     # serializes only PP batches; identities remain per book.

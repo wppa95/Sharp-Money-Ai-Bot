@@ -408,7 +408,11 @@ class TestIndependentPrizePicks:
         )
 
         assert complete is False
-        assert market_engine._propline_pending_props == {}
+        assert all(
+            row.player_name == "Complete Player"
+            for row in market_engine._propline_pending_props.values()
+        )
+        assert market_engine._propline_pending_props
 
     def test_available_lines_show_verified_prizepicks_or_explicit_unavailable(self):
         available = _format_available_lines_block(15.5, pp_line=14.5)

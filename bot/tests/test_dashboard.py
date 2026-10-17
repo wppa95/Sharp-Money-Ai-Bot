@@ -322,7 +322,7 @@ class TestDashboardNormalizedActivity:
 
         assert "Provider Pipeline" in message
         assert "Observed:" in message
-        assert "PrizePicks" not in message
+        assert "PrizePicks" in message
 
     def test_legacy_activity_is_only_a_fallback(self):
         report = DashboardReport(
@@ -350,7 +350,7 @@ class TestDashboardNormalizedActivity:
         assert "Provider Pipeline" in message
         assert "Observed:" in message
 
-    def test_historical_and_recent_tracking_sections_remain_intact(self):
+    def test_recent_tracking_data_is_retained_but_its_panel_is_removed(self):
         report = DashboardReport(
             recent_tracked_props=[{
                 "provider": "Underdog",
@@ -364,9 +364,10 @@ class TestDashboardNormalizedActivity:
         message = report.to_telegram()
 
         assert "Provider Pipeline" in message
-        assert "Recently Tracked Props" in message
-        assert "UNDERDOG PICK" in message
-        assert "PrizePicks" not in message
+        assert "Recently Tracked Props" not in message
+        assert report.recent_tracked_props
+        assert "UNDERDOG PICK" not in message
+        assert "PrizePicks" in message
 
 
 @pytest.mark.asyncio
@@ -437,9 +438,9 @@ async def test_dashboard_gather_uses_normalized_activity_and_preserves_legacy_hi
     assert report.tracking_by_provider["PrizePicks"]["observed"] == 1
     assert "Provider Pipeline" in activity
     assert "Observed:" in activity
-    assert "MLB" in activity
+    assert "By current sport" not in activity
     assert len(report.recent_tracked_props) == 2
-    assert "PrizePicks" not in activity
+    assert "PrizePicks" in activity
 
     async with empty_db.session() as session:
         normalized_count = (

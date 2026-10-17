@@ -16,6 +16,7 @@ from typing import Any, Iterable
 import math
 
 from engine.offering_coverage import coverage, directions_from
+from engine.sport_policy import player_sport_key
 
 
 @dataclass
@@ -65,7 +66,7 @@ class CanonicalPlayerProp:
 def canonicalize_player_prop(provider: str, prop: Any) -> CanonicalPlayerProp | None:
     """Adapt one provider object into the canonical Player Props shape."""
     player = str(getattr(prop, "player_name", "") or "").strip()
-    sport = str(getattr(prop, "sport", "") or "").strip().upper()
+    sport = player_sport_key(getattr(prop, "sport", ""))
     stat = str(getattr(prop, "stat_type", "") or "").strip()
     if not player or not sport or not stat:
         return None

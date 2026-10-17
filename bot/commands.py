@@ -379,9 +379,9 @@ def _primary_player_prop_provider_lines(
 ) -> list[str]:
     """Render configured provider roles with the current health-state icon."""
     underdog_enabled = bool(config.UNDERDOG_ENABLED)
-    provider_icons = {"Underdog": "🟢" if underdog_enabled else "⚪"}
+    provider_icons = {"Underdog": "⚪", "PrizePicks": "⚪"}
     if health_monitor is not None and hasattr(health_monitor, "get_health"):
-        for provider in ("Underdog",):
+        for provider in ("PrizePicks", "Underdog"):
             try:
                 health = health_monitor.get_health(provider)
                 # Registration alone is not a successful fetch.  Do not show a
@@ -408,7 +408,10 @@ def _primary_player_prop_provider_lines(
         else "🟢" if "🟢" in _health_icons
         else "⚪"
     )
-    source_states = f"Underdog: {'available' if underdog_enabled else 'unavailable'}"
+    source_states = (
+        "PrizePicks: primary (via PropLine); "
+        f"Underdog: secondary ({'enabled' if underdog_enabled else 'disabled'})"
+    )
     return [
         f"  {overall_icon} <b>Player Props</b> — {source_states}",
     ]
@@ -419,7 +422,7 @@ def _primary_provider_runtime_lines(health_monitor: object | None) -> list[str]:
     if health_monitor is None or not hasattr(health_monitor, "get_health"):
         return ["  Fetch: unavailable"]
     provider_runtime: list[str] = []
-    for provider in ("Underdog",):
+    for provider in ("PrizePicks", "Underdog"):
         try:
             health = health_monitor.get_health(provider)
             awaiting_first_fetch = not getattr(health, "last_success", None)
@@ -450,8 +453,25 @@ def _primary_provider_runtime_lines(health_monitor: object | None) -> list[str]:
 
 
 def _prizepicks_feed_count_lines(health_tracker: object | None) -> list[str]:
-    """PropLine is internal and never appears in Telegram command output."""
-    return []
+    """Expose actual parsed feed populations, not inferred provider readiness."""
+    if health_tracker is None:
+        return []
+    try:
+        counts = health_tracker.get_provider_feed_counts("PrizePicks")
+        if not isinstance(counts, dict) or not counts:
+            return ["  PrizePicks feed: no successful fetch recorded this session"]
+        lines = ["  PrizePicks feed (latest response per sport; fetch state shown):"]
+        for sport, values in sorted(counts.items()):
+            if not isinstance(values, dict):
+                continue
+            lines.append(
+                f"    {_html.escape(str(sport))}: "
+                f"raw {int(values.get('raw_records', 0) or 0):,} · "
+                f"parsed {int(values.get('normalized_props', 0) or 0):,} · {_html.escape(str(values.get('state', 'unknown')))}"
+            )
+        return lines
+    except Exception:
+        return ["  PrizePicks feed counts: unavailable"]
 
 
 # ── Module-level references (set by main.py on startup) ───────────────────────
@@ -673,9 +693,12 @@ async def cmd_health(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         # ── Market provider health (live prop sources) ────────────────────────
         lines.append("")
         lines.append("<b>📡 Market Providers</b>")
-        _market_provider_labels = {"Underdog": "Underdog source"}
+        _market_provider_labels = {
+            "PrizePicks": "primary · via PropLine",
+            "Underdog": "secondary · native feed",
+        }
         _market_rows: list[str] = []
-        for provider in ("Underdog",):
+        for provider in ("PrizePicks", "Underdog"):
             info = ht.get_provider_info(provider)
             if info:
                 last_fetch = ht.provider_last_fetch_str(provider)
@@ -1171,6 +1194,7 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                 _alerts_today,
                 total_prop_history,
                 ud_history,
+                pp_history,
             ) = await _status_db_reads(
                 [
                     _status_db_read(
@@ -1183,10 +1207,14 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                         "Underdog prop history",
                         _db.count_prop_line_history(provider="Underdog"),
                     ),
+                    _status_db_read(
+                        "PrizePicks prop history",
+                        _db.count_prop_line_history(provider="PrizePicks"),
+                    ),
                 ]
             )
         else:
-            _alerts_today = total_prop_history = ud_history = 0
+            _alerts_today = total_prop_history = ud_history = pp_history = 0
         # Load provider health monitor singleton
         try:
             from providers import get_health_monitor
@@ -1209,7 +1237,8 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             "📡 <b>Market Providers</b>",
             *_primary_player_prop_provider_lines(_mon),
             (
-                f"  History: Underdog: {_format_status_count(ud_history)}"
+                f"  History: PrizePicks: {_format_status_count(pp_history)}"
+                f" · Underdog: {_format_status_count(ud_history)}"
             ),
         ]
         if _ht_pipeline is not None:
@@ -1786,7 +1815,7 @@ async def cmd_backtest(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             msg += "\n\n📡 <b>Provider context</b>"
             msg += "\n<i>Backtest metrics above use legacy EVRecord rows.</i>"
             for provider, stats in sorted(provider_perf["by_provider"].items()):
-                if str(provider).strip().lower() != "underdog":
+                if str(provider).strip().lower() not in {"underdog", "prizepicks"}:
                     continue
                 msg += (
                     f"\n  {provider}: {stats.get('hit', 0)}H-"
@@ -2071,14 +2100,12 @@ def _select_directional_provider_rows(
     rec_map: dict[tuple[str, str, str, str], tuple[Optional[str], Optional[int]]],
     limit: int,
 ) -> list[tuple[str, Any]]:
-    """Resolve Underdog direction, then apply a fair cap.
-
-    ``pp_props`` remains in the signature for callers written against the
-    previous multi-provider command surface, but is intentionally ignored:
-    PropLine is internal evidence and never a Telegram candidate.
-    """
+    """Resolve each platform's own direction without merging source lines."""
     directional_by_identity: dict[tuple[str, ...], tuple[str, Any]] = {}
-    for provider, prop in (("Underdog", row) for row in ud_props):
+    for provider, prop in (
+        [("PrizePicks", row) for row in pp_props]
+        + [("Underdog", row) for row in ud_props]
+    ):
         effective_rec = getattr(prop, "bet_recommendation", None)
         if provider == "Underdog":
             if not _is_canonical_alert_prop(prop):
@@ -2344,29 +2371,41 @@ async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             or str(getattr(row, "sport", "")).upper() == sport_filter
         )
     ]
+    _canonical_ud = [row for row in _canonical_props
+                     if (getattr(row, "provider", None) or "Underdog") == "Underdog"]
+    _canonical_pp = [row for row in _canonical_props
+                     if getattr(row, "provider", None) == "PrizePicks"]
     _seen_pick_ids = {
         _pick_source_identity("Underdog", row)
-        for row in _canonical_props
+        for row in _canonical_ud
     }
-    ud_props = _canonical_props + [
+    ud_props = _canonical_ud + [
         row for row in ud_props
         if _pick_source_identity("Underdog", row) not in _seen_pick_ids
     ]
 
-    # PropLine is an internal evidence source, not a separate Telegram
-    # provider. Keep the bounded legacy read for comparison compatibility, but
-    # never expose those rows as a command provider or candidate.
+    _stage_started = time.monotonic()
     try:
-        await _picks_report_read(_db.get_latest_props_for_provider(
+        pp_props = await _picks_report_read(_db.get_latest_props_for_provider(
             "PrizePicks",
             since_hours=_since_hours,
             limit=_provider_overfetch,
             directional_first=True,
         ))
     except Exception:
-        pass
-    pp_props = []
-    _pp_query_seconds = 0.0
+        pp_props = []
+    _pp_seen = {_pick_source_identity("PrizePicks", row) for row in _canonical_pp}
+    pp_props = _canonical_pp + [
+        row for row in pp_props
+        if _pick_source_identity("PrizePicks", row) not in _pp_seen
+        and _has_current_prop_data(row, now, require_direction=False, require_scoring=False)
+        and not _is_season_future(row.stat_type)
+        and _is_active_display_sport(row.sport)
+        and not is_telegram_suppressed_sport(row.sport)
+        and _is_upcoming_game(getattr(row, "game_time", None), getattr(row, "provider_status", None))
+        and (not sport_filter or row.sport.upper() == sport_filter)
+    ]
+    _pp_query_seconds = time.monotonic() - _stage_started
     # Resolve direction before deduplication or limiting. /picks is a current
     # directional research view, not a second Telegram delivery gate.
     _rec_map: dict = {}
@@ -2417,7 +2456,7 @@ async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     _direction_started = time.monotonic()
     provider_props = _select_directional_provider_rows(
         ud_props,
-        [],
+        pp_props,
         _rec_map,
         _provider_overfetch,
     )
@@ -2698,11 +2737,7 @@ async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         provider_line = (
             comp.lines.get(provider) if comp and provider in comp.lines else None
         )
-        source_v = (
-            provider_line.line_value
-            if provider_line is not None and provider_line.available
-            else plh.line_value
-        )
+        source_v = plh.line_value
 
         # Bet direction — primary: synced column on PropLineHistory (always fresh)
         # Secondary: live UnderdogSnapshotRecord via _rec_map (handles same-cycle updates)
@@ -2801,18 +2836,11 @@ async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             elif _mag is not None:
                 _movement_quality = f"{_movement.get('direction', 'UNKNOWN')} · {_mag}"
         _historical = _evidence.get("historical") if isinstance(_evidence, dict) else None
-        entry_lines.extend([
-            "",
-            "🧠 <b>Downstream Intelligence</b>",
-            f"  Sharp Confidence: {_shown(_sharp.get('score') if isinstance(_sharp, dict) else None, '/100')}",
-            f"  Model Projection: {_shown(_projection)}",
-            f"  Current Line: {_shown(source_v)}",
-            f"  Model Edge / Current-Line Value: {_shown(_edge)}",
-            f"  Line Movement: {_shown(_movement.get('direction') if isinstance(_movement, dict) and _movement.get('available') else None)}",
-            f"  Movement Quality: {_movement_quality}",
-            f"  Evidence Completeness: {_shown(_complete.get('score') if isinstance(_complete, dict) else None, '/100')}",
-            f"  Historical Evidence: {_shown(_json.dumps(_historical, separators=(',', ':')) if _historical else None)}",
-        ])
+        # Optional analytics must not advertise missing or arbitrary scores.
+        if _projection is not None:
+            entry_lines.append(f"Model projection: {_projection}")
+        if _edge is not None:
+            entry_lines.append(f"Stored current-line value: {_edge}")
 
         # ── Evidence block ────────────────────────────────────────────────────
         hr, _opp = _hit_rates[flat_idx]
@@ -2848,9 +2876,14 @@ async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
                 ("Season", hr.season),
             ]:
                 if _ws and _ws.games >= 3:
+                    from engine.player_results import directional_window_counts
+                    _counts = directional_window_counts(_ws, bet_rec)
+                    if _counts is None:
+                        continue
+                    _hits, _games, _pushes = _counts
                     _summary = (
-                        f"{_ws.over_count}/{_ws.games}"
-                        f" ({_ws.hit_rate:.0%})  avg {_ws.average:.1f}"
+                        f"{_hits}/{_games}"
+                        f" ({_hits / _games:.0%}) {bet_rec}  avg {_ws.average:.1f}"
                     )
                     _window_key = _wlbl.lower()
                     _actuals = _actual_values_text(_window_key)
@@ -2874,10 +2907,13 @@ async def _cmd_picks_inner(update: Update, context: ContextTypes.DEFAULT_TYPE) -
                 _opp_short = _opp[:18] + "…" if len(_opp) > 18 else _opp
                 _h2h_values = _actual_values_text("h2h")
                 _h2h_prefix = f"{_h2h_values} · " if _h2h_values else ""
+                from engine.player_results import directional_window_counts
+                _h_counts = directional_window_counts(_h, bet_rec)
                 entry_lines.append(
                     f"  H2H vs {_opp_short} ({_h.games}g): {_h2h_prefix}"
-                    f"{_h.over_count}/{_h.games} ({_h.hit_rate:.0%})"
-                    f"  avg {_h.average:.1f}"
+                    + (f"{_h_counts[0]}/{_h_counts[1]} ({_h_counts[0] / _h_counts[1]:.0%}) {bet_rec}"
+                       if _h_counts else "N/A")
+                    + f"  avg {_h.average:.1f}"
                 )
 
         # ── Alternate lines (if Underdog offers multiple) ─────────────────────
@@ -5318,15 +5354,15 @@ async def cmd_config(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         "<b>Player Prop Market Providers</b>",
         *_primary_player_prop_provider_lines(_config_mon),
         *_primary_provider_runtime_lines(_config_mon),
-        f"  Coverage: all discovered Underdog player props within pacing/budget",
+        f"  Coverage: discovered PrizePicks and Underdog props within shared pacing/budget",
         "",
         "<b>Historical Enrichment Sources</b>",
-        f"  ESPN gamelog:      ✅ active (NBA/NFL/WNBA/MLB/Soccer/NHL)",
-        f"  MLB Stats API:     ✅ active",
-        f"  NHL API:           ✅ active",
-        f"  OpenDota (DOTA):   ✅ active",
-        f"  JeffSackmann:      ✅ active (Tennis)",
-        f"  Sleeper (NFL):     {'✅ active' if getattr(config, 'UD_SLEEPER_ENABLED', True) else '⏸️ disabled'}",
+        f"  ESPN gamelog:      configured (NBA/NFL/WNBA/MLB/Soccer/NHL)",
+        f"  MLB Stats API:     configured",
+        f"  NHL API:           configured",
+        f"  OpenDota (DOTA):   configured",
+        f"  JeffSackmann:      configured (Tennis)",
+        f"  Sleeper (NFL):     {'configured' if getattr(config, 'UD_SLEEPER_ENABLED', True) else 'disabled'}",
         "",
         "<b>Poll Intervals</b>",
         f"  Shared Player Props monitor: <code>{config.UNDERDOG_POLL_INTERVAL}s ({config.UNDERDOG_POLL_INTERVAL // 60} min)</code>",
@@ -5421,7 +5457,7 @@ async def cmd_tracking(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     )
     _provider_names = {
         provider for provider in _provider_names
-        if str(provider).strip().lower() == "underdog"
+        if str(provider).strip().lower() in {"underdog", "prizepicks"}
     }
     if _provider_names:
         lines += ["", "<b>By Provider (observations + active)</b>"]
@@ -5462,37 +5498,46 @@ async def cmd_analyst(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         )
         from engine.candidate import candidate_from_ud_decision
 
-        # Retrieve recent alerted Underdog snapshots with bet recommendations
-        snaps = await _bounded(_db.get_recent_underdog_snapshots(limit=5))
-        alerted = [
-            s for s in snaps
-            if (
-                getattr(s, "alert_sent", False)
-                and getattr(s, "bet_recommendation", None) in ("OVER", "UNDER")
-                and _is_upcoming_game(
-                    getattr(s, "game_time", None),
-                    getattr(s, "provider_status", None),
-                )
-            )
-        ]
         # Prefer the durable analyst payload linked to the opportunity row.
         # The narrative below remains a compatibility presentation layer and
         # is never treated as the source of the stored AI prediction.
-        stored_analyst: dict[tuple[str, str, str], object] = {}
+        def _identity(row):
+            return (
+                str(getattr(row, "provider", None) or "Underdog").casefold(),
+                str(getattr(row, "external_id", "") or ""),
+                str(getattr(row, "game_id", "") or ""),
+                str(getattr(row, "player_name", "")).casefold(),
+                str(getattr(row, "sport", "")).upper(),
+                str(getattr(row, "stat_type", "")).casefold(),
+                getattr(row, "line_value", None),
+                getattr(row, "recommendation", None) or getattr(row, "bet_recommendation", None),
+            )
+        stored_analyst: dict[tuple, object] = {}
+        alerted = []
         get_alerted = getattr(_db, "get_alerted_opportunity_log", None)
         if callable(get_alerted):
             try:
                 for row in await _bounded(get_alerted(since_hours=72, limit=10)):
-                    stored_analyst[
-                        (
-                            str(getattr(row, "player_name", "")).lower(),
-                            str(getattr(row, "sport", "")).upper(),
-                            str(getattr(row, "stat_type", "")).lower(),
-                        )
-                    ] = row
+                    if (
+                        getattr(row, "alert_sent", False)
+                        and (getattr(row, "recommendation", None)
+                             or getattr(row, "bet_recommendation", None)) in {"OVER", "UNDER"}
+                        and (getattr(row, "provider", None) or "Underdog")
+                        in {"PrizePicks", "Underdog"}
+                    ):
+                        stored_analyst[_identity(row)] = row
+                        alerted.append(row)
             except Exception as exc:
                 logger.debug("cmd_analyst: stored advisory lookup unavailable: %s", exc)
 
+        if not alerted:
+            # Compatibility for legacy deliveries lacking a durable opportunity.
+            snaps = await _bounded(_db.get_recent_underdog_snapshots(limit=50))
+            alerted = [
+                row for row in snaps
+                if getattr(row, "alert_sent", False)
+                and getattr(row, "bet_recommendation", None) in {"OVER", "UNDER"}
+            ]
         if not alerted:
             await update.message.reply_text(
                 "🧠 <b>Analyst Assessment</b>\n\n"
@@ -5500,6 +5545,47 @@ async def cmd_analyst(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
                 "Analyst assessments are generated when props are alerted.</i>",
                 parse_mode="HTML",
             )
+            return
+
+        if stored_analyst:
+            # Historical delivered picks are canonical here. A mutable live
+            # snapshot, game-day filter or optional AI model cannot hide them.
+            import json
+            from engine.player_results import directional_window_counts
+            lines = ["<b>Delivered recommendation analysis</b>",
+                     "<i>Last 72h · confirmed picks, not recipients</i>", ""]
+            for row in list(stored_analyst.values())[:5]:
+                provider = getattr(row, "provider", None) or "Underdog"
+                direction = (getattr(row, "recommendation", None)
+                             or getattr(row, "bet_recommendation", None))
+                lines += [
+                    f"<b>{_html.escape(str(row.player_name))}</b> · {_html.escape(provider)}",
+                    f"{_html.escape(str(row.sport))} · {_html.escape(str(row.stat_type))} · "
+                    f"<b>{direction} {float(row.line_value):g}</b>",
+                    f"Source: <code>{_html.escape(str(getattr(row, 'external_id', '') or 'unknown'))}</code>",
+                    f"Event: <code>{_html.escape(str(getattr(row, 'game_id', '') or 'unknown'))}</code>",
+                ]
+                reason = str(getattr(row, "explanation", None)
+                             or getattr(row, "bet_reason", "") or "")
+                if reason:
+                    lines.append(_html.escape(reason[:240]))
+                try:
+                    evidence = json.loads(getattr(row, "delivery_evidence_json", None)
+                                          or getattr(row, "validation_json", None) or "{}")
+                except (TypeError, ValueError):
+                    evidence = {}
+                for name in ("l5", "l10", "l20", "l30", "h2h"):
+                    counts = directional_window_counts(
+                        evidence.get(name) if isinstance(evidence, dict) else None,
+                        direction,
+                    )
+                    if counts:
+                        hits, games, pushes = counts
+                        lines.append(f"{name.upper()}: {hits}/{games} "
+                                     f"({hits/games:.0%}) {direction} · pushes {pushes}")
+                outcome = getattr(row, "result", None) or "PENDING"
+                lines += [f"Outcome: {_html.escape(str(outcome))}", ""]
+            await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML)
             return
 
         lines: list[str] = [
@@ -5519,7 +5605,7 @@ async def cmd_analyst(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             )
             score_ns = __import__("types", fromlist=["SimpleNamespace"]).SimpleNamespace(
                 total     = None,
-                n_history = 10,
+                n_history = 0,
             )
             try:
                 c = candidate_from_ud_decision(
@@ -5563,18 +5649,13 @@ async def cmd_analyst(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             lines.append(
                 f"<b>{_html.escape(snap.player_name)}</b>  ·  "
                 f"{_html.escape(snap.sport)}  ·  "
+                f"{_html.escape(getattr(snap, 'provider', None) or 'Underdog')} · "
                 f"{_html.escape(snap.stat_type)} <code>{snap.line_value:.1f}</code>"
             )
             lines.append(
                 f"Direction: <b>{_html.escape(getattr(snap, 'bet_recommendation', ''))}</b>"
             )
-            ai_row = stored_analyst.get(
-                (
-                    str(getattr(snap, "player_name", "")).lower(),
-                    str(getattr(snap, "sport", "")).upper(),
-                    str(getattr(snap, "stat_type", "")).lower(),
-                )
-            )
+            ai_row = stored_analyst.get(_identity(snap))
             if ai_row is not None:
                 try:
                     import json
@@ -5594,13 +5675,11 @@ async def cmd_analyst(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
                     or getattr(ai_row, "analyst_model_version", None)
                     or "unavailable"
                 )
-                lines.append(
-                    f"🧠 Stored AI: <b>{_html.escape(ai_prediction)}</b> · "
-                    f"grade <b>{_html.escape(str(ai_grade))}</b> · "
-                    f"model <code>{_html.escape(ai_model)}</code>"
-                )
-            else:
-                lines.append("🧠 Stored AI: <b>UNAVAILABLE</b>")
+                if ai_prediction != "UNAVAILABLE":
+                    lines.append(
+                        f"Stored analysis: <b>{_html.escape(ai_prediction)}</b> · "
+                        f"outcome <b>{_html.escape(str(ai_grade))}</b>"
+                    )
             lines.append("")
             lines.append(f"✅ {_html.escape(narrative.recommended_because[:200])}")
             lines.append(f"⚠️ {_html.escape(narrative.risk_because[:200])}")

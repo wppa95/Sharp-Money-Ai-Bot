@@ -251,9 +251,11 @@ class OfferingCoverage:
         return sorted(result, key=lambda row: (row.line_variant, row.line_value, row.external_id))
 
     def report(self, sport: str = "", platform: str = "") -> list[str]:
+        from engine.sport_policy import canonical_sport_key
+        sport = canonical_sport_key(sport)
         groups: dict[tuple, list] = {}
         for key, row in self.rows.items():
-            if sport and row.sport.upper() != sport.upper():
+            if sport and canonical_sport_key(row.sport) != sport:
                 continue
             if platform and row.provider.casefold() != platform.casefold():
                 continue
@@ -274,7 +276,7 @@ class OfferingCoverage:
         for (provider, reason), count in sorted(self.failures.items()):
             lines.append(f"{escape(provider)} normalization rejected: {escape(reason)}={count}")
         for (provider, league, market), count in sorted(self.raw_markets.items()):
-            if sport and league.upper() != sport.upper() or platform and provider.casefold() != platform.casefold():
+            if sport and canonical_sport_key(league) != sport or platform and provider.casefold() != platform.casefold():
                 continue
             lines.append(f"RAW {escape(provider)} · {escape(league)} · {escape(market)}: {count} observations")
         for (provider, league, market, source_id), reason in self.raw_rejections.items():

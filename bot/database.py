@@ -33,6 +33,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sess
 from sqlalchemy.orm import DeclarativeBase
 
 logger = logging.getLogger(__name__)
+from engine.sport_policy import player_sport_key, player_sport_aliases
 
 _UNDERDOG_BULK_MAX_RETRIES = 4
 _UNDERDOG_BULK_RETRY_DELAYS = (1.0, 3.0, 7.0, 15.0)
@@ -567,20 +568,45 @@ class _WriteAwareAsyncSession:
         self._session = session
         self._lock = lock
         self._owner = owner
+        self._wrote = False
 
     async def execute(self, statement, *args, **kwargs):
+        if self._session.new or self._session.dirty or self._session.deleted:
+            # SELECT may trigger SQLAlchemy autoflush before commit.
+            self._wrote = True
         if _statement_is_write(statement):
             await self._owner._acquire_writer()
-        return await self._session.execute(statement, *args, **kwargs)
+        result = await self._session.execute(statement, *args, **kwargs)
+        if _statement_is_write(statement) and getattr(result, "rowcount", -1) != 0:
+            self._wrote = True
+        return result
 
     async def flush(self, *args, **kwargs):
         await self._owner._acquire_writer()
+        self._wrote = self._wrote or bool(
+            self._session.new or self._session.dirty or self._session.deleted
+        )
         return await self._session.flush(*args, **kwargs)
 
     async def commit(self):
         await self._owner._acquire_writer()
         try:
-            return await self._session.commit()
+            wrote = self._wrote or bool(
+                self._session.new or self._session.dirty or self._session.deleted
+            )
+            result = await self._session.commit()
+            self._wrote = False
+            if wrote:
+                # Only successful commits advance telemetry. SELECTs, rollbacks
+                # and failed transactions must never look like data writes.
+                try:
+                    from engine.health import get_health_tracker
+                    tracker = get_health_tracker()
+                    if tracker is not None:
+                        tracker.record_database_write("database_commit")
+                except Exception:
+                    logger.warning("Database commit health telemetry unavailable")
+            return result
         finally:
             self._owner._release_writer()
 
@@ -588,6 +614,7 @@ class _WriteAwareAsyncSession:
         try:
             return await self._session.rollback()
         finally:
+            self._wrote = False
             self._owner._release_writer()
 
     def __getattr__(self, name: str):
@@ -7772,7 +7799,7 @@ class Database:
         """
         from engine.identity import display_player_name
         player_name  = display_player_name(getattr(raw, "player_name", None))
-        sport        = raw.sport
+        sport        = player_sport_key(raw.sport)
         stat_type    = raw.stat_type.lower().strip()
         game_date    = raw.game_date
         actual_value = raw.actual_value
@@ -7833,7 +7860,7 @@ class Database:
         fetched_at = datetime.utcnow()
         for raw in records:
             player_name = display_player_name(getattr(raw, "player_name", None))
-            sport = str(getattr(raw, "sport", "") or "").strip().upper()
+            sport = player_sport_key(getattr(raw, "sport", ""))
             stat_type = str(getattr(raw, "stat_type", "") or "").lower().strip()
             game_date = str(getattr(raw, "game_date", "") or "").strip()
             actual_value = getattr(raw, "actual_value", None)
@@ -7948,7 +7975,7 @@ class Database:
                 select(PlayerGameResult)
                 .where(
                     PlayerGameResult.player_name == player_name,
-                    PlayerGameResult.sport       == sport,
+                    PlayerGameResult.sport.in_(player_sport_aliases(sport)),
                     PlayerGameResult.stat_type   == stat_type.lower().strip(),
                     # Audit-only weekly totals are not individual games.
                     PlayerGameResult.source != "sleeper_stats_weekly",
@@ -7974,7 +8001,10 @@ class Database:
             return results_by_key
 
         players = {key[0] for key in keys}
-        sports = {key[1] for key in keys}
+        sports = {alias for key in keys for alias in player_sport_aliases(key[1])}
+        requested_keys: dict[tuple, list] = {}
+        for key in keys:
+            requested_keys.setdefault((key[0], player_sport_key(key[1]), key[2]), []).append(key)
         stats = {key[2] for key in keys}
         async with self.session() as s:
             # Keep each expanded IN query below SQLite builds that still use
@@ -7994,11 +8024,11 @@ class Database:
                 for record in result.scalars().all():
                     key = (
                         record.player_name,
-                        record.sport,
+                        player_sport_key(record.sport),
                         (record.stat_type or "").lower().strip(),
                     )
-                    if key in results_by_key:
-                        results_by_key[key].append(record)
+                    for requested in requested_keys.get(key, ()):
+                        results_by_key[requested].append(record)
 
         for records in results_by_key.values():
             records.sort(
@@ -10699,6 +10729,28 @@ class Database:
                 })
                 display_row.line_value = audit.line_value
                 display_row.alert_sent_at = audit.attempted_at
+                display_row.delivery_evidence_json = audit.evidence_snapshot_json
+                try:
+                    snapshot = json.loads(audit.evidence_snapshot_json or "{}")
+                except (TypeError, ValueError):
+                    snapshot = {}
+                direction = snapshot.get("direction") if isinstance(snapshot, dict) else None
+                if direction in {"OVER", "UNDER"}:
+                    display_row.recommendation = direction
+                elif row.line_value != audit.line_value:
+                    # Older moved-line audits may not retain the original
+                    # direction. Never assign today's direction to that send.
+                    display_row.recommendation = None
+                if (row.result in {"HIT", "MISS", "PUSH"}
+                        and row.actual_value is not None
+                        and display_row.recommendation in {"OVER", "UNDER"}):
+                    value, line = float(row.actual_value), float(audit.line_value)
+                    display_row.result = (
+                        "PUSH" if value == line else
+                        "HIT" if ((value > line) == (display_row.recommendation == "OVER")) else "MISS"
+                    )
+                elif row.line_value != audit.line_value:
+                    display_row.result = "PENDING"
                 confirmed.append(display_row)
                 if len(confirmed) >= max(1, int(limit)):
                     break
@@ -11509,7 +11561,7 @@ class Database:
             stats.add(stat)
             return (
                 str(getattr(opp, "player_name", "") or ""),
-                str(getattr(opp, "sport", "") or "").upper().strip(),
+                player_sport_key(getattr(opp, "sport", "")),
                 stat,
                 dates,
                 str(getattr(opp, "game_id", "") or ""),
@@ -11532,7 +11584,8 @@ class Database:
             for info in metadata.values()
             if info[1][0]
         }
-        sports = {info[1][1] for info in metadata.values() if info[1][1]}
+        sports = {alias for info in metadata.values() if info[1][1]
+                  for alias in player_sport_aliases(info[1][1])}
         dates = {
             date
             for info in metadata.values()
@@ -11725,7 +11778,7 @@ class Database:
         by_event: dict[tuple[str, str, str, str], list[PlayerGameResult]] = {}
         for row in rows:
             player_key = str(row.player_name or "").lower().strip()
-            sport_key = str(row.sport or "").upper().strip()
+            sport_key = player_sport_key(row.sport)
             stat_key = str(row.stat_type or "").lower().strip()
             date_key = str(row.game_date or "")
             by_date.setdefault(
@@ -11767,6 +11820,7 @@ class Database:
                         if is_gradeable_player_result_for_event(
                             provider, row.source, game_id, row.game_id
                         )
+                        and (not game_id or str(row.game_id or "").strip() == game_id.strip())
                         and (
                             not game_id
                             or str(row.game_id or "") == game_id
@@ -11833,6 +11887,14 @@ class Database:
                 if len(component_rows) != len(components):
                     continue
                 selected = [component_rows[component] for component in components]
+                if (
+                    len({str(row.game_id or "").strip() for row in selected}) != 1
+                    or not str(selected[0].game_id or "").strip()
+                    or (game_id and str(selected[0].game_id).strip() != str(game_id).strip())
+                    or len({str(row.opponent or "").strip().casefold()
+                            for row in selected if row.opponent}) > 1
+                ):
+                    continue
                 if any(
                     str(row.source or "").strip().casefold()
                     == "propline_player_games"
@@ -11944,7 +12006,7 @@ class Database:
             if row is not None:
                 return row
 
-            if game_date and provider and not (is_underdog and game_id):
+            if game_date and provider and not game_id:
                 # Other providers may reconcile distinct event-ID namespaces
                 # by date. Underdog keeps a supplied event ID strict.
                 fallback_filters = [
@@ -12013,10 +12075,7 @@ class Database:
             ]
             if game_id:
                 component_filters.append(
-                    or_(
-                        component_source != "propline_player_games",
-                        PlayerGameResult.game_id == str(game_id),
-                    )
+                    PlayerGameResult.game_id == str(game_id)
                 )
             else:
                 component_filters.append(
@@ -12030,12 +12089,24 @@ class Database:
             component_rows = component_result.scalars().all()
             by_stat: dict[str, PlayerGameResult] = {}
             for component_row in component_rows:
+                if not is_gradeable_player_result_for_event(
+                    provider, component_row.source, game_id, component_row.game_id
+                ):
+                    continue
                 key = str(component_row.stat_type or "").lower().strip()
                 by_stat.setdefault(key, component_row)
             if any(component not in by_stat for component in components):
                 return None
 
             selected = [by_stat[component] for component in components]
+            if (
+                len({str(row.game_id or "").strip() for row in selected}) != 1
+                or not str(selected[0].game_id or "").strip()
+                or (game_id and str(selected[0].game_id).strip() != str(game_id).strip())
+                or len({str(row.opponent or "").strip().casefold()
+                        for row in selected if row.opponent}) > 1
+            ):
+                return None
             if any(
                 str(row.source or "").strip().casefold()
                 == "propline_player_games"

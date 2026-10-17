@@ -50,6 +50,13 @@ def canonical_sport_key(sport: Optional[object]) -> str:
     """Normalize provider sport labels without conflating soccer and football."""
     raw = sport.value if hasattr(sport, "value") else str(sport or "")
     key = re.sub(r"[^A-Z0-9]+", "_", raw.upper()).strip("_")
+    key = {
+        "CS2": "CS", "CSGO": "CS", "CS_GO": "CS",
+        "COUNTER_STRIKE": "CS", "COUNTER_STRIKE_2": "CS",
+        "DOTA2": "DOTA", "DOTA_2": "DOTA",
+        "LEAGUE_OF_LEGENDS": "LOL", "VALORANT": "VAL",
+        "TABLE_TENNIS": "TABLETENNIS",
+    }.get(key, key)
     # Keep aliases on one evidence/delivery identity.  Soccer is deliberately
     # not included: a provider's generic FOOTBALL label means gridiron, while
     # SOCCER/ASSOCIATION_FOOTBALL remains its own sport.
@@ -62,6 +69,25 @@ def canonical_sport_key(sport: Optional[object]) -> str:
     if key in {"ASSOCIATION_FOOTBALL", "FOOTBALL_SOCCER"}:
         return "SOCCER"
     return key
+
+
+def player_sport_key(sport: Optional[object]) -> str:
+    """Unify esports identity while preserving established football labels."""
+    raw = sport.value if hasattr(sport, "value") else str(sport or "")
+    canonical = canonical_sport_key(raw)
+    return canonical if canonical in {"CS", "DOTA", "LOL", "VAL"} else raw.strip().upper()
+
+
+def player_sport_aliases(sport: Optional[object]) -> tuple[str, ...]:
+    """Read legacy aliases without changing or migrating stored evidence."""
+    key = player_sport_key(sport)
+    aliases = {
+        "CS": ("CS", "CS2", "CSGO", "CS_GO", "COUNTER_STRIKE_2", "COUNTER-STRIKE 2"),
+        "DOTA": ("DOTA", "DOTA2", "DOTA_2", "DOTA 2"),
+        "LOL": ("LOL", "LEAGUE_OF_LEGENDS", "LEAGUE OF LEGENDS"),
+        "VAL": ("VAL", "VALORANT"),
+    }
+    return aliases.get(key, (key,))
 
 
 def is_football_related_sport(sport: Optional[object]) -> bool:

@@ -57,7 +57,7 @@ def test_provider_database_write_isolated_and_persisted(tmp_path: Path):
     assert "last_db_write_ts" not in ud_info
 
 
-def test_internal_propline_feed_counts_are_not_rendered_in_telegram(tmp_path: Path):
+def test_primary_prizepicks_feed_counts_are_rendered_in_telegram(tmp_path: Path):
     tracker = HealthTracker(path=tmp_path / "health.json")
     tracker.record_provider_feed_counts(
         "PrizePicks", "NBA", 0, 0, succeeded=True
@@ -77,8 +77,11 @@ def test_internal_propline_feed_counts_are_not_rendered_in_telegram(tmp_path: Pa
     assert counts["WNBA"]["state"] == "failed"
 
     rendered = "\n".join(commands._prizepicks_feed_count_lines(tracker))
-    assert rendered == ""
-    assert "PrizePicks" not in rendered
+    assert "PrizePicks feed" in rendered
+    assert "MLB: raw 9 · parsed 4" in rendered
+    assert "NBA: raw 0 · parsed 0 · empty" in rendered
+    assert "WNBA: raw 0 · parsed 0 · failed" in rendered
+    assert "PrizePicks" in rendered
     assert "PropLine" not in rendered
 
 
@@ -139,8 +142,8 @@ async def test_status_uses_shared_monitoring_cycle_without_merging_ud():
     assert "Latest Underdog scan" not in text
     assert "Latest monitoring cycle" not in text
     assert "Observed:            99" not in text
-    assert "History: Underdog: 15" in text
-    assert "PrizePicks" not in text
+    assert "History: PrizePicks: 5 · Underdog: 15" in text
+    assert "PrizePicks" in text
 
 
 @pytest.mark.asyncio

@@ -354,7 +354,7 @@ class TestDashboardTierBreakdown:
     def test_dashboard_render_reports_tracked_props(self):
         import inspect, engine.dashboard as _dash
         src = inspect.getsource(_dash.DashboardReport.to_telegram)
-        assert "Recently Tracked Props" in src
+        assert "Recently Tracked Props" not in src
 
     def test_dashboard_empty_tracking_is_safe(self):
         report = DashboardReport()

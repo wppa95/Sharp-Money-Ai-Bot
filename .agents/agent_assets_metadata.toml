@@ -36,3 +36,17 @@ mtime_ms = 1790457879955
 storage_uri = "gcs://replit-rams-assets-spock/rams/assets/repl:0f126d34-12f4-4521-91c1-5cf2228d2bcd/101e9a66-2917-44f2-8c5f-da517e2f055b/d0555c98-eb3e-4c82-bdaf-6a5118810cc8"
 storage_version_token = "1790457909055587"
 content_type = "text/markdown"
+
+[[outputs]]
+id = "1sTxTKv6Ax44KERnh-Z56"
+uri = "file://docs/v4-audit-repair-verification.md"
+type = "text"
+title = "V4 audit and verification report"
+description = "Exact repairs, changed files, test results, real-data checks, live limitations, and the user-controlled Railway checklist."
+logical_id = "38437c01-ba6d-469a-8304-e8b3df634d1d"
+content_hash = "sha256:bb27b9f459bd09aaab470b6e978ab735758479f22fa9c78b58d2b4904b962090"
+size = 19892
+mtime_ms = 1792206809189
+storage_uri = "gcs://replit-rams-assets-spock/rams/assets/repl:0f126d34-12f4-4521-91c1-5cf2228d2bcd/38437c01-ba6d-469a-8304-e8b3df634d1d/4fb23d46-e1f0-4dce-b7a1-96fb1a922bd6"
+storage_version_token = "1792206838990335"
+content_type = "text/markdown"

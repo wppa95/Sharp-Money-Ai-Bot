@@ -1887,6 +1887,16 @@ def _normalize_stat(value: Any) -> str:
     raw = re.sub(r"\s+", " ", _clean(value).lower())
     display = re.sub(r"\s+", " ", raw.replace("_", " "))
     compact = re.sub(r"\s*\+\s*", "+", display)
+    # Segment identity is evidence, not an interchangeable stat alias.
+    scoped = re.fullmatch(
+        r"(.+?) (?:on |in )?(maps?|games?) ([0-9]+(?:\+[0-9]+)*)", compact
+    )
+    if scoped:
+        base, unit, numbers = scoped.groups()
+        prefix = "on" if unit.startswith("map") else "in"
+        unit = ("maps" if unit.startswith("map") else "games") if "+" in numbers else (
+            "map" if unit.startswith("map") else "game")
+        return f"{base} {prefix} {unit} {numbers}"
     return _STAT_NORMALIZATION.get(
         raw,
         _STAT_NORMALIZATION.get(
@@ -1949,6 +1959,25 @@ def _propline_raw_player_game_stat_matches(
     canonical_sport = _normalize_sport(sport)
     requested = _normalize_stat(requested_stat)
     observed = _normalize_stat(observed_stat)
+    # Documented raw CS fields use kills_maps_1_2; preserve their exact map
+    # range and never let maps 1-2 become equivalent to maps 1-3.
+    if canonical_sport == "CS":
+        def raw_scope(value):
+            text = re.sub(r"\s+", " ", _clean(value).lower().replace("_", " ")).strip()
+            match = re.fullmatch(r"(kills|headshots|assists) maps? ([1-9](?: [1-9])*)", text)
+            if match:
+                numbers = "+".join(match.group(2).split())
+                unit = "maps" if "+" in numbers else "map"
+                return f"{match.group(1)} on {unit} {numbers}"
+            return _normalize_stat(value).replace(" in games ", " on maps ").replace(" in game ", " on map ")
+        observed = raw_scope(observed_stat)
+        requested = raw_scope(requested_stat)
+        if requested == observed:
+            return True
+        if requested in {"kills", "headshots"}:
+            return observed == f"{requested} on maps 1+2"
+        if " on map" in requested or " on map" in observed:
+            return False
     if requested == observed:
         return True
     aliases = _PROPLINE_RAW_PLAYER_GAME_STAT_ALIASES.get(
@@ -2613,6 +2642,11 @@ def official_player_market_for(
     )
     normalized = _normalize_stat(stat_type)
     sport_key = _normalize_sport(sport)
+    if sport_key == "CS" and normalized in {
+        "kills on maps 1+2", "headshots on maps 1+2",
+        "kills in games 1+2", "headshots in games 1+2",
+    }:
+        normalized = normalized.split(" ", 1)[0]
     sport_mapping = _SPORT_STAT_TO_OFFICIAL_MARKET.get(sport_key, {})
     if candidate.startswith("player_") and candidate in _OFFICIAL_MARKETS:
         if sport_key in _SPORTS_WITHOUT_GRADED_PLAYER_MARKETS:

@@ -1,0 +1,442 @@
+V4 SHARP MONEY BOT — COMPLETE CODEBASE AUDIT, REPAIR, AND VERIFICATION
+
+PRIMARY OBJECTIVE
+
+Inspect, diagnose, repair, and test the existing V4 Sharp Money Telegram bot in this Replit project. Fix the underlying causes of the problems documented below without replacing the architecture, blindly rewriting working code, weakening qualification thresholds, or introducing unrelated changes.
+
+This is an implementation task, not an audit-only task. Inspect first, identify root causes, implement the necessary repairs, and run tests.
+
+The production workflow is:
+
+Replit → GitHub → Railway
+
+Replit is the source of truth for this work. Do not assume the Railway deployment has the same environment variables, database contents, or runtime state as Replit. The Railway diagnostic outputs below are evidence of observed behavior, not proof of which exact code path is responsible.
+
+Do not deploy to Railway or make external production changes as part of this task. Complete and verify the repairs in Replit, then report the exact files changed, tests run, results, and remaining configuration steps.
+
+NON-NEGOTIABLE REQUIREMENTS
+
+1. PrizePicks is the primary platform. Underdog is secondary.
+2. Only send qualified, individual player-prop recommendations.
+3. Never create, recommend, or deliver 2-man or 3-man slips.
+4. Every Telegram alert must represent a genuine recommendation that passed the existing qualification requirements.
+5. Verify the actual platform, player, sport, event, market/stat, line, and selectable direction before advertising a pick.
+6. Preserve the existing qualification thresholds. Do not lower them to increase alert volume or make tests pass.
+7. Do not fabricate historical data, hit rates, results, market lines, comparisons, probabilities, edges, or recommendations.
+8. Keep PrizePicks and Underdog records distinct. Never relabel Underdog observations as PrizePicks.
+9. Preserve existing MLB mappings, scoring, thresholds, delivery behavior, and database behavior unless a specific shared defect is proven and its repair is demonstrably safe for MLB.
+10. Do not reactivate, configure, or add The Odds API during this repair phase. We will address it after the core pipeline works.
+11. Do not add paid providers, introduce new subscription dependencies, or replace existing data providers without first establishing that the current sources cannot meet the requirement.
+12. Do not introduce Strong Bet labels, stars, confidence tiers, arbitrary score labels, or unsupported intelligence fields.
+13. Missing history must not cause an observation to be discarded. Store and track valid observations, seek available historical evidence, and withhold recommendations when the existing requirements are not satisfied.
+14. Keep the footer on recommendation alerts:
+
+"Monitoring player props across multiple sports. Not betting advice."
+
+15. Do not perform a broad architectural rewrite. Make focused, maintainable changes to the existing pipeline.
+
+---
+
+PHASE 1 — INSPECT THE REAL CODEBASE
+
+Before editing files:
+
+1. Inspect the actual entry point, scheduler, providers, database models, migrations, history enrichment, grading/resolution, recommendation evaluation, Telegram delivery, commands, and tests.
+2. Identify the actual active code paths. Do not assume a file is active merely because it exists.
+3. Trace the complete flow:
+
+"PROVIDER FETCH → NORMALIZE → STORE OBSERVATION → TRACK PROP → ENRICH HISTORY → EVALUATE → VERIFY DIRECTION → QUALIFY RECOMMENDATION → CREATE ALERT → DELIVERY GATE → TELEGRAM SEND → FETCH FINAL RESULTS → VERIFY RESULT → GRADE PICK → UPDATE ANALYTICS"
+
+4. Identify every place where records, identifiers, provider names, market names, event IDs, lines, directions, or timestamps can become inconsistent.
+5. Inspect configuration and environment-variable handling for PropLine, PrizePicks, Underdog, historical sources, and scheduled jobs.
+6. Determine which defects are caused by code, configuration, scheduling, API responses, database schemas, matching logic, or reporting queries.
+7. Establish a baseline using the existing tests and, where possible, add regression tests before changing the relevant logic.
+8. Protect credentials and tokens. Never print secrets in logs or test output.
+9. Do not use live betting actions, submit bets, or create slips.
+
+Produce a concise root-cause map internally as you work. Do not stop after producing a report; implement the necessary repairs.
+
+PHASE 2 — REPAIR PROP LINE / PRIZEPICKS INGESTION
+
+This is a top priority.
+
+Railway diagnostics repeatedly reported Underdog as the only player-prop provider. Commands such as "/providers", "/status", "/config", "/stats", "/tracking", "/grades", and "/learning" showed no distinct PrizePicks population. The following market queries returned no PrizePicks observations in the current session:
+
+- "/funnel markets MLB PrizePicks"
+- "/funnel markets NBA PrizePicks"
+- "/funnel markets NHL PrizePicks"
+- "/funnel markets Tennis PrizePicks"
+
+The configuration also indicated that the season check was retired for the PropLine/Underdog feed.
+
+These outputs do not establish the precise root cause. Trace the actual code and determine why the PrizePicks/PropLine pipeline is not demonstrably contributing correctly attributed observations.
+
+Requirements:
+
+1. Verify that the PropLine client is present, configured, registered with the scheduler, and actually executing.
+2. Verify authentication, endpoint selection, response parsing, rate limits, exceptions, retry behavior, and database writes.
+3. Inspect the available PropLine documentation already referenced by this project, including "https://prop-line.com/llms-full.txt" if accessible through the existing development environment.
+4. Use supported PropLine endpoints and actual returned data. Do not invent endpoints or assume an endpoint is available without checking.
+5. Determine whether the current implementation is incorrectly treating a combined feed as Underdog-only, whether PrizePicks ingestion is disabled, or whether the provider status and tracking layers are simply omitting valid PP records.
+6. Store actual source identity and platform-specific line information for every observation.
+7. Ensure PrizePicks observations populate the same core tracking and evaluation pipeline as other providers without overwriting or merging incompatible provider records.
+8. Keep PP and UD observations separate while allowing legitimate cross-platform comparisons.
+9. Fix provider status, coverage, "/tracking", "/stats", "/funnel", "/dashboard", and grading reports to display actual provider populations.
+10. If PropLine cannot supply a requested market, report that limitation accurately and continue supporting other available markets.
+11. Do not reactivate The Odds API as a workaround.
+12. Do not claim PrizePicks ingestion is fixed unless tests demonstrate actual parsing, attribution, persistence, and downstream visibility.
+
+PHASE 3 — RESTORE HISTORICAL PLAYER-GAME EVIDENCE
+
+The bot must use real historical evidence to evaluate props across supported sports.
+
+Railway diagnostics showed many observations rejected for reasons such as:
+
+- No completed game history.
+- No supporting evidence/history.
+- Insufficient settled sample.
+- No settled player-game hit-rate window.
+
+This affected MLB, NBA, NHL, tennis, Dota 2, and other markets. The user confirmed that historical data should be obtained from PropLine where available; a fresh Railway database does not mean external history is inherently unavailable.
+
+Inspect and repair the history-enrichment pipeline.
+
+Requirements:
+
+1. Verify that each configured historical provider is genuinely returning usable data, not merely marked active.
+2. Check ESPN gamelog, MLB Stats API, NHL API, OpenDota, Jeff Sackmann tennis data, Sleeper, PropLine, and any other existing sources actually used by this codebase.
+3. Repair scheduler registration, fetches, response parsing, pagination, caching, player matching, market/stat normalization, timestamps, and persistence wherever the evidence identifies a defect.
+4. Use real completed player-game results when available.
+5. Calculate L5, L10, L20, L30, and H2H statistics from the correct player's completed games and the correct market definition.
+6. Report sample sizes, hit counts, and hit rates accurately. Distinguish missing samples from genuine 0% hit rates.
+7. Correctly handle pushes and market-specific scoring rules.
+8. Normalize sport, player, event, and stat aliases consistently.
+9. Avoid mixing different stats, periods, map ranges, or markets into one historical sample.
+10. Preserve and track valid observations even if history is unavailable.
+11. Missing history must not cause automatic approval or permanent deletion. A recommendation may be sent only if it satisfies the existing qualification criteria with legitimate evidence.
+12. Do not lower thresholds or weaken evidence requirements to compensate for missing history.
+13. Report unavailable history honestly and distinguish configured sources, successful fetches, parsed results, and successfully matched player-game records.
+
+The supported sports include, but are not limited to, FIFA/soccer, badminton, KBO, NPB, tennis, table tennis, WNBA, NBA, NFL, MLB, NHL, college sports, Dota 2, CS/CS2, LoL, Valorant, and other sports already configured in the project.
+
+Do not invent support for a sport or market when the underlying source does not provide it.
+
+PHASE 4 — FIX OUTCOME GRADING AND RESULT MATCHING
+
+This is a critical defect.
+
+Observed Railway output:
+
+- "/grades" reported 13,167 tracked lines, all pending, with zero resolved.
+- 1,475 directional picks were stored, all pending.
+- Exact tracked-line matches: 0.
+- Exact PropLine result corroborations: 0.
+- Source-verified outcomes: 0.
+- The learning rollup reported 245 lines scheduled in the preceding 24 hours still pending.
+- "/backtest" reported no resolved records.
+- Another funnel report reported 1,286 settled-result evidence records even though the grading reports showed zero resolved outcomes.
+
+The counts came from different reports and may represent different populations, but the mismatch must be explained and repaired where it reflects a defect.
+
+Requirements:
+
+1. Trace how completed results are fetched, normalized, stored, and associated with the original tracked prop and recommendation.
+2. Inspect the result resolver and its scheduler. Verify that the job is registered, executes, processes eligible rows, and records successful work.
+3. Determine why records with past scheduled times remain pending when valid final evidence is available.
+4. Check event IDs, player IDs/names, team identities, sport aliases, market/stat names, period/map identifiers, line values, event start times, and timezones.
+5. Use stable identifiers where available; use conservative matching when IDs differ across providers.
+6. Require appropriate evidence for a grade. Matching must distinguish different events, players, stats, markets, and game segments.
+7. Correctly classify OVER and UNDER results, pushes, voids, cancellations, and postponed events.
+8. Do not grade a result solely because an event's scheduled time has passed.
+9. Do not treat bot-generated grades as independent evidence.
+10. Reconcile result evidence, tracked lines, and recommendation records without silently fabricating a match.
+11. Make grading idempotent so repeated jobs do not create duplicate results or corrupt previously verified outcomes.
+12. Preserve a distinction between a neutral tracked line's above/below outcome and the win/loss result of an actual recommended direction.
+13. Expose useful failure reasons: result not fetched, event not final, player not matched, market not matched, stat not matched, source conflict, or insufficient evidence.
+14. Ensure "/grade", "/grades", "/learning", "/rollups", "/performance", and "/backtest" report consistent populations and definitions.
+15. Add tests for successful grades, missing results, mismatched players, mismatched stats, pushes, voids, duplicate results, and retries.
+
+Do not run a bulk backfill or destructive migration without first determining the required changes and making them safe and idempotent.
+
+PHASE 5 — UNIFY RECOMMENDATION QUALIFICATION AND TELEGRAM DELIVERY
+
+This is the core product requirement.
+
+The user should receive only qualified individual picks that meet existing requirements.
+
+Railway reported seven alerts/actionable picks, but "/analyst" returned:
+
+"No recent alerted picks with bet recommendations found."
+
+Other commands showed hundreds of directional candidates but very few delivered alerts. The funnel showed zero sends during a scan even though historical delivery reports showed seven deliveries. These counts may use different scopes, but the bot must make their relationships clear.
+
+Requirements:
+
+1. Establish one canonical recommendation record or a reliable shared identifier that links evaluation, qualification, alert creation, delivery, analysis, and grading.
+2. Separate directional candidates from qualified recommendations. A directional OVER/UNDER calculation alone is not sufficient to send an alert.
+3. Every sent alert must pass the existing qualification criteria and be a genuine recommendation.
+4. Ensure "/analyst" reads the same canonical recommendations that were actually created and delivered.
+5. Ensure the delivery gate does not accidentally block legitimate qualified picks because of missing optional analytics, an uninitialized ranking model, or an unrelated subsystem.
+6. Do not bypass required evidence, selectable-direction verification, or existing qualification thresholds.
+7. Do not introduce new arbitrary blockers or unsupported scoring labels.
+8. Store the actual provider, platform, line, direction, market, event, player, evidence summary, qualification decision, rejection reason, and delivery result as appropriate.
+9. Ensure each alert can be traced back to the observation and evidence that justified it.
+10. Make delivery idempotent. Prevent duplicates without suppressing legitimate line movements or new recommendations that the existing policy allows.
+11. Correctly distinguish candidate counts, qualified picks, alerts created, send attempts, confirmed Telegram deliveries, recipients, duplicates, failures, and pending sends.
+12. If no pick qualifies, send no pick alert. Do not manufacture alert volume to make dashboard numbers look healthier.
+13. Keep alerts limited to individual picks. Never create slips or multi-leg recommendations.
+14. Preserve the exact required footer:
+
+"Monitoring player props across multiple sports. Not betting advice."
+
+PHASE 6 — VERIFY THE EXACT PLATFORM AND SELECTABLE DIRECTION
+
+Some previously sent NHL alerts were UNDER 0.5 markets, including Power Play Points. The user questioned whether UNDER was actually selectable on the relevant platform for certain markets.
+
+Implement robust verification:
+
+1. Verify the actual source and platform for every advertised pick.
+2. Confirm the exact player, event, market/stat, line, and direction.
+3. When the provider exposes selectable sides, verify the recommended side is genuinely offered.
+4. Never infer that a side is available solely because a statistical calculation supports it.
+5. If the platform's selectable direction cannot be verified, do not falsely claim it was verified. Apply the existing eligibility policy and explain the limitation in diagnostics.
+6. Never turn an unavailable direction into a recommendation by changing its label.
+7. When comparing platforms, preserve the actual line and direction offered on each platform.
+8. Do not let a missing cross-platform comparison automatically disqualify a standalone pick that independently meets existing requirements.
+
+Add tests for unavailable sides, half-point lines, exact-line matching, provider mismatch, stale observations, and missing platform evidence.
+
+PHASE 7 — REPAIR DIRECTION-AWARE HIT-RATE CALCULATIONS
+
+The "/picks" output appears to use OVER hit rates for UNDER recommendations.
+
+Observed examples:
+
+- Dota 2, zeal, Kills Maps 1+2 UNDER 10.5, results "16, 29, 6, 6, 4", displayed 2/5 (40%). Assuming these are the relevant outcomes and no push, three of five are below 10.5.
+- NHL, Liam Ohgren, Goals UNDER 0.5, results "1, 0, 0, 0, 0", displayed 1/5 (20%). Assuming no other result complications, four of five are below 0.5.
+
+Requirements:
+
+1. OVER hit rate = outcomes above the line divided by the eligible resolved sample.
+2. UNDER hit rate = outcomes below the line divided by the eligible resolved sample.
+3. Pushes must be identified and handled consistently.
+4. Voids, cancellations, missing results, and unresolved events must not be counted as ordinary wins or losses.
+5. Use one shared calculation implementation across "/picks", "/analyst", "/performance", and any other output showing hit rates.
+6. Report numerator, denominator, and sample size clearly.
+7. Never report 0% merely because the sample is missing.
+8. Test both directions, pushes, integer lines, half-point lines, and empty samples.
+
+PHASE 8 — FIX SPORT ALIASES AND EVENT-DATE FILTERING
+
+Diagnostics showed inconsistent coverage for aliases such as:
+
+- CS versus CS2
+- DOTA versus Dota 2
+
+Aggregate tracking showed records even when scoped market queries returned no observations.
+
+Dota 2 also showed rejection reasons indicating an event was not scheduled for the current reporting day.
+
+Requirements:
+
+1. Normalize sport aliases centrally and use that mapping throughout ingestion, tracking, history, filtering, reporting, and result matching.
+2. Preserve the canonical source sport identifier when needed for API requests.
+3. Correct timezone conversion and event-day logic.
+4. Support legitimate overnight events and cross-midnight schedules.
+5. Do not reject a valid event solely because UTC and local dates differ.
+6. Make coverage reports distinguish no observations, unsupported source, no data in the requested window, and alias/filter mismatch.
+7. Add regression tests for CS/CS2, DOTA/Dota 2, and event dates across timezone boundaries.
+
+PHASE 9 — REPAIR JOB SCHEDULING AND TELEMETRY
+
+Railway health output showed stale job timestamps, including a Player History run 18 minutes earlier and an Opportunity Grader run 9 minutes earlier, while monitoring scans continued. Health also repeatedly reported "Last DB write: not recorded".
+
+These are diagnostic warnings, not proof of a specific scheduler defect.
+
+Requirements:
+
+1. Inspect all scheduler registrations, intervals, startup ordering, shutdown, exception handling, and actual execution.
+2. Determine whether jobs are not running, failing, waiting, or running successfully with no eligible work.
+3. Ensure monitoring, history enrichment, evaluation, and grading have clear responsibilities and do not accidentally trigger or suppress one another.
+4. Do not introduce self-overlapping jobs, uncontrolled concurrent runs, or silent failures.
+5. Preserve the intended existing cadence unless evidence demonstrates it is incorrect.
+6. Record last successful run, last attempt, duration, records fetched, records matched, records written, records graded, and the latest error where appropriate.
+7. Record actual successful database commits so the health command can report last DB write accurately.
+8. Distinguish zero work from failed work.
+9. Ensure API failures are logged safely without exposing secrets.
+10. Review the earlier Telegram polling conflict and "RuntimeError: coroutine ignored GeneratorExit" in "DiscordGateway._run". Ensure only one Telegram polling instance uses the bot token and that shutdown is graceful. Do not claim the issue is currently active unless reproduced.
+11. Avoid unnecessary DB resets or migrations. Preserve existing data and make schema changes safe and reversible.
+
+PHASE 10 — FIX PROVIDER COMPARISONS AND MARKET REPORTING
+
+The user expects PrizePicks to be primary, with Underdog used as a secondary comparison source.
+
+Requirements:
+
+1. Store real PP and UD line observations independently.
+2. Compare only compatible records for the same player, sport, event, stat/market, and relevant game segment.
+3. Account for differing lines without pretending that different numbers are the same line.
+4. Display each platform's actual line and the direction genuinely offered.
+5. If no matching line exists, say no comparison is available.
+6. A missing comparison must not fabricate a value or automatically block an otherwise eligible standalone pick.
+7. Fix market-snapshot creation only if inspection shows it is intended to operate from the existing data sources and its writer is broken or disabled.
+8. Do not build +EV or steam claims out of incomplete data.
+9. Keep live odds polling, The Odds API, +EV automation, and steam detection deferred until the core pipeline passes its tests.
+
+PHASE 11 — REPAIR DASHBOARD, REPORTS, AND ACCOUNTING
+
+The user explicitly wants these two dashboard sections removed:
+
+- "By current sport"
+- "Recently Tracked Props"
+
+Remove those sections from "/dashboard" without removing useful operational information.
+
+Keep and improve the useful information: provider status, data freshness, evidence availability, recommendation counts, delivery status, pending/resolved outcomes, and job health.
+
+Requirements:
+
+1. Correct provider-specific populations across "/status", "/providers", "/config", "/stats", "/tracking", "/grades", "/learning", "/rollups", "/dashboard", "/performance", and "/reconcile".
+2. Report actual PP and UD populations separately.
+3. Make time windows and record populations explicit.
+4. Ensure counts use consistent definitions and canonical queries where practical.
+5. Reconcile the observed differences, including NHL 678 versus 680 directional picks, the seven audited deliveries versus 14 hourly alerts/recipients, and the differences between overall directional totals.
+6. If two counts legitimately represent different populations, explain the distinction rather than forcing them to match.
+7. Do not report directional candidates as actionable picks.
+8. Do not report alert creation as confirmed Telegram delivery.
+9. Do not report a directional pick as graded until supported by verified outcome evidence.
+10. Remove unavailable intelligence fields from user-facing pick displays unless genuine values can be supplied.
+11. Keep "/funnel" useful for diagnosing each pipeline stage, with clear stage counts and rejection reasons.
+12. Correct the “Last DB write” telemetry.
+13. Keep command outputs concise and useful on a phone.
+
+PHASE 12 — REFINEMENT AND ADAPTIVE RANKING
+
+The refinement report listed five rules:
+
+- "global-miss-rate-high"
+- "global-clv-negative"
+- "s-tier-miss-high"
+- "mlb-miss-rate-high"
+- "alert-volume-drop"
+
+None had fired. Adaptive ranking showed "NOT_INITIALIZED", with zero eligible groups.
+
+Requirements:
+
+1. Verify these rules use real resolved outcomes and genuine CLV records.
+2. Do not treat missing data as a 0% or 100% performance rate.
+3. Do not allow an uninitialized adaptive-ranking subsystem to block valid recommendations unless an existing documented requirement explicitly says it must.
+4. Preserve existing qualification thresholds.
+5. Do not let refinement automatically lower thresholds or change MLB behavior as a shortcut.
+6. Ensure refinement is ranking/monitoring logic only unless the existing code has a documented and intended different role.
+7. Test behavior when there are no samples, insufficient samples, and adequate verified samples.
+
+PHASE 13 — TESTING AND ACCEPTANCE CRITERIA
+
+Do not declare the work complete just because the bot starts or a command returns a response.
+
+Create or update automated tests for the relevant modules. Use fixtures or mocked provider responses where appropriate. Do not require live bets, paid API calls, or access to production secrets for unit tests.
+
+Minimum acceptance criteria:
+
+A. Provider ingestion
+
+- PropLine ingestion can be tested with a representative real-format response.
+- PrizePicks observations are stored with PrizePicks identity and are visible in provider-specific tracking.
+- Underdog observations remain separately attributed.
+- Failed or unavailable providers produce clear health diagnostics.
+- No provider data is relabeled to make counts appear correct.
+
+B. Historical evidence
+
+- Supported history sources return parsed, persisted, matchable game records in tests.
+- L5/L10/L20/L30/H2H calculations use the correct player and market.
+- Missing history is represented as missing, not as a fake 0% hit rate.
+- Unsupported markets are reported honestly.
+
+C. Recommendations
+
+- An eligible candidate creates a canonical recommendation record.
+- An ineligible candidate does not become an actionable pick.
+- Existing qualification thresholds remain unchanged.
+- A recommendation can be traced from source observation to evidence, qualification, alert, delivery, and eventual grading.
+- No slips or multi-leg picks are generated.
+
+D. Platform and direction
+
+- The exact platform, player, event, stat, line, and direction are validated.
+- Unavailable or unverifiable directions are never falsely advertised as verified.
+- PP/UD comparisons use actual provider records.
+
+E. Telegram delivery
+
+- Only qualified individual recommendations are delivered.
+- "/analyst" can find the same recommendation records used by delivery.
+- Duplicate handling works without suppressing valid new recommendations.
+- Failed sends are distinguishable from successful sends.
+- The required footer is retained.
+
+F. Grading
+
+- Final result evidence matches the correct event, player, sport, market, and direction.
+- OVER, UNDER, push, void, cancellation, and unresolved cases are tested.
+- Grading is idempotent.
+- Verified outcomes update the corresponding recommendation and analytics records.
+- Unverified outcomes remain pending.
+
+G. Analytics and reporting
+
+- UNDER hit rates are direction-aware.
+- Provider populations and reporting totals reconcile or have clearly documented scopes.
+- "/grades", "/learning", "/rollups", "/performance", and "/backtest" agree on the underlying verified outcomes.
+- Dashboard sections "By current sport" and "Recently Tracked Props" are removed.
+- The health output reports actual scheduler activity and database writes.
+
+H. Regression protection
+
+- Existing MLB mappings, scoring, thresholds, delivery behavior, and database behavior are protected by regression tests.
+- Sport aliases and event-day handling have regression tests.
+- Existing working sports and markets are not broken by shared changes.
+
+If the live data providers cannot be contacted in tests, clearly separate mocked test success from live provider verification. Never claim a live integration has been verified when only a mock was tested.
+
+PHASE 14 — IMPLEMENTATION SAFETY
+
+- Make focused changes to the existing code.
+- Follow the project's current Python version and architecture.
+- Preserve existing database records and schemas unless a necessary, justified migration is required.
+- Use transactions and idempotent migrations.
+- Do not reset or delete the database to make reports look clean.
+- Do not create fake history or seed fake recommendations.
+- Do not weaken qualification thresholds.
+- Do not activate The Odds API.
+- Do not change unrelated modules merely for style.
+- Do not claim success for work that has not been tested.
+- If an essential secret or environment variable is missing, implement safe handling and report exactly which configuration is needed.
+- If a requested behavior is impossible with the available data source, explain the limitation instead of fabricating data.
+
+REQUIRED FINAL REPORT
+
+When implementation and tests are finished, provide:
+
+1. Root causes: Each confirmed problem and its cause in the existing code.
+2. Files changed: Exact paths and a concise explanation of each change.
+3. Behavioral changes: What the bot now does differently.
+4. Tests added or updated: Test names, what they verify, and results.
+5. Verification results: Passed, failed, skipped, and not verified live.
+6. Database changes: Any migration and its safety/rollback plan.
+7. Configuration required: Exact variable names or provider setup still needed, without revealing secret values.
+8. Remaining issues: Anything that cannot be fixed or verified in Replit alone.
+9. Deployment checklist: What the user should verify after pushing to GitHub and deploying to Railway.
+10. Acceptance checklist: Mark each requirement above as passed, failed, or not yet verified.
+
+Do not report a problem as fixed merely because its command output changed. Demonstrate the underlying behavior with tests or traceable evidence.
+
+FINAL PRIORITY
+
+First repair and verify the existing PropLine/PrizePicks ingestion, history, recommendation qualification, selectable-direction validation, Telegram delivery, outcome grading, and report consistency.
+
+Only after those core functions pass verification should we work on The Odds API, live odds polling, +EV detection, market snapshots, and steam detection.
+
+The goal is a reliable, evidence-based, multi-sport player-prop recommendation bot—not simply more alerts.

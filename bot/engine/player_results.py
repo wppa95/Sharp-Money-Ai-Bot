@@ -102,6 +102,32 @@ class PlayerHitRates:
     sample_values: tuple[tuple[str, tuple[float, ...]], ...] = ()
 
 
+def directional_window_counts(window, direction: str) -> tuple[int, int, int] | None:
+    """One directional numerator/denominator contract for all history views.
+
+    Pushes remain completed samples but are never OVER or UNDER hits.
+    Missing strict UNDER counts are unknown, never the complement of OVER.
+    """
+    if window is None or direction not in {"OVER", "UNDER"}:
+        return None
+    def value(name, short, default=None):
+        if isinstance(window, dict):
+            return window.get(name, window.get(short, default))
+        return getattr(window, name, default)
+    n = value("games", "n")
+    hits = value("over_count" if direction == "OVER" else "under_count",
+                 "o" if direction == "OVER" else "u")
+    pushes = value("push_count", "p", 0)
+    if any(isinstance(v, bool) or not isinstance(v, (int, float))
+           for v in (n, hits, pushes)):
+        return None
+    if not all(math.isfinite(v) and int(v) == v for v in (n, hits, pushes)):
+        return None
+    if n <= 0 or hits < 0 or pushes < 0 or hits + pushes > n:
+        return None
+    return int(hits), int(n), int(pushes)
+
+
 # ── Computation ───────────────────────────────────────────────────────────────
 
 def compute_hit_rates(

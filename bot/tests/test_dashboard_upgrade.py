@@ -182,12 +182,13 @@ class TestDashboardReportToTelegram:
             health.get_health_tracker = original
 
         text = report.to_telegram()
-        assert "By current sport <i>(last FPR rotation)</i>" in text
-        assert "MLB: FPR rescored <code>514</code>" in text
+        assert "By current sport" not in text
+        assert "Recently Tracked Props" not in text
+        assert "FPR rescored <code>  514</code>" in text
         assert "Last FPR pool: <code>7,656</code>" in text
         assert "FPR rescored: <code>7,656</code>" in text
         assert "By Sport" in text and "last FPR rotation coverage" in text
-        assert "UNAVAILABLE" not in text
+        assert "By Sport" in text
 
     def test_uptime_age_is_labeled_as_start_time(self):
         report = _report(

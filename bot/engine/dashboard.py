@@ -268,42 +268,6 @@ class DashboardReport:
             "",
         ]
 
-        if tracking_unavailable and self.fpr_by_sport:
-            scan_label = (
-                "last FPR rotation"
-                if self.fpr_rotation_complete
-                else "last FPR batch"
-            )
-            parts.append(f"  By current sport <i>({scan_label})</i>:")
-            for sport, rescored in sorted(self.fpr_by_sport.items()):
-                parts.append(
-                    f"    {sport}: FPR rescored <code>{rescored:,}</code>"
-                )
-            parts.append("")
-        elif tracking_unavailable:
-            parts.append("  By current sport: <i>UNAVAILABLE</i>")
-            parts.append("")
-        elif self.tracking_by_sport:
-            parts.append("  By current sport:")
-            for sport, values in sorted(self.tracking_by_sport.items()):
-                parts.append(
-                    f"    {sport}: active <code>{values.get('active', 0):,}</code>"
-                    f" · observed <code>{values.get('observed', 0):,}</code>"
-                    f" · directional <code>{values.get('directional', 0):,}</code>"
-                    f" · delivered <code>{values.get('delivered', 0):,}</code>"
-                )
-            parts.append("")
-
-        if self.recent_tracked_props:
-            parts.append("🔔 <b>Recently Tracked Props</b>  <i>(last hour · all sports)</i>")
-            for prop in self.recent_tracked_props[:5]:
-                parts.append(
-                    f"  🐶 <b>UNDERDOG PICK</b> · "
-                    f"<b>{prop['player_name']}</b>  {prop['stat_type']} "
-                    f"<code>{prop['line_value']:.1f}</code> · <i>{prop['sport']}</i>"
-                )
-            parts.append("")
-
         # ── CLV performance ───────────────────────────────────────────────────
         parts.append("💎 <b>Closing Line Value</b>")
         if "clv" in self.unavailable:
@@ -323,36 +287,31 @@ class DashboardReport:
         parts.append("")
 
         # ── Provider pipeline ──────────────────────────────────────────────────
-        # Keep this as a compact current-activity section.  The dashboard
-        # intentionally exposes the primary Underdog stream only; secondary
-        # provider records are not part of the active product surface.
-        pipeline_values = self.provider_pipeline.get("Underdog")
-        if not isinstance(pipeline_values, dict):
-            pipeline_values = {}
+        parts += ["📡 <b>Provider Pipeline</b>",
+                  "<i>Observed = stored snapshots; directional ≠ qualified; "
+                  "delivered = confirmed picks, not recipients.</i>"]
+        for provider, role in (("PrizePicks", "primary"), ("Underdog", "secondary")):
+            values = self.provider_pipeline.get(provider) or {}
+            observed = values.get("observed", self._normalized_activity(
+                provider, self.total_ud_alerts if provider == "Underdog" else 0))
+            active = values.get("active", 0)
+            parts.append(
+                f"  <b>{provider}</b> ({role}) · Observed: <code>{_count(observed)}</code>"
+                f" · Active: <code>{_count(active)}</code>"
+            )
+            parts.append(
+                f"    directional {_count(values.get('directional'))}"
+                f" · delivered {_count(values.get('delivered'))}"
+                f" · pending {_count(values.get('pending'))}"
+                f" · resolved {_count(values.get('resolved'))}"
+            )
+            if values.get("status"):
+                parts.append(f"    status: {values['status']} · last fetch: "
+                             f"{values.get('last_fetch', 'unavailable')}")
         if tracking_unavailable and self.fpr_pool_size is not None:
-            pipeline_line = (
-                "  <b>Underdog</b>  "
-                f"Last FPR pool: <code>{self.fpr_pool_size:,}</code>"
-            )
-            if self.fpr_rescored is not None:
-                pipeline_line += (
-                    f" · FPR rescored: <code>{self.fpr_rescored:,}</code>"
-                )
-        else:
-            observed = pipeline_values.get(
-                "observed",
-                self._normalized_activity("Underdog", self.total_ud_alerts),
-            )
-            active = pipeline_values.get(
-                "active",
-                self.active_tracked_props,
-            )
-            pipeline_line = (
-                "  <b>Underdog</b>  "
-                f"Observed: <code>{_count(observed)}</code> · "
-                f"Active: <code>{_count(active)}</code>"
-            )
-        parts += ["📡 <b>Provider Pipeline</b>", pipeline_line, ""]
+            parts.append(f"  Underdog Last FPR pool: <code>{self.fpr_pool_size:,}</code>"
+                         f" · FPR rescored: <code>{self.fpr_rescored or 0:,}</code>")
+        parts.append("")
 
         # ── By sport ──────────────────────────────────────────────────────────
         # All-time cumulative alert distribution across EV + Underdog + PrizePicks.
@@ -1145,7 +1104,7 @@ class DashboardEngine:
         # needed for this presentation.
         by_provider = r.tracking_by_provider
 
-        known_providers = {"Underdog"}
+        known_providers = {"PrizePicks", "Underdog"}
         pipeline: dict[str, dict] = {}
         health_monitor = None
         health_tracker = None
