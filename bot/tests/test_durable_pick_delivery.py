@@ -185,7 +185,6 @@ async def _seed_pp_history(db: Database, item: dict, *, line_variant=None):
                 external_id=item["source_id"],
                 game_id=item["event_id"],
                 line_variant=variant,
-                removed=False,
                 fetched_at=item["source_fetched_at"],
                 first_seen=item["source_fetched_at"],
                 last_seen=item["source_fetched_at"],
@@ -195,6 +194,165 @@ async def _seed_pp_history(db: Database, item: dict, *, line_variant=None):
             )
         )
         await session.commit()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "mismatch",
+    [
+        "source_id", "event_id", "player_name", "sport",
+        "stat_type", "line_value", "direction", "line_variant",
+    ],
+)
+async def test_prizepicks_queue_rejects_non_exact_source_identity(tmp_path, mismatch):
+    db = await _make_db(tmp_path, f"pp_identity_{mismatch}.sqlite3")
+    try:
+        original = _item(
+            provider="PrizePicks",
+            sport="NBA",
+            source_id="pp-source",
+            event_id="pp-event",
+            player="Sample Player",
+            stat="Points",
+            line=19.5,
+            line_variant="standard",
+        )
+        await _seed_pp_history(db, original)
+        await _seed_opportunity(db, original)
+
+        altered = {
+            "source_id": "other-source",
+            "event_id": "other-event",
+            "player_name": "Different Player",
+            "sport": "NHL",
+            "stat_type": "Goals",
+            "line_value": 20.5,
+            "direction": "UNDER",
+            "line_variant": "alternate",
+        }[mismatch]
+        changes = {}
+        if mismatch == "player_name":
+            changes["player"] = altered
+        elif mismatch == "sport":
+            changes["sport"] = altered
+        elif mismatch == "stat_type":
+            changes["stat"] = altered
+        elif mismatch == "line_value":
+            changes["line"] = altered
+        elif mismatch == "direction":
+            changes["direction"] = altered
+        elif mismatch == "line_variant":
+            changes["line_variant"] = altered
+        elif mismatch == "source_id":
+            changes["source_id"] = altered
+        else:
+            changes["event_id"] = altered
+        candidate = _item(
+            provider="PrizePicks",
+            sport=changes.get("sport", original["sport"]),
+            source_id=changes.get("source_id", original["source_id"]),
+            event_id=changes.get("event_id", original["event_id"]),
+            player=changes.get("player", original["player_name"]),
+            stat=changes.get("stat", original["stat_type"]),
+            line=changes.get("line", original["line_value"]),
+            direction=changes.get("direction", original["direction"]),
+            line_variant=changes.get("line_variant", original["line_variant"]),
+        )
+        with pytest.raises(ValueError, match="exact PropLine source line"):
+            await db.enqueue_telegram_pick_deliveries([candidate])
+    finally:
+        await _close_db(db)
+
+
+@pytest.mark.asyncio
+async def test_prizepicks_queue_and_success_audit_advance_exact_lifecycle(tmp_path):
+    db = await _make_db(tmp_path, "pp_lifecycle.sqlite3")
+    try:
+        evaluation_id = "a" * 32
+        candidate = _item(
+            provider="PrizePicks",
+            sport="NBA",
+            source_id="pp-source",
+            event_id="pp-event",
+            player="Sample Player",
+            stat="Points",
+            line=19.5,
+            line_variant="standard",
+        )
+        await _seed_pp_history(db, candidate)
+        await _seed_opportunity(db, candidate)
+        evidence = json.loads(candidate["evidence_snapshot_json"])
+        evidence["candidate_lifecycle_id"] = evaluation_id
+        candidate["evidence_snapshot_json"] = json.dumps(evidence)
+        await db.record_candidate_lifecycle_batch([{
+            "evaluation_id": evaluation_id,
+            "provider": candidate["provider"],
+            "source_id": candidate["source_id"],
+            "event_id": candidate["event_id"],
+            "player_name": candidate["player_name"],
+            "sport": candidate["sport"],
+            "stat_type": candidate["stat_type"],
+            "line_variant": candidate["line_variant"],
+            "line_value": candidate["line_value"],
+            "direction": candidate["direction"],
+            "delivery_path": "prizepicks",
+            "qualification_json": {"passed_collection_gates": True},
+            "evidence_snapshot_json": evidence,
+        }])
+        async with db.session() as session:
+            lifecycle = await session.get(CandidateLifecycleRecord, evaluation_id)
+            original_identity = lifecycle.pick_identity_key
+            assert lifecycle.disposition == "directional_decision"
+
+        queued_ids = await db.enqueue_telegram_pick_deliveries([candidate])
+        assert len(queued_ids) == 1
+        async with db.session() as session:
+            lifecycle = await session.get(CandidateLifecycleRecord, evaluation_id)
+            queue_row = await session.scalar(
+                select(TelegramPickDelivery).where(
+                    TelegramPickDelivery.id == queued_ids[0]
+                )
+            )
+            assert lifecycle.disposition == "queue_admitted"
+            assert lifecycle.pick_identity_key == original_identity
+            assert queue_row.provider == "PrizePicks"
+            assert queue_row.source_id == "pp-source"
+            assert queue_row.line_value == 19.5
+            assert queue_row.direction == "OVER"
+            assert queue_row.line_variant == "standard"
+
+        recorded = await db.record_telegram_play_delivery(
+            provider="PrizePicks",
+            delivery_path="prizepicks",
+            player_name=candidate["player_name"],
+            sport=candidate["sport"],
+            stat_type=candidate["stat_type"],
+            external_id=candidate["source_id"],
+            event_id=candidate["event_id"],
+            line_value=candidate["line_value"],
+            recipients_sent=1,
+            recipients_failed=0,
+            evidence_snapshot=evidence,
+            direction=candidate["direction"],
+            line_variant=candidate["line_variant"],
+        )
+        assert recorded is True
+        async with db.session() as session:
+            lifecycle = await session.get(CandidateLifecycleRecord, evaluation_id)
+            assert lifecycle.disposition == "delivered"
+            assert lifecycle.pick_identity_key == original_identity
+            assert lifecycle.delivered_at is not None
+            audit = await session.scalar(
+                select(TelegramDeliveryAudit).where(
+                    TelegramDeliveryAudit.provider == "PrizePicks",
+                    TelegramDeliveryAudit.external_id == "pp-source",
+                    TelegramDeliveryAudit.line_value == 19.5,
+                )
+            )
+            assert audit is not None
+            assert json.loads(audit.evidence_snapshot_json)["line_variant"] == "standard"
+    finally:
+        await _close_db(db)
 
 
 class _FakeBot:
