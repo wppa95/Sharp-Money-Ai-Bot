@@ -4980,6 +4980,13 @@ class Database:
                     row.evidence_snapshot_json = self._lifecycle_json(
                         change["evidence_snapshot_json"]
                     )
+                if "candidate_rank" in change:
+                    row.candidate_rank = change.get("candidate_rank")
+                if "ranking_scope" in change:
+                    row.ranking_scope = (
+                        str(change["ranking_scope"])
+                        if change.get("ranking_scope") is not None else None
+                    )
                 updated += 1
             await s.commit()
         return updated
@@ -5176,6 +5183,8 @@ class Database:
                             )
                         if lifecycle.disposition == "delivered":
                             lifecycle.delivered_at = lifecycle.delivered_at or row.sent_at or now
+                        lifecycle.candidate_rank = item.get("candidate_rank")
+                        lifecycle.ranking_scope = item.get("ranking_scope")
                         lifecycle.qualification_json = str(
                             item.get("qualification_json") or "{}"
                         )
