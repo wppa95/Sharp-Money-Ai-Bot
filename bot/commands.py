@@ -5974,8 +5974,18 @@ async def cmd_funnel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             summary = {
                 "since_hours": since_h,
                 "evaluated": int(scan_summary.get("analyzed", 0) or 0),
-                "directional_total": int(scan_summary.get("qualified", 0) or 0),
-                "actionable_total": int(scan_summary.get("qualified", 0) or 0),
+                "directional_total": int(
+                    scan_summary.get(
+                        "directional_decisions",
+                        scan_summary.get("qualified", 0),
+                    ) or 0
+                ),
+                "actionable_total": int(
+                    scan_summary.get(
+                        "directional_decisions",
+                        scan_summary.get("qualified", 0),
+                    ) or 0
+                ),
                 "delivered": int(scan_summary.get("alert_delivered", 0) or 0),
                 "pending": 0,
                 "resolved": 0,
@@ -6214,7 +6224,14 @@ async def cmd_funnel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                 f"   ├─ New:                         <b>{sc_new:,}</b>",
                 f"   ├─ Line moved:                  <b>{sc_lc:,}</b>",
                 f"   └─ Full-pool rotation:           <b>{fpr_rescored:,}</b>",
-                f"🎯 Qualified directional candidates: <b>{int(scan_summary.get('qualified', 0) or 0):,}</b>",
+                f"↕️ Directional decisions: "
+                f"<b>{int(scan_summary.get('directional_decisions', scan_summary.get('qualified', 0)) or 0):,}</b>",
+                f"   └─ Legacy directional decisions (qualification detail not stored): "
+                f"<b>{int(scan_summary.get('legacy_directional_decisions', 0) or 0):,}</b>",
+                f"✅ Fully qualified candidates (explicitly recorded): "
+                f"<b>{int(scan_summary.get('fully_qualified', 0) or 0):,}</b>",
+                f"📥 Durable queue admissions (explicitly recorded): "
+                f"<b>{int(scan_summary.get('queue_admitted', 0) or 0):,}</b>",
                 f"📤 Delivered to Telegram — current-session scan sends: "
                 f"<b>{sc_delivered:,}</b>",
             ]
