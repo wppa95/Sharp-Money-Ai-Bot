@@ -1080,26 +1080,7 @@ async def test_confirmed_send_is_audited_and_never_sent_twice(tmp_path, monkeypa
             fetched_at=now,
         )
         await _seed_underdog(db, candidate)
-        async with db.session() as session:
-            session.add(
-                PropOpportunityLog(
-                    external_id=candidate["source_id"],
-                    player_name=candidate["player_name"],
-                    team="",
-                    sport=candidate["sport"],
-                    stat_type=candidate["stat_type"],
-                    line_value=candidate["line_value"],
-                    recommendation=candidate["direction"],
-                    decision_tier="A",
-                    confidence=80,
-                    game_time=candidate["game_time"],
-                    game_id=candidate["event_id"],
-                    provider=candidate["provider"],
-                    detected_at=now,
-                    alert_sent=False,
-                )
-            )
-            await session.commit()
+        await _seed_opportunity(db, candidate)
         await db.enqueue_telegram_pick_deliveries([candidate])
         monkeypatch.setenv("ALLOWED_USER_IDS", "12345")
         bot = _FakeBot()

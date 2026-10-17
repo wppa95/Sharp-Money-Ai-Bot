@@ -11,6 +11,7 @@ from sqlalchemy import update
 
 from alerts import AlertDelivery
 from database import Database, PropOpportunityLog
+from tests.offering_fixtures import seed_current_offering
 
 
 @pytest.fixture()
@@ -43,6 +44,7 @@ def _directional_decision(
 
 
 async def _track_and_log(db: Database, *, external_id: str = "funnel-prop") -> None:
+    game_time = _future_game()
     await db.track_prop_records(
         [{
             "provider": "Underdog",
@@ -52,7 +54,7 @@ async def _track_and_log(db: Database, *, external_id: str = "funnel-prop") -> N
             "sport": "MLB",
             "stat_type": "Hits",
             "line_value": 0.5,
-            "game_time": _future_game(),
+            "game_time": game_time,
             "game_id": "funnel-game",
         }]
     )
@@ -66,10 +68,24 @@ async def _track_and_log(db: Database, *, external_id: str = "funnel-prop") -> N
         recommendation="OVER",
         decision_tier="S",
         confidence=90,
-        game_time=_future_game(),
+        game_time=game_time,
         game_id="funnel-game",
         provider="Underdog",
     )
+    seed_current_offering(
+        provider="Underdog",
+        source_id=external_id,
+        event_id="funnel-game",
+        player_name="Funnel Player",
+        sport="MLB",
+        team="TST",
+        stat_type="Hits",
+        line_value=0.5,
+        direction="OVER",
+        game_time=game_time,
+        replace_scope=False,
+    )
+    return game_time
 
 
 async def _confirm_pick_delivery(db, external_id: str = "funnel-prop") -> None:
@@ -144,7 +160,7 @@ async def test_delivery_state_requires_tracking_and_directional_opportunity(db):
 
 @pytest.mark.asyncio
 async def test_alert_delivery_blocks_already_delivered_funnel_row(db):
-    await _track_and_log(db)
+    game_time = await _track_and_log(db)
     await _confirm_pick_delivery(db)
 
     bot = MagicMock()
@@ -168,7 +184,7 @@ async def test_alert_delivery_blocks_already_delivered_funnel_row(db):
             stat_type="Hits",
             old_line=0.5,
             new_line=0.5,
-            game_time=_future_game(),
+            game_time=game_time,
             validation=validation,
             decision=_directional_decision("OVER"),
             strict_pregame=True,
