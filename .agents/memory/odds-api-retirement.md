@@ -1,33 +1,43 @@
 ---
-name: The Odds API retirement
-description: Durable rule for the retired sportsbook-odds provider.
+name: The Odds API supplemental boundary
+description: User-authorized Free-plan Odds API use is supplemental only and shares a conservative persisted quota.
 ---
 
-The Odds API is retired. Do not add or reintroduce Odds API clients, requests,
-schedulers, quota or pacing paths, confirmations, CLV fetches, or live-market
-ingestion unless the user explicitly asks for that provider again.
+The user explicitly reauthorized The Odds API as a supplemental provider for
+current team scores, event-market discovery, and bookmaker quote context for an
+already-qualified pick. PrizePicks and Underdog remain equal primary platforms;
+PropLine continues to feed PrizePicks and may supplement either platform.
 
 Existing persisted odds, evidence, and CLV rows remain readable for historical
-reports and compatibility. They are not permission to resume provider writes
-or network requests. Underdog and PropLine own live evaluation, observations,
-and provider-neutral settlement/evidence paths.
+reports and compatibility. Current Odds API prices, event metadata, or team
+scores must never create a pick, validate an offering, replace a source line,
+or supply player history/results/HIT-MISS-PUSH settlement. Historical endpoints
+remain prohibited.
 
-Keep the generic game-results and grading interfaces importable. The retired
-score adapter remains an import-compatible no-network no-op.
+Use only documented V4 endpoints: quota-free `/sports` and per-sport `/events`;
+paid event `/markets` (1 credit), event `/odds` (requested markets × regions
+reserved, actual unique returned market keys × regions charged), and `/scores`
+(1 credit without `daysFrom`, 2 with it). `/scores` supplies team/event status
+only. `/sports?all=true` is explicit, not the default.
+
+Every paid request across all endpoints and sports shares one persistent
+monthly UTC ledger: user-confirmed Free plan 500-credit hard limit, 450-credit
+operating target, roughly 50-credit reserve, and reset on the first day of the
+month at 00:00 UTC. Pace requests across the remaining time to reset, persist
+usage/cooldown/rotation over restarts, and fail closed when cost is unknown.
+Do not change PropLine's separate shared budget.
 
 **Verified capability boundary (2026-10-17):** Official V4 documentation says
 the scores endpoint returns event completion and team scores, not player stats.
-Historical odds endpoints return market quotes (including player labels, lines,
-and prices), not actual player-game results; historical endpoints are paid-plan
-only, and historical event-prop requests cost 10 quota credits per unique
-market/region. Account plan and quota reset/remaining values cannot be inferred
-from local config or stale local counters.
+Historical odds endpoints return market quotes, not actual player-game results,
+and are paid-plan only. The user confirmed the Free-plan monthly limit and UTC
+reset; no live provider request was made during the implementation.
 
-**Why:** Player-result grading and historical compatibility remain useful, but
-the retired provider must not perform network requests.
+**Why:** The user requested Odds API restoration only for safe supplemental
+context, while keeping platform ownership, original lines, and actual
+player-result grading independent of bookmaker data.
 
-**How to apply:** Future grading/provider work must preserve the generic
-scaffold without restoring an Odds API client or polling path. Even after an
-explicit restoration request, do not treat team scores or quoted prices as a
-player result; require verified account-plan and quota-period details before
-using paid historical endpoints.
+**How to apply:** Route every paid endpoint through the same persistent budget
+and paced all-sport scheduler. Keep market availability and current odds
+supplemental, exact-event matched, and separate from qualification, offering
+validation, and player settlement.
