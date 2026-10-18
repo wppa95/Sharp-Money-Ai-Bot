@@ -103,7 +103,8 @@ def test_sports_and_events_are_quota_free_and_all_is_explicit(tmp_path):
     all_transport = FakeTransport(OddsApiHttpResponse(200, {}, []))
     all_client = _client(tmp_path / "all", all_transport)
     asyncio.run(all_client.fetch_sports(all_sports=True))
-    assert all_transport.calls[0][1] == {"all": "true"}
+    assert all_transport.calls[0][1]["all"] == "true"
+    assert "apiKey" in all_transport.calls[0][1]
 
 
 def test_market_availability_is_one_credit_and_cached(tmp_path):
