@@ -31,6 +31,7 @@ from providers.odds_api_budget import (
 logger = logging.getLogger(__name__)
 UTC = timezone.utc
 ODDS_API_BASE_URL = "https://api.the-odds-api.com/v4"
+ODDS_API_AUTH_BACKOFF_SECONDS = 60 * 60
 
 # Snapshot of the provider's published Scores & Results coverage on
 # 2026-10-17. Runtime requests are still restricted to keys returned by the
@@ -478,6 +479,9 @@ class OddsApiClient:
                     or "OUT_OF_USAGE_CREDITS" in error_code
                     or "QUOTA" in error_code
                 )
+                auth_backoff = (
+                    None if quota_rejected else ODDS_API_AUTH_BACKOFF_SECONDS
+                )
                 if reservation_id:
                     self.budget.complete(
                         reservation_id,
@@ -488,6 +492,7 @@ class OddsApiClient:
                         ),
                         reported_used=reported_used,
                         reported_remaining=0 if quota_rejected else reported_remaining,
+                        retry_after_seconds=auth_backoff,
                     )
                 else:
                     self.budget.record_free_request(
@@ -499,6 +504,7 @@ class OddsApiClient:
                         ),
                         reported_used=reported_used,
                         reported_remaining=0 if quota_rejected else reported_remaining,
+                        retry_after_seconds=auth_backoff,
                     )
                 if quota_rejected:
                     self._record_failure("HTTP quota rejection", FailureType.QUOTA)
@@ -514,12 +520,14 @@ class OddsApiClient:
                         outcome="forbidden",
                         reported_used=reported_used,
                         reported_remaining=reported_remaining,
+                        retry_after_seconds=ODDS_API_AUTH_BACKOFF_SECONDS,
                     )
                 else:
                     self.budget.record_free_request(
                         endpoint=endpoint, params=params, outcome="forbidden",
                         reported_used=reported_used,
                         reported_remaining=reported_remaining,
+                        retry_after_seconds=ODDS_API_AUTH_BACKOFF_SECONDS,
                     )
                 self._record_failure("HTTP 403", FailureType.BLOCKED)
                 raise OddsApiError("provider denied the request")

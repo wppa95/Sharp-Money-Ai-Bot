@@ -208,6 +208,25 @@ def test_retry_after_is_global_and_transport_is_not_retried(tmp_path):
     assert len(transport.calls) == 1
 
 
+def test_auth_failure_applies_persisted_global_backoff_without_retry(tmp_path):
+    transport = FakeTransport(
+        OddsApiHttpResponse(
+            401,
+            {},
+            {"error_code": "INVALID_API_KEY", "message": "redacted"},
+        )
+    )
+    client = _client(tmp_path, transport)
+    with pytest.raises(OddsApiError, match="provider rejected"):
+        asyncio.run(client.fetch_event_markets("basketball_nba", "event-1"))
+    diagnostics = client.budget.diagnostics()
+    assert diagnostics["cooldown_until"]
+    assert diagnostics["credits_used"] == 1
+    with pytest.raises(OddsApiDeferred, match="cooldown"):
+        asyncio.run(client.fetch_sports())
+    assert len(transport.calls) == 1
+
+
 def test_unknown_paid_response_charges_reserved_cost_and_redacts_errors(tmp_path):
     transport = FakeTransport(OddsApiHttpResponse(200, {}, None))
     client = _client(tmp_path, transport)
