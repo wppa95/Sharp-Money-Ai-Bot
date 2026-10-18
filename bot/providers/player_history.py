@@ -1404,6 +1404,7 @@ class PlayerHistoryProvider:
         from providers.player_stats import RawGameResult
         from providers.propline import (
             PropLineClient,
+            _normalize_sport,
             _parse_datetime,
             propline_raw_player_game_value,
             _team_names_match,
@@ -1441,6 +1442,37 @@ class PlayerHistoryProvider:
         for game in payload["games"]:
             if not isinstance(game, dict):
                 continue
+            declared_sport = (
+                game.get("canonical_sport")
+                or game.get("sport")
+                or game.get("sport_key")
+                or game.get("league")
+            )
+            if declared_sport not in (None, ""):
+                if (
+                    str(declared_sport).strip().casefold()
+                    not in {sport_u.casefold(), str(official_sport).casefold()}
+                    and _normalize_sport(declared_sport)
+                    != _normalize_sport(sport_u)
+                ):
+                    continue
+            declared_player = (
+                game.get("player_name")
+                or game.get("athlete_name")
+                or game.get("player")
+            )
+            if isinstance(declared_player, dict):
+                declared_player = (
+                    declared_player.get("name")
+                    or declared_player.get("full_name")
+                    or declared_player.get("display_name")
+                )
+            if declared_player not in (None, ""):
+                normalize_player = lambda value: " ".join(
+                    str(value).casefold().split()
+                )
+                if normalize_player(declared_player) != normalize_player(player_name):
+                    continue
             status = str(game.get("status") or "").strip().lower()
             if status not in {"final", "completed", "complete", "settled"}:
                 continue

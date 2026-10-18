@@ -466,7 +466,7 @@ def test_sport_scoped_fetch_preserves_requested_alias_for_confirmation_matching(
     )
 
     assert len(props) == 1
-    assert props[0].sport == "NCAAF"
+    assert props[0].sport == "CFB"
     assert props[0].player_name == "College Player"
     assert len(session.calls) == 1
     assert "football_ncaaf" in session.calls[0][0]
