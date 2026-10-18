@@ -27,6 +27,18 @@ month at 00:00 UTC. Pace requests across the remaining time to reset, persist
 usage/cooldown/rotation over restarts, and fail closed when cost is unknown.
 Do not change PropLine's separate shared budget.
 
+Quota-free event discovery keeps a separate persisted last-sport position from
+the paid market/score rotation. Advance the discovery position before fetching
+events, so an error or cooldown moves on and the failed sport is retried after
+the remaining active sports get a turn.
+
+**Why:** Sharing the paid cursor would couple independent rotations, while
+advancing only after a successful fetch can let one failing sport monopolize
+every discovery tick.
+
+**How to apply:** Preserve separate rotation state for free event discovery and
+paid credit-consuming work; keep discovery requests cached and quota-free.
+
 **Verified capability boundary (2026-10-17):** Official V4 documentation says
 the scores endpoint returns event completion and team scores, not player stats.
 Historical odds endpoints return market quotes, not actual player-game results,
