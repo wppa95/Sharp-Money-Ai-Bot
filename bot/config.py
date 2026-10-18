@@ -51,6 +51,9 @@ class Config:
     # PrizePicks uses a public API — no key required. Field reserved for future
     # authenticated endpoints.
     PRIZEPICKS_API_KEY: str = os.environ.get("PRIZEPICKS_API_KEY", "")
+    # Optional supplemental market context/team-score provider. Never used for
+    # player results, pick qualification, or source-offering validation.
+    ODDS_API_KEY: str = os.environ.get("ODDS_API_KEY", "")
     # PandaScore API key for CS2 player stats.  Free tier available at
     # pandascore.co — set PANDASCORE_API_KEY env var to activate CS2 alerts.
     # CS2 props gracefully return [] without this key (decision engine PASS).
@@ -80,9 +83,8 @@ class Config:
         }
 
     # ── PropLine evidence feed ────────────────────────────────────────────────
-    # PropLine supplies source-specific player-prop observations for all
-    # configured pick'em/sportsbook feeds. Underdog's native connector remains
-    # the primary live source; PropLine's Underdog rows are supplemental.
+    # Underdog and PrizePicks are equal primary pick'em feeds. PropLine supplies
+    # PrizePicks observations and shared supplemental evidence for either feed.
     # The official provider catalog controls scope when available; an empty
     # value must not silently narrow the feed to a guessed subset.
     PRIZEPICKS_LEAGUES_RAW: str = os.environ.get("PRIZEPICKS_LEAGUES", "")

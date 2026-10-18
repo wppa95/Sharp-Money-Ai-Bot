@@ -55,7 +55,7 @@ bot/
 ### 1. Player-prop ingestion (`connectors/underdog.py`, `providers/propline.py`, `main.py`)
 - Underdog supplies the live player-prop projections used by the monitoring cycle.
 - PropLine supplies PrizePicks observations and settled player-result evidence.
-- The shared pipeline evaluates and tracks directional opportunities without The Odds API.
+- The Odds API is optional supplemental event/market/team-score context only. It never creates picks, validates PrizePicks/Underdog offerings, or supplies player stats or settlements.
 
 ### 2. Fair probability engine (`engine/fair_probability.py`, `engine/analysis.py → VigRemover`)
 - Four devig methods: **multiplicative** (default), additive, power-iteration, odds-ratio

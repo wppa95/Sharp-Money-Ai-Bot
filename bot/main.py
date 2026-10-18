@@ -110,7 +110,11 @@ from engine.health import init_health_tracker, get_health_tracker
 
 _stdout_handler = logging.StreamHandler(sys.stdout)
 _log_redaction_filter = install_credential_redaction(
-    secrets=(config.TELEGRAM_BOT_TOKEN,)
+    secrets=tuple(
+        secret
+        for secret in (config.TELEGRAM_BOT_TOKEN, config.ODDS_API_KEY)
+        if secret
+    )
 )
 _stdout_handler.addFilter(_log_redaction_filter)
 logging.basicConfig(
@@ -121,7 +125,7 @@ logging.basicConfig(
 )
 # Some environments install a dedicated handler on HTTP client loggers before
 # application startup, so protect those records at the logger boundary too.
-for _logger_name in ("httpx", "httpcore", "telegram.request"):
+for _logger_name in ("httpx", "httpcore", "telegram.request", "aiohttp.client"):
     _http_logger = logging.getLogger(_logger_name)
     _http_logger.addFilter(_log_redaction_filter)
     # HTTPX INFO request lines contain the Telegram bot credential in the URL.
@@ -682,6 +686,36 @@ async def _start_health_server() -> None:
 
 # ── PTB lifecycle hooks ────────────────────────────────────────────────────────
 
+async def _odds_api_discovery_job(context) -> None:
+    scheduler = context.application.bot_data.get("odds_api_scheduler")
+    if scheduler is None:
+        return
+    try:
+        result = await scheduler.discovery_tick()
+        if result.get("status") not in {"ok", "disabled", "no_active_sports"}:
+            logger.info("Odds API discovery deferred: %s", result.get("status"))
+    except Exception as exc:  # noqa: BLE001
+        # Provider errors are already classified by the client. Log only the
+        # exception type; aiohttp errors may contain credential-bearing URLs.
+        logger.warning("Odds API discovery failed (%s)", type(exc).__name__)
+
+
+async def _odds_api_paid_rotation_job(context) -> None:
+    scheduler = context.application.bot_data.get("odds_api_scheduler")
+    if scheduler is None:
+        return
+    try:
+        result = await scheduler.paid_rotation_tick()
+        if result.get("status") in {"failed", "deferred"}:
+            logger.info(
+                "Odds API paced rotation %s: %s",
+                result.get("status"),
+                result.get("reason", ""),
+            )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Odds API paced rotation failed (%s)", type(exc).__name__)
+
+
 async def post_init(application: Application) -> None:
     """Runs once after the bot is initialised but before polling starts."""
     global _db, _history_db, _engine
@@ -729,12 +763,31 @@ async def post_init(application: Application) -> None:
     _health_monitor = init_health_monitor()
     from market_engine import initialize_propline_provider
     _propline_enabled = initialize_propline_provider().is_available()
+    from providers.odds_api import OddsApiClient, OddsApiScheduler
+
+    _odds_api_client = OddsApiClient(
+        api_key=config.ODDS_API_KEY,
+        health_monitor=_health_monitor,
+    )
+    _odds_api_scheduler = OddsApiScheduler(_odds_api_client)
     _health_monitor.register("Underdog", disabled=not config.UNDERDOG_ENABLED)
     _health_monitor.register("PrizePicks", disabled=not _propline_enabled)
+    _health_monitor.register("OddsAPI", disabled=not _odds_api_client.is_configured)
+    if _odds_api_client.is_configured:
+        # Persist a future first paid slot. Discovery is quota-free; paid work
+        # never runs immediately on startup and every endpoint shares this slot.
+        _first_odds_api_slot = _odds_api_client.budget.initialize_schedule()
+        logger.info(
+            "Supplemental Odds API configured; first paid slot is paced for %s",
+            _first_odds_api_slot.isoformat(),
+        )
+    else:
+        logger.info("Supplemental Odds API disabled (credential not configured)")
     logger.info(
         "Provider health monitor initialised "
-        "(Underdog + PrizePicks via PropLine=%s; all configured sports enabled)",
+        "(equal Underdog/PrizePicks feeds via PropLine=%s; optional Odds API context=%s)",
         "enabled" if _propline_enabled else "disabled",
+        "enabled" if _odds_api_client.is_configured else "disabled",
     )
     if config.discord_configured:
         logger.info(
@@ -783,6 +836,12 @@ async def post_init(application: Application) -> None:
     # Store db reference in bot_data for market engine jobs
     application.bot_data["db"] = _db
     application.bot_data["history_db"] = _history_db
+    application.bot_data["odds_api_client"] = _odds_api_client
+    application.bot_data["odds_api_scheduler"] = _odds_api_scheduler
+    from providers.game_results import OddsApiResultsProvider
+    application.bot_data["odds_api_results_provider"] = OddsApiResultsProvider(
+        client=_odds_api_client
+    )
     from providers.player_history import get_player_history_provider
     application.bot_data["player_history_provider"] = (
         get_player_history_provider()
@@ -792,6 +851,36 @@ async def post_init(application: Application) -> None:
     # Register background jobs
     jq = application.job_queue
     if jq:
+        # Free sports/event discovery is intentionally delayed after startup;
+        # it reads the provider's active catalog and rotates across returned
+        # keys. No live call is made from post_init itself.
+        jq.run_repeating(
+            _coordinated_job(
+                "odds_api_discovery",
+                _odds_api_discovery_job,
+                use_exclusive_group=False,
+                single_flight=True,
+            ),
+            interval=300,
+            first=120,
+            name="odds_api_discovery",
+            job_kwargs={"coalesce": True, "misfire_grace_time": 30},
+        )
+        # The monthly credit target is spread over the remaining UTC month.
+        # This minute-level wakeup only checks the persisted due time; it does
+        # not issue a provider request until that shared slot is due.
+        jq.run_repeating(
+            _coordinated_job(
+                "odds_api_paid_rotation",
+                _odds_api_paid_rotation_job,
+                use_exclusive_group=False,
+                single_flight=True,
+            ),
+            interval=60,
+            first=300,
+            name="odds_api_paid_rotation",
+            job_kwargs={"coalesce": True, "misfire_grace_time": 30},
+        )
         # Already-qualified individual picks are persisted before network I/O.
         # One worker sends at a time, with the durable sender pace and a
         # persisted provider/sport round-robin cursor.
