@@ -2518,6 +2518,12 @@ class AlertDelivery:
                     ),
                 },
             }
+            _source_event_teams: list[list[str]] = []
+            for _pair in getattr(_offering, "event_teams", ()) or ():
+                if isinstance(_pair, (tuple, list)) and len(_pair) == 2:
+                    _home, _away = (str(_pair[0] or "").strip(), str(_pair[1] or "").strip())
+                    if _home and _away:
+                        _source_event_teams.append([_home, _away])
             evidence_snapshot = {
                 **evidence_snapshot,
                 "direction": _direction,
@@ -2525,6 +2531,10 @@ class AlertDelivery:
                 "line_variant": normalized_line_variant,
                 "source_event_id": event_id_value,
                 "source_id": source_id_value,
+                **(
+                    {"source_event_teams": _source_event_teams}
+                    if _source_event_teams else {}
+                ),
                 **_reminder_snapshot(
                     game_time,
                     _direction,

@@ -209,6 +209,8 @@ class OddsApiScore:
 
 
 def _parse_datetime(value: Any) -> datetime | None:
+    if isinstance(value, datetime):
+        return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
     if not isinstance(value, str) or not value.strip():
         return None
     try:
@@ -672,6 +674,18 @@ class OddsApiClient:
                         )
         return markets
 
+    def event_markets_cached(
+        self, sport_key: str, event_id: str, *, region: str = "us"
+    ) -> bool:
+        sport = quote(str(sport_key).strip(), safe="_-")
+        event = quote(str(event_id).strip(), safe="_-")
+        params = {"regions": region}
+        return self.budget.cache_get(
+            self._cache_key(
+                f"/sports/{sport}/events/{event}/markets", params
+            )
+        ) is not None
+
     async def fetch_event_odds(
         self,
         sport_key: str,
@@ -884,6 +898,122 @@ class OddsApiScheduler:
     def __init__(self, client: OddsApiClient) -> None:
         self.client = client
         self._last_discovery_sport = ""
+        self._pending_pick_contexts: dict[str, dict[str, Any]] = {}
+        self._market_event_cursors: dict[str, int] = {}
+
+    @staticmethod
+    def _market_key_for_pick(sport: str, stat: str) -> str:
+        """Only map common, documented player markets; unknown labels are skipped."""
+        stat_key = re.sub(r"[^a-z0-9]+", "_", str(stat).casefold()).strip("_")
+        sport_key = re.sub(r"[^a-z0-9]+", "_", str(sport).casefold()).strip("_")
+        aliases = {
+            "points": "player_points",
+            "rebounds": "player_rebounds",
+            "assists": "player_assists",
+            "3_pointers_made": "player_threes",
+            "three_pointers_made": "player_threes",
+            "threes": "player_threes",
+            "steals": "player_steals",
+            "blocks": "player_blocks",
+            "turnovers": "player_turnovers",
+            "points_rebounds_assists": "player_points_rebounds_assists",
+            "pts_rebs_asts": "player_points_rebounds_assists",
+            "hits": "batter_hits",
+            "total_bases": "batter_total_bases",
+            "home_runs": "batter_home_runs",
+            "rbis": "batter_rbis",
+            "runs": "batter_runs",
+            "pitcher_strikeouts": "pitcher_strikeouts",
+            "strikeouts": "pitcher_strikeouts",
+            "passing_yards": "player_pass_yds",
+            "passing_tds": "player_pass_tds",
+            "passing_touchdowns": "player_pass_tds",
+            "rushing_yards": "player_rush_yds",
+            "receiving_yards": "player_reception_yds",
+            "receptions": "player_receptions",
+            "shots_on_goal": "player_shots_on_goal",
+            "goals": "player_goals",
+        }
+        if sport_key in {"mlb", "baseball"}:
+            return aliases.get(stat_key, "")
+        if sport_key in {"nfl", "cfb", "american_football"}:
+            return aliases.get(stat_key, "")
+        if sport_key in {"nhl", "ice_hockey"}:
+            return aliases.get(stat_key, "")
+        if sport_key in {"nba", "wnba", "ncaab", "basketball"}:
+            return aliases.get(stat_key, "")
+        return aliases.get(stat_key, "")
+
+    def queue_qualified_pick_context(self, queue_item: dict[str, Any]) -> bool:
+        """Queue optional quotes only after durable admission of a qualified pick."""
+        if not self.client.is_configured or not isinstance(queue_item, dict):
+            return False
+        try:
+            qualification = json.loads(queue_item.get("qualification_json") or "{}")
+            evidence = json.loads(queue_item.get("evidence_snapshot_json") or "{}")
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return False
+        provider = str(queue_item.get("provider") or "").casefold()
+        if qualification.get("qualified") is not True:
+            return False
+        if provider not in {"underdog", "prizepicks"}:
+            return False
+        required = (
+            "pick_key", "source_id", "event_id", "player_name", "sport",
+            "stat_type", "line_value", "direction",
+        )
+        if any(queue_item.get(key) in (None, "") for key in required):
+            return False
+        if str(queue_item.get("direction") or "").upper() not in {"OVER", "UNDER"}:
+            return False
+        if provider == "prizepicks" and not str(queue_item.get("line_variant") or "").strip():
+            return False
+        event_teams = evidence.get("source_event_teams")
+        if not isinstance(event_teams, list) or len(event_teams) != 1:
+            return False
+        pair = event_teams[0]
+        if not isinstance(pair, list) or len(pair) != 2 or not all(pair):
+            return False
+        market_key = self._market_key_for_pick(
+            str(queue_item["sport"]), str(queue_item["stat_type"])
+        )
+        if not market_key:
+            return False
+        pick = {
+            "qualified": True,
+            "provider": queue_item["provider"],
+            "source_id": queue_item["source_id"],
+            "event_id": queue_item["event_id"],
+            "player_name": queue_item["player_name"],
+            "sport": queue_item["sport"],
+            "stat_type": queue_item["stat_type"],
+            "line_value": queue_item["line_value"],
+            "line_variant": queue_item.get("line_variant", ""),
+            "direction": str(queue_item["direction"]).upper(),
+        }
+        source_event = {
+            "sport": str(queue_item["sport"]),
+            "home_team": str(pair[0]),
+            "away_team": str(pair[1]),
+            "commence_time": queue_item.get("game_time"),
+        }
+        self._pending_pick_contexts[str(queue_item["pick_key"])] = {
+            "pick": pick,
+            "source_event": source_event,
+            "market_key": market_key,
+        }
+        return True
+
+    def _resolve_api_sport(
+        self, source_sport: str, sports: list[OddsApiSport]
+    ) -> OddsApiSport | None:
+        key = str(source_sport or "").strip().casefold()
+        matches = [
+            sport for sport in sports
+            if sport.active
+            and (sport.key.casefold() == key or sport.title.strip().casefold() == key)
+        ]
+        return matches[0] if len(matches) == 1 else None
 
     async def discovery_tick(self) -> dict[str, Any]:
         if not self.client.is_configured:
@@ -918,16 +1048,99 @@ class OddsApiScheduler:
             }
 
         sports = await self.client.fetch_sports()
-        score_sports = [
-            sport.key
-            for sport in sports
+        active_sports = [
+            sport for sport in sports
             if sport.active and not sport.has_outrights
-            and sport.key in SCORE_SUPPORTED_SPORT_KEYS
         ]
-        if not score_sports:
-            return {"status": "no_documented_score_sports"}
-        index = self.client.budget.advance_rotation_cursor(len(score_sports), now)
-        sport_key = score_sports[index]
+        if not active_sports:
+            return {"status": "no_active_sports"}
+        index = self.client.budget.advance_rotation_cursor(len(active_sports), now)
+        sport = active_sports[index]
+        sport_key = sport.key
+
+        # A qualified pick's current quote is considered only after strict
+        # primary-source identity and event-team matching. Context requests are
+        # per-source pick; shared quotes are served from cache when identical.
+        context_item = next(
+            (
+                (pick_key, item)
+                for pick_key, item in self._pending_pick_contexts.items()
+                if self._resolve_api_sport(
+                    str(item["source_event"]["sport"]), sports
+                ) == sport
+            ),
+            None,
+        )
+        if context_item is not None:
+            pick_key, item = context_item
+            source_event = dict(item["source_event"])
+            source_event["sport_key"] = sport_key
+            start = _parse_datetime(source_event.get("commence_time"))
+            if start is None or start <= now:
+                self._pending_pick_contexts.pop(pick_key, None)
+                return {"status": "pick_context_expired", "sport_key": sport_key}
+            try:
+                context = await self.client.market_context_for_qualified_pick(
+                    item["pick"], source_event, market_key=item["market_key"]
+                )
+            except OddsApiDeferred as exc:
+                return {"status": "deferred", "reason": str(exc)}
+            except OddsApiError as exc:
+                self._pending_pick_contexts.pop(pick_key, None)
+                return {"status": "failed", "sport_key": sport_key, "reason": str(exc)}
+            self._pending_pick_contexts.pop(pick_key, None)
+            return {
+                "status": "pick_context" if context else "pick_context_unmatched",
+                "sport_key": sport_key,
+                "quotes": len(context.get("quotes", [])) if context else 0,
+                "identity_preserved": bool(context),
+                "is_player_result": False,
+            }
+
+        # Discover event-specific market availability periodically for planning.
+        # Only returned API market keys are cached; they never validate a
+        # PrizePicks/Underdog offering. One in four fair sport turns is reserved
+        # for this one-credit discovery, and unsupported sports are still
+        # represented by their own fair rotation slot.
+        discover_markets = index % 4 == 0 or sport_key not in SCORE_SUPPORTED_SPORT_KEYS
+        if discover_markets:
+            try:
+                events = await self.client.fetch_events(sport_key)
+                upcoming = [
+                    event for event in events
+                    if event.commence_time is not None and event.commence_time > now
+                ]
+                if upcoming:
+                    cursor = self._market_event_cursors.get(sport_key, 0) % len(upcoming)
+                    self._market_event_cursors[sport_key] = cursor + 1
+                    event = upcoming[cursor]
+                    if not self.client.event_markets_cached(sport_key, event.id):
+                        markets = await self.client.fetch_event_markets(
+                            sport_key, event.id
+                        )
+                        return {
+                            "status": "market_discovery",
+                            "sport_key": sport_key,
+                            "event": event.id,
+                            "markets": len(markets),
+                            "credits": 1,
+                        }
+            except OddsApiDeferred as exc:
+                return {"status": "deferred", "reason": str(exc)}
+            except OddsApiError as exc:
+                # Try a supported score turn below; no immediate retry.
+                market_error = str(exc)
+            else:
+                market_error = ""
+        else:
+            market_error = ""
+
+        if sport_key not in SCORE_SUPPORTED_SPORT_KEYS:
+            return {
+                "status": "market_unavailable",
+                "sport_key": sport_key,
+                "reason": market_error or "no current event with market discovery data",
+            }
         try:
             scores = await self.client.fetch_scores(sport_key, days_from=1)
         except OddsApiDeferred as exc:
