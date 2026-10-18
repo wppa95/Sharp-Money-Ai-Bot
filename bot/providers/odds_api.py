@@ -821,6 +821,14 @@ class OddsApiClient:
         quotes = await self.fetch_event_odds(
             matched.sport_key, matched.id, (market_key,)
         )
+        player_identity = _quote_identity(pick.get("player_name"))
+        quotes = [
+            item for item in quotes
+            if item.market_key == market_key
+            and _quote_identity(item.player) == player_identity
+        ]
+        if not quotes:
+            return None
         return {
             "source_pick": {
                 key: pick[key]
@@ -900,6 +908,7 @@ class OddsApiScheduler:
         self._last_discovery_sport = ""
         self._pending_pick_contexts: dict[str, dict[str, Any]] = {}
         self._market_event_cursors: dict[str, int] = {}
+        self._last_pick_contexts: dict[str, dict[str, Any]] = {}
 
     @staticmethod
     def _market_key_for_pick(sport: str, stat: str) -> str:
@@ -1080,6 +1089,41 @@ class OddsApiScheduler:
                 self._pending_pick_contexts.pop(pick_key, None)
                 return {"status": "pick_context_expired", "sport_key": sport_key}
             try:
+                events = await self.client.fetch_events(sport_key)
+                matched = match_event_exactly(source_event, events)
+                if matched is None:
+                    self._pending_pick_contexts.pop(pick_key, None)
+                    return {"status": "pick_context_unmatched", "sport_key": sport_key}
+                if not item.get("markets_confirmed"):
+                    available = await self.client.fetch_event_markets(
+                        sport_key, matched.id
+                    )
+                    if not any(
+                        market.key == item["market_key"] for market in available
+                    ):
+                        self._pending_pick_contexts.pop(pick_key, None)
+                        return {
+                            "status": "pick_market_unavailable",
+                            "sport_key": sport_key,
+                        }
+                    item["markets_confirmed"] = True
+                    item["matched_event_id"] = matched.id
+                    return {
+                        "status": "pick_market_confirmed",
+                        "sport_key": sport_key,
+                        "event": matched.id,
+                        "quotes": 0,
+                    }
+                if item.get("matched_event_id") != matched.id:
+                    # Event rediscovery must not silently retarget an old pick.
+                    self._pending_pick_contexts.pop(pick_key, None)
+                    return {"status": "pick_event_changed", "sport_key": sport_key}
+            except OddsApiDeferred as exc:
+                return {"status": "deferred", "reason": str(exc)}
+            except OddsApiError as exc:
+                self._pending_pick_contexts.pop(pick_key, None)
+                return {"status": "failed", "sport_key": sport_key, "reason": str(exc)}
+            try:
                 context = await self.client.market_context_for_qualified_pick(
                     item["pick"], source_event, market_key=item["market_key"]
                 )
@@ -1089,6 +1133,8 @@ class OddsApiScheduler:
                 self._pending_pick_contexts.pop(pick_key, None)
                 return {"status": "failed", "sport_key": sport_key, "reason": str(exc)}
             self._pending_pick_contexts.pop(pick_key, None)
+            if context:
+                self._last_pick_contexts[pick_key] = context
             return {
                 "status": "pick_context" if context else "pick_context_unmatched",
                 "sport_key": sport_key,

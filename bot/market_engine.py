@@ -974,6 +974,7 @@ def _active_job_names() -> set[str]:
 
 # Module-level registry — set by init_market_engine()
 _registry: Optional[ConnectorRegistry] = None
+_odds_api_context_scheduler: Optional[object] = None
 
 # ── PropLine confirmation state ────────────────────────────────────────────────
 # Confirmation reads only already-persisted PropLine observations.
@@ -3657,6 +3658,29 @@ def init_market_engine(registry: ConnectorRegistry) -> None:
     global _registry
     _registry = registry
     logger.info("Market engine initialized with %d connectors", len(registry.connectors))
+
+
+def init_odds_api_context_scheduler(scheduler: object | None) -> None:
+    """Attach optional quote context to the existing durable qualified-pick path."""
+    global _odds_api_context_scheduler
+    _odds_api_context_scheduler = scheduler
+
+
+def _queue_qualified_odds_context(items: list[dict]) -> None:
+    scheduler = _odds_api_context_scheduler
+    enqueue = getattr(scheduler, "queue_qualified_pick_context", None)
+    if not callable(enqueue):
+        return
+    queued = 0
+    for item in items:
+        try:
+            queued += bool(enqueue(item))
+        except Exception as exc:  # noqa: BLE001
+            logger.debug(
+                "Optional Odds API context skipped (%s)", type(exc).__name__
+            )
+    if queued:
+        logger.info("Queued optional Odds API context for %d qualified picks", queued)
 
 
 # ── Internal helpers ──────────────────────────────────────────────────────────
