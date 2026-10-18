@@ -512,7 +512,9 @@ def test_discovery_rotation_advances_after_failure_and_retries_later(
 
     class DiscoveryClient:
         is_configured = True
-        budget = budget
+
+        def __init__(self):
+            self.budget = budget
 
         async def fetch_sports(self):
             return [
@@ -546,7 +548,9 @@ def test_discovery_rotation_advances_after_successful_empty_result(tmp_path):
 
     class DiscoveryClient:
         is_configured = True
-        budget = budget
+
+        def __init__(self):
+            self.budget = budget
 
         async def fetch_sports(self):
             return [
@@ -573,7 +577,9 @@ def test_discovery_rotation_position_survives_scheduler_restart(tmp_path):
 
     class FirstClient:
         is_configured = True
-        budget = first_budget
+
+        def __init__(self):
+            self.budget = first_budget
 
         async def fetch_sports(self):
             return [
@@ -593,7 +599,9 @@ def test_discovery_rotation_position_survives_scheduler_restart(tmp_path):
 
     class RestartedClient:
         is_configured = True
-        budget = restarted_budget
+
+        def __init__(self):
+            self.budget = restarted_budget
 
         async def fetch_sports(self):
             return [
