@@ -2,7 +2,12 @@
 Shared pytest fixtures for the Sharp Money Bot test suite.
 """
 
+import os
+
 import pytest
+
+# Exercise the same forward-compatible RetryAfter type used by bot startup.
+os.environ["PTB_TIMEDELTA"] = "1"
 
 
 @pytest.fixture(autouse=True)

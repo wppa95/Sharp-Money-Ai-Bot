@@ -1,9 +1,17 @@
+from datetime import timedelta
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from telegram.error import RetryAfter
 
 import alerts
+
+
+def test_retry_after_timedelta_is_normalized_to_seconds():
+    error = RetryAfter(timedelta(seconds=45))
+
+    assert isinstance(error.retry_after, timedelta)
+    assert alerts._telegram_retry_after_seconds(error) == 45
 
 
 @pytest.mark.asyncio

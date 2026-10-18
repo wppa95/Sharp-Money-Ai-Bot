@@ -24,6 +24,9 @@ from collections import defaultdict
 from datetime import datetime, timedelta
 from typing import Any, Optional
 
+# Use python-telegram-bot's forward-compatible RetryAfter timedelta value.
+os.environ.setdefault("PTB_TIMEDELTA", "1")
+
 from telegram import BotCommand, Update
 from telegram.ext import Application, CommandHandler
 
