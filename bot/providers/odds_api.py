@@ -844,15 +844,49 @@ class OddsApiClient:
 
     def diagnostics(self) -> dict[str, Any]:
         data = self.budget.diagnostics()
+        active_sports = [
+            sport.key for sport in self._last_sports
+            if sport.active and not sport.has_outrights
+        ]
+        cursor = int(data.get("rotation_cursor", 0) or 0)
+        score_sports = [
+            key for key in active_sports if key in SCORE_SUPPORTED_SPORT_KEYS
+        ]
+        remaining = int(data.get("credits_remaining_to_target", 0) or 0)
+        reset_at = _parse_datetime(data.get("next_reset_utc"))
+        seconds_left = (
+            max(0.0, (reset_at - datetime.now(UTC)).total_seconds())
+            if reset_at else 0.0
+        )
+        estimated_score_rotation_days = (
+            round(len(score_sports) * 2 * seconds_left / remaining / 86400, 1)
+            if remaining > 0 and score_sports else None
+        )
+        next_sports = (
+            [
+                active_sports[(cursor + offset) % len(active_sports)]
+                for offset in range(min(3, len(active_sports)))
+            ]
+            if active_sports else []
+        )
         data.update(
             {
                 "configured": self.is_configured,
                 "cache_hits": self._cache_hits,
                 "cache_misses": self._cache_misses,
                 "discovered_sports": len(self._last_sports),
-                "score_supported_sports": len(
-                    set(s.key for s in self._last_sports) & SCORE_SUPPORTED_SPORT_KEYS
+                "active_sport_count": len(active_sports),
+                "score_supported_sports": len(score_sports),
+                "no_documented_score_endpoint": sorted(
+                    key for key in active_sports
+                    if key not in SCORE_SUPPORTED_SPORT_KEYS
                 ),
+                "next_paid_sports": next_sports,
+                "estimated_score_rotation_days": estimated_score_rotation_days,
+                "pending_pick_contexts": len(self._pending_pick_contexts)
+                if hasattr(self, "_pending_pick_contexts") else 0,
+                "retained_pick_contexts": len(self._last_pick_contexts)
+                if hasattr(self, "_last_pick_contexts") else 0,
                 "discovered_events": sum(
                     len(events) for events in self._last_events_by_sport.values()
                 ),
