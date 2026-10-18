@@ -331,3 +331,153 @@ def test_pending_context_requires_exact_qualified_source_and_prizepicks_variant(
             "source_event_teams": [["Home", "Away"]],
         }),
     })
+
+
+def test_paid_scheduler_rotates_all_live_sports_and_exposes_scoreless_sport():
+    class RotationBudget:
+        def __init__(self):
+            self.cursor = 0
+
+        def diagnostics(self):
+            return {
+                "next_paid_request_at": (
+                    datetime.now(UTC) - timedelta(seconds=1)
+                ).isoformat(),
+                "cooldown_until": None,
+            }
+
+        def advance_rotation_cursor(self, count):
+            selected = self.cursor % count
+            self.cursor = (self.cursor + 1) % count
+            return selected
+
+    class RotationClient:
+        is_configured = True
+
+        def __init__(self):
+            self.budget = RotationBudget()
+            self.score_calls = []
+            self.market_calls = []
+
+        async def fetch_sports(self):
+            return [
+                OddsApiSport("basketball_nba", "NBA"),
+                OddsApiSport("americanfootball_nfl", "NFL"),
+                OddsApiSport("mma_mixed_martial_arts", "MMA"),
+            ]
+
+        async def fetch_events(self, sport_key):
+            self.market_calls.append(("events", sport_key))
+            return []
+
+        async def fetch_scores(self, sport_key, days_from=None):
+            self.score_calls.append((sport_key, days_from))
+            return []
+
+        def diagnostics(self):
+            return {}
+
+    client = RotationClient()
+    scheduler = OddsApiScheduler(client)
+    results = [
+        asyncio.run(scheduler.paid_rotation_tick())
+        for _ in range(3)
+    ]
+    assert client.score_calls == [
+        ("basketball_nba", 1),
+        ("americanfootball_nfl", 1),
+    ]
+    assert results[2]["status"] == "market_unavailable"
+    assert results[2]["sport_key"] == "mma_mixed_martial_arts"
+
+
+def test_qualified_context_waits_for_exact_market_availability_then_fetches_quotes():
+    future = datetime.now(UTC) + timedelta(hours=3)
+
+    class RotationBudget:
+        def diagnostics(self):
+            return {
+                "next_paid_request_at": (
+                    datetime.now(UTC) - timedelta(seconds=1)
+                ).isoformat(),
+                "cooldown_until": None,
+            }
+
+        def advance_rotation_cursor(self, _count):
+            return 0
+
+    class ContextClient:
+        is_configured = True
+        budget = RotationBudget()
+
+        def __init__(self):
+            self.market_calls = 0
+            self.quote_calls = 0
+
+        async def fetch_sports(self):
+            return [OddsApiSport("basketball_nba", "NBA")]
+
+        async def fetch_events(self, _sport_key):
+            return [
+                OddsApiEvent(
+                    "odds-event",
+                    "basketball_nba",
+                    future,
+                    "Home",
+                    "Away",
+                )
+            ]
+
+        async def fetch_event_markets(self, _sport, _event):
+            self.market_calls += 1
+            return [OddsApiMarket("player_points")]
+
+        async def fetch_scores(self, *_args, **_kwargs):
+            raise AssertionError("qualified quote work should be selected first")
+
+        async def market_context_for_qualified_pick(self, pick, _event, *, market_key):
+            self.quote_calls += 1
+            return {
+                "source_pick": pick,
+                "quotes": [{"market_key": market_key}],
+                "is_player_result": False,
+            }
+
+    client = ContextClient()
+    scheduler = OddsApiScheduler(client)
+    queue_item = {
+        "pick_key": "ud-pick-identity",
+        "provider": "Underdog",
+        "source_id": "ud-source",
+        "event_id": "ud-event",
+        "player_name": "Example Player",
+        "sport": "NBA",
+        "stat_type": "Points",
+        "line_value": 22.5,
+        "direction": "OVER",
+        "line_variant": "standard",
+        "game_time": future,
+        "qualification_json": json.dumps({"qualified": True}),
+        "evidence_snapshot_json": json.dumps({
+            "source_id": "ud-source",
+            "source_event_id": "ud-event",
+            "direction": "OVER",
+            "line": 22.5,
+            "line_variant": "standard",
+            "source_event_teams": [["Home", "Away"]],
+        }),
+    }
+    assert scheduler.queue_qualified_pick_context(queue_item)
+    first = asyncio.run(scheduler.paid_rotation_tick())
+    assert first["status"] == "pick_market_confirmed"
+    assert client.market_calls == 1
+    assert client.quote_calls == 0
+
+    second = asyncio.run(scheduler.paid_rotation_tick())
+    assert second["status"] == "pick_context"
+    assert second["identity_preserved"] is True
+    assert second["is_player_result"] is False
+    assert client.quote_calls == 1
+    assert scheduler._last_pick_contexts["ud-pick-identity"]["source_pick"][
+        "line_value"
+    ] == 22.5
