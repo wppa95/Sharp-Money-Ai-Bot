@@ -1,0 +1,226 @@
+Sharp Money V4 — Controlled Multi-Issue Fix
+
+Use the official PropLine API documentation:
+https://prop-line.com/llms-full.txt
+
+My PropLine account is on the Free plan with 1,000 API calls per 24 hours. Implement the fixes below as one coordinated change. Make targeted code changes, run the relevant tests, and restart the current bot process automatically after successful changes if that is the normal workflow.
+
+Do not stop at an audit or recommendations. Do not make unrelated changes, delete database records, perform unnecessary backfills, expose secrets, or change unrelated scheduler intervals.
+
+A. PropLine API integration and quota protection
+
+Use "https://api.prop-line.com" with the configured API key in the "X-API-Key" header. Never expose the key.
+
+Use these endpoints where appropriate and supported by the Free plan:
+
+Discovery and live player props
+
+- "GET /v1/sports"
+- "GET /v1/sports/{sport_key}/events"
+- "GET /v1/sports/{sport_key}/events/{event_id}/markets"
+- "GET /v1/sports/{sport_key}/events/{event_id}/odds?markets={market_keys}&includeBookIds=true&includeRestricted=true"
+
+Final scores, player stats, and settlement inspection
+
+- "GET /v1/sports/{sport_key}/scores"
+- "GET /v1/sports/{sport_key}/events/{event_id}/stats"
+- "GET /v1/sports/{sport_key}/events/{event_id}/results"
+
+Player identity and raw game history
+
+- "GET /v1/sports/{sport_key}/players?search={player_name}&limit=25"
+- "GET /v1/sports/{sport_key}/players/{player_name}/games"
+
+Data freshness diagnostics
+
+- "GET /v1/freshness"
+
+Check the official documentation for endpoint parameters, response schemas, sport coverage, and Free-tier restrictions before implementation. Do not assume that every endpoint supports every sport or market.
+
+Shared request budget
+
+- Enforce one shared budget across all PropLine jobs and callers.
+- Target 950–960 calls per UTC day, reserving 40–50 calls for recovery and essential work.
+- Reserve requests atomically before dispatch so concurrent jobs cannot exceed the budget.
+- Persist request accounting across restarts.
+- Honor quota/reset headers and "Retry-After".
+- Avoid duplicate calls by caching responses and reusing fresh local data.
+- Do not retry quota exhaustion, tier restrictions, invalid keys, or permanent errors in a tight loop.
+- Record usage by endpoint, sport, calling job, HTTP status, and cache result.
+- Keep API requests within the documented burst and sustained limits.
+- Do not add unnecessary polling jobs or call PropLine once per player when a batch response already covers the needed data.
+
+B. Fix the missing settlement and historical evidence pipeline
+
+Investigate and resolve the previously observed logs:
+
+"result_rows=0"
+"historical_evidence_available=0"
+"no_historical_evidence=290"
+
+Trace the entire process from request to durable database write. Determine whether the actual cause is:
+
+- a missing completed-results collection job;
+- Free-tier result redaction;
+- invalid or stale event IDs;
+- response parsing or matching failures;
+- player/event/market identity mismatches;
+- unsupported or missing raw statistics;
+- or missing database persistence.
+
+Inspect the actual HTTP response and row counts before assigning a root cause.
+
+PropLine Free-tier "/results" may return rows with "resolution" and "actual_value" redacted. Do not interpret redacted results as completed settlements. Do not repeatedly call a restricted endpoint expecting it to return paid-tier data.
+
+Where supported, use final event status and "/stats" to grade V4's own tracked picks from actual box-score values. Use "/players/{player_name}/games" for available raw game history. Build L5/L10/L20/L30, season context, and H2H from locally stored data where coverage permits.
+
+Requirements:
+
+- Persist usable observations, final stats, and grading inputs to the existing application database.
+- Grade only when the event is final and the required statistic is complete.
+- Correctly calculate supported single-stat and composite-stat markets.
+- Store HIT, MISS, or PUSH accurately and idempotently.
+- Never count PUSH as a hit.
+- Do not overwrite actual outcomes with live stats, guesses, or incomplete data.
+- Represent unsupported or unavailable results explicitly rather than fabricating a settlement.
+- Preserve original platform lines, source IDs, player identities, event IDs, and market identity.
+- Make the grader and history pipeline work across all supported sports, not only NHL or MLB.
+
+Do not delete or bulk-backfill existing rows. If a migration is genuinely required, explain its necessity and keep it additive and safe.
+
+C. Telegram pick delivery interval
+
+Change only "telegram_pick_delivery" from its current one-second interval to 60 seconds.
+
+Preserve:
+
+- durable queue behavior;
+- delivery ordering;
+- retries and recovery after temporary failures;
+- duplicate-send protection;
+- pending deliveries across startup;
+- existing alert formatting and qualification rules.
+
+Add a focused test proving that the configured interval is 60 seconds. Do not change other job intervals.
+
+D. Fix historical evidence and grading accuracy across sports
+
+Previously, multiple sports showed tracked props without completed-game history. Review the entire evidence-to-grading pipeline rather than applying a sport-specific patch.
+
+Verify:
+
+- completed events are discovered and linked to the correct canonical event;
+- player IDs and names are matched safely;
+- market names map to the correct raw-stat fields;
+- composite markets use correct formulas;
+- history windows contain the correct number of games;
+- H2H uses the correct opponent and event;
+- missing history is distinguished from an actual zero;
+- pushes and voids are handled correctly;
+- data from one player, event, or platform cannot be attached to another.
+
+Do not mark an opportunity as evidence-supported when the required history is missing. Do not silently exclude supported sports or markets because they are inconvenient to map.
+
+E. PrizePicks and Underdog consistency
+
+PrizePicks and Underdog must remain equal primary platforms.
+
+Verify that:
+
+- PrizePicks observations arrive through the intended PropLine feed;
+- Underdog observations continue through its own feed;
+- both platforms feed the shared durable observation and grading pipeline;
+- each observation retains its original platform, line, player, event, market, and direction;
+- HIT/MISS/PUSH grading uses the correct original line for each platform;
+- platform-specific offering availability is respected;
+- an unavailable Under or Over on one platform does not incorrectly block a valid direction on the other;
+- cross-platform comparisons never replace the actual line of the pick being delivered.
+
+Do not add The Odds API or another provider as a substitute for PropLine's raw stats or as an eligibility gate.
+
+F. Restore and verify alert correctness
+
+Review the earlier alert problems and make targeted corrections where needed.
+
+Alerts must:
+
+- identify the correct platform and original line;
+- show the direction and market accurately;
+- preserve relevant platform comparisons when a legitimate comparison exists;
+- avoid claiming a line or direction is playable when the source marks it restricted or unavailable;
+- use correctly matched L5/L10/L20/L30 and H2H evidence when available;
+- clearly distinguish unavailable history from a verified result;
+- avoid presenting unsupported hit rates as facts;
+- preserve the required footer:
+
+"Monitoring player props across multiple sports. Not betting advice."
+
+Do not add Strong Bet labels, star ratings, tiers, or score labels. Do not add delivery blockers based on those labels.
+
+G. Preserve the full-market and individual-pick requirements
+
+- Scan all supported sports and markets rather than a preferred-stat list.
+- Do not impose a top-three-per-sport candidate limit.
+- Do not silently hardcode sports out of the pipeline.
+- Deliver individual picks only.
+- Do not create, generate, or send two-leg or three-leg slips.
+- Preserve the current qualification and evidence requirements except where a verified defect requires correction.
+- Do not weaken evidence standards just to increase the number of alerts.
+
+H. Health, scheduler, and persistence diagnostics
+
+Improve the existing diagnostics enough to determine whether the pipeline is actually working.
+
+Verify that health output reports:
+
+- last successful PropLine collection;
+- last completed-results/statistics processing run;
+- last successful player-history update;
+- last actual database write;
+- latest scan and its observation counts;
+- pending grading count;
+- resolved HIT/MISS/PUSH counts;
+- PropLine quota usage and remaining budget;
+- scheduler job status and next run;
+- last error and last success for important jobs.
+
+A scheduler registration or job execution must not be described as a successful data update if no data was fetched, parsed, matched, or persisted. Distinguish zero rows returned by the provider from rows returned but rejected, rows with redacted resolution, and rows successfully stored.
+
+Preserve non-overlapping jobs, idempotent processing, and continuous monitoring. Do not introduce busy loops or hidden queues that can accumulate indefinitely.
+
+I. Tests and verification
+
+Add or update focused tests for:
+
+1. Shared daily quota accounting, UTC reset, and concurrent request reservations.
+2. Caching and duplicate-request prevention.
+3. "Retry-After", quota exhaustion, and restricted Free-tier endpoints.
+4. Redacted "/results" parsing.
+5. Final-stat grading for supported markets.
+6. HIT/MISS/PUSH correctness and idempotent settlement persistence.
+7. Missing stats, incomplete events, unsupported markets, and ambiguous identities.
+8. PrizePicks and Underdog original-line preservation and independent handling.
+9. Multi-sport history and event matching.
+10. Telegram delivery configured for 60 seconds.
+11. Durable queue retries and duplicate-send protection.
+12. Alert formatting, evidence integrity, and the required footer.
+13. Health diagnostics and database-write timestamps.
+
+Run focused tests and the relevant existing regression suite. Run compilation and diff checks.
+
+Do not claim the full pipeline is verified solely because tests pass. Report which behaviors were unit-tested and which were verified against actual provider responses.
+
+J. Completion report
+
+Return a concise, factual report containing:
+
+- files changed;
+- the exact root cause of the zero-settlement/history problem;
+- the actual Free-tier endpoints and fields available;
+- the grading paths now supported and any remaining sport/market limitations;
+- the shared daily quota target and observed usage;
+- the configured Telegram delivery interval;
+- tests run and their pass/fail counts;
+- any remaining issues that need a separate fix.
+
+Implement this as one controlled change set. Do not modify unrelated features, delete records, expose secrets, or claim success without test evidence.
