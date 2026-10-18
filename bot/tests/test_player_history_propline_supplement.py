@@ -312,7 +312,11 @@ async def test_event_stats_supports_verified_football_player_stat():
     rows = await provider._fetch_propline_event_stats(
         "NFL", "NFL", "passing yards"
     )
-    assert len(rows) == 1
+    assert len(rows) == 1, (
+        rows,
+        client.fetch_scores.await_args,
+        client.fetch_event_stats.await_args_list,
+    )
     assert rows[0].sport == "NFL"
     assert rows[0].stat_type == "passing yards"
     assert rows[0].actual_value == 275.0
