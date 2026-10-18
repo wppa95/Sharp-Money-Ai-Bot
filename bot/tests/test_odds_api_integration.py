@@ -338,7 +338,7 @@ def test_paid_scheduler_rotates_all_live_sports_and_exposes_scoreless_sport():
         def __init__(self):
             self.cursor = 0
 
-        def diagnostics(self):
+        def diagnostics(self, now=None):
             return {
                 "next_paid_request_at": (
                     datetime.now(UTC) - timedelta(seconds=1)
@@ -346,7 +346,7 @@ def test_paid_scheduler_rotates_all_live_sports_and_exposes_scoreless_sport():
                 "cooldown_until": None,
             }
 
-        def advance_rotation_cursor(self, count):
+        def advance_rotation_cursor(self, count, now=None):
             selected = self.cursor % count
             self.cursor = (self.cursor + 1) % count
             return selected
@@ -374,7 +374,7 @@ def test_paid_scheduler_rotates_all_live_sports_and_exposes_scoreless_sport():
             self.score_calls.append((sport_key, days_from))
             return []
 
-        def diagnostics(self):
+        def diagnostics(self, now=None):
             return {}
 
     client = RotationClient()
@@ -403,7 +403,7 @@ def test_qualified_context_waits_for_exact_market_availability_then_fetches_quot
                 "cooldown_until": None,
             }
 
-        def advance_rotation_cursor(self, _count):
+        def advance_rotation_cursor(self, _count, now=None):
             return 0
 
     class ContextClient:
