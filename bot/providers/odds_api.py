@@ -947,7 +947,19 @@ class OddsApiScheduler:
 
     def __init__(self, client: OddsApiClient) -> None:
         self.client = client
-        self._last_discovery_sport = ""
+        get_last_sport = getattr(
+            self.client.budget, "get_discovery_last_sport", None
+        )
+        try:
+            self._last_discovery_sport = (
+                str(get_last_sport() or "") if callable(get_last_sport) else ""
+            )
+        except Exception as exc:  # noqa: BLE001
+            self._last_discovery_sport = ""
+            logger.warning(
+                "Odds API discovery rotation restore failed (%s)",
+                type(exc).__name__,
+            )
         self._pending_pick_contexts: dict[str, dict[str, Any]] = {}
         self._market_event_cursors: dict[str, int] = {}
         self._last_pick_contexts: dict[str, dict[str, Any]] = {}
@@ -1095,8 +1107,23 @@ class OddsApiScheduler:
                  active_sports[-1])
         ) + 1) % len(active_sports)
         sport = active_sports[next_index]
-        events = await self.client.fetch_events(sport.key)
+        # Advance before the event fetch. A failed/deferred sport will be
+        # retried after the remaining active sports get their rotation turn.
         self._last_discovery_sport = sport.key
+        save_last_sport = getattr(
+            self.client.budget, "set_discovery_last_sport", None
+        )
+        if callable(save_last_sport):
+            try:
+                save_last_sport(sport.key)
+            except Exception as exc:  # noqa: BLE001
+                # Keep this process fair even if the optional checkpoint write
+                # fails; the next process will fall back to its default order.
+                logger.warning(
+                    "Odds API discovery rotation checkpoint failed (%s)",
+                    type(exc).__name__,
+                )
+        events = await self.client.fetch_events(sport.key)
         return {"status": "ok", "sport_key": sport.key, "events": len(events)}
 
     async def paid_rotation_tick(self) -> dict[str, Any]:

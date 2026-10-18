@@ -412,6 +412,21 @@ class OddsApiCreditBudget:
             self._save_unlocked(state)
             return cursor % max(1, int(count))
 
+    def get_discovery_last_sport(self) -> str:
+        """Return the last attempted free-discovery sport, if recorded."""
+        with self._locked_state() as state:
+            value = state.get("discovery_last_sport_key")
+            return str(value).strip() if isinstance(value, str) else ""
+
+    def set_discovery_last_sport(self, sport_key: str) -> None:
+        """Persist discovery position without changing paid-credit accounting."""
+        key = str(sport_key or "").strip()
+        if not key:
+            return
+        with self._locked_state() as state:
+            state["discovery_last_sport_key"] = key
+            self._save_unlocked(state)
+
     def cache_get(self, key: str, now: datetime | None = None) -> Any | None:
         current = _as_utc(now or datetime.now(UTC))
         with self._locked_state() as state:

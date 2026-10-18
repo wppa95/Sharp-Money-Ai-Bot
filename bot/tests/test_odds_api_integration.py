@@ -500,3 +500,119 @@ def test_qualified_context_waits_for_exact_market_availability_then_fetches_quot
     assert scheduler._last_pick_contexts["ud-pick-identity"]["source_pick"][
         "line_value"
     ] == 22.5
+
+
+@pytest.mark.parametrize("failure_type", [OddsApiError, OddsApiDeferred])
+def test_discovery_rotation_advances_after_failure_and_retries_later(
+    tmp_path, failure_type
+):
+    budget = _budget(tmp_path)
+    calls = []
+    fail_once = {"sport_a": True}
+
+    class DiscoveryClient:
+        is_configured = True
+        budget = budget
+
+        async def fetch_sports(self):
+            return [
+                OddsApiSport("sport_a", "Sport A"),
+                OddsApiSport("sport_b", "Sport B"),
+            ]
+
+        async def fetch_events(self, sport_key):
+            calls.append(sport_key)
+            if sport_key == "sport_a" and fail_once["sport_a"]:
+                fail_once["sport_a"] = False
+                raise failure_type("temporary discovery failure")
+            return []
+
+    scheduler = OddsApiScheduler(DiscoveryClient())
+    with pytest.raises(failure_type):
+        asyncio.run(scheduler.discovery_tick())
+    assert budget.get_discovery_last_sport() == "sport_a"
+
+    next_result = asyncio.run(scheduler.discovery_tick())
+    retry_result = asyncio.run(scheduler.discovery_tick())
+    assert next_result == {"status": "ok", "sport_key": "sport_b", "events": 0}
+    assert retry_result == {"status": "ok", "sport_key": "sport_a", "events": 0}
+    assert calls == ["sport_a", "sport_b", "sport_a"]
+    assert budget.diagnostics()["credits_used"] == 0
+
+
+def test_discovery_rotation_advances_after_successful_empty_result(tmp_path):
+    budget = _budget(tmp_path)
+    calls = []
+
+    class DiscoveryClient:
+        is_configured = True
+        budget = budget
+
+        async def fetch_sports(self):
+            return [
+                OddsApiSport("sport_a", "Sport A"),
+                OddsApiSport("sport_b", "Sport B"),
+            ]
+
+        async def fetch_events(self, sport_key):
+            calls.append(sport_key)
+            return []
+
+    scheduler = OddsApiScheduler(DiscoveryClient())
+    first = asyncio.run(scheduler.discovery_tick())
+    second = asyncio.run(scheduler.discovery_tick())
+
+    assert first == {"status": "ok", "sport_key": "sport_a", "events": 0}
+    assert second == {"status": "ok", "sport_key": "sport_b", "events": 0}
+    assert calls == ["sport_a", "sport_b"]
+
+
+def test_discovery_rotation_position_survives_scheduler_restart(tmp_path):
+    first_budget = _budget(tmp_path)
+    calls = []
+
+    class FirstClient:
+        is_configured = True
+        budget = first_budget
+
+        async def fetch_sports(self):
+            return [
+                OddsApiSport("sport_a", "Sport A"),
+                OddsApiSport("sport_b", "Sport B"),
+            ]
+
+        async def fetch_events(self, sport_key):
+            calls.append(("first", sport_key))
+            raise OddsApiError("temporary discovery failure")
+
+    first_scheduler = OddsApiScheduler(FirstClient())
+    with pytest.raises(OddsApiError):
+        asyncio.run(first_scheduler.discovery_tick())
+
+    restarted_budget = OddsApiCreditBudget(first_budget.state_path)
+
+    class RestartedClient:
+        is_configured = True
+        budget = restarted_budget
+
+        async def fetch_sports(self):
+            return [
+                OddsApiSport("sport_a", "Sport A"),
+                OddsApiSport("sport_b", "Sport B"),
+            ]
+
+        async def fetch_events(self, sport_key):
+            calls.append(("restarted", sport_key))
+            return []
+
+    restarted_scheduler = OddsApiScheduler(RestartedClient())
+    next_result = asyncio.run(restarted_scheduler.discovery_tick())
+    retry_result = asyncio.run(restarted_scheduler.discovery_tick())
+
+    assert next_result["sport_key"] == "sport_b"
+    assert retry_result["sport_key"] == "sport_a"
+    assert calls == [
+        ("first", "sport_a"),
+        ("restarted", "sport_b"),
+        ("restarted", "sport_a"),
+    ]
