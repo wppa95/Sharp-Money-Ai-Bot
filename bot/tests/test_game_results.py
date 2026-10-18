@@ -8,7 +8,10 @@ from providers.game_results import (
 
 
 @pytest.mark.asyncio
-async def test_retired_odds_results_provider_is_a_no_network_noop():
+async def test_odds_team_score_provider_is_disabled_without_configured_key(monkeypatch):
+    # Tests must never issue provider traffic, even in a workspace with the
+    # optional production secret configured.
+    monkeypatch.delenv("ODDS_API_KEY", raising=False)
     provider = OddsApiResultsProvider()
 
     assert await provider.fetch_scores("basketball_nba") == []
