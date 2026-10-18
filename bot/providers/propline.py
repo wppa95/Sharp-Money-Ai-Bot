@@ -6777,6 +6777,7 @@ class PropLinePrizePicksProvider(PropProviderBase):
                 [], datetime.utcnow(),
                 error="PropLine is not configured", failure_kind="disabled",
             )
+        requested_sport = _clean(sport).upper()
         canonical_sport = _normalize_sport(sport)
         if self._sport_filter is not None and canonical_sport not in self._sport_filter:
             return PropLineFetchResult(
@@ -6801,10 +6802,10 @@ class PropLinePrizePicksProvider(PropProviderBase):
             event_scoped=event_scoped,
         )
         # The same official endpoint can have multiple aliases in the bot
-        # namespace (for example CFB/NCAAF and SOCCER/EPL).  The requested
-        # canonical identity is authoritative for confirmation matching.
+        # namespace (for example CFB/NCAAF and SOCCER/EPL). Preserve the
+        # caller's explicit identity for source-aware confirmation matching.
         return PropLineFetchResult(
-            [replace(prop, sport=canonical_sport) for prop in result.props],
+            [replace(prop, sport=requested_sport) for prop in result.props],
             result.fetched_at,
             from_cache=result.from_cache,
             succeeded=result.succeeded,

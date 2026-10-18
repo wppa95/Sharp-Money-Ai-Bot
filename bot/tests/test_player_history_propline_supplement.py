@@ -310,7 +310,7 @@ async def test_event_stats_supports_verified_football_player_stat():
     provider = PlayerHistoryProvider(propline_client=client)
 
     rows = await provider._fetch_propline_event_stats(
-        "NFL", "NFL", "passing yards"
+        "Alex Example", "NFL", "passing yards"
     )
     assert len(rows) == 1, (
         rows,
