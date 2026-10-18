@@ -3617,6 +3617,7 @@ async def _run_prizepicks_independent_cycle(
                     "durable delivery batch returned an incomplete identity set"
                 )
             _pp_queued = len(_pp_delivery_buffer)
+            _queue_qualified_odds_context(_pp_delivery_buffer)
         except Exception as exc:  # noqa: BLE001
             logger.error(
                 "prizepicks_cycle: durable delivery batch failed: %s",
@@ -7798,6 +7799,7 @@ async def underdog_job(context) -> None:
                             "durable delivery batch returned an incomplete identity set"
                         )
                     _n_queue_admitted += len(_saved_queue_ids)
+                    _queue_qualified_odds_context(_udog_delivery_buffer)
                     for _queued_candidate in _delivery_queue:
                         _queued_record = _queued_candidate.get("record")
                         if (

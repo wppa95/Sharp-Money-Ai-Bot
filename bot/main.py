@@ -91,6 +91,7 @@ from connectors import (
     UnderdogConnector,
 )
 from market_engine import (
+    init_odds_api_context_scheduler,
     init_market_engine,
     init_propline_confirmation,
     reset_monitoring_runtime_state,
@@ -829,6 +830,7 @@ async def post_init(application: Application) -> None:
     ))
 
     init_market_engine(registry)
+    init_odds_api_context_scheduler(_odds_api_scheduler)
     # Confirmation reads only current PropLine observations; it never starts a
     # separate provider request or promotes historical sportsbook rows to live.
     init_propline_confirmation(_db)
