@@ -13,7 +13,6 @@ from typing import Any
 
 from engine.sport_policy import (
     canonical_sport_key,
-    is_football_related_sport,
 )
 from providers.propline import PROPLINE_DEFAULT_REQUESTS_PER_HOUR
 
@@ -220,23 +219,16 @@ def _completed_propline_game_rows(
     """Convert final, identified player-game stats into shared history rows."""
     import math
 
-    if is_football_related_sport(
-        getattr(target, "canonical_sport", "") or getattr(target, "official_sport", "")
-    ):
-        return []
-
     from providers.player_stats import RawGameResult
     from providers.propline import (
-        _normalize_stat,
         _parse_datetime,
-        _propline_raw_player_game_stat_matches,
+        propline_raw_player_game_value,
         _team_names_match,
     )
 
     rows_by_identity: dict[tuple[str, str, str, str, str], Any] = {}
     conflicting_identities: set[tuple[str, str, str, str, str]] = set()
     duplicates = 0
-    target_stat = _normalize_stat(target.market)
     for game in _propline_game_records(getattr(result, "payload", None)):
         if not _is_explicit_propline_final(game):
             continue
@@ -279,43 +271,25 @@ def _completed_propline_game_rows(
             )
         )
         stats = _propline_value(game, "stats", "statistics", "player_stats")
-        actual = None
-        if isinstance(stats, dict):
-            for stat_name, stat_value in stats.items():
-                if not _propline_raw_player_game_stat_matches(
-                    target.canonical_sport, target_stat, stat_name
-                ):
-                    continue
-                if isinstance(stat_value, dict):
-                    actual = _propline_value(
-                        stat_value, "actual_value", "value", "stat_value"
-                    )
-                else:
-                    actual = stat_value
-                break
-        elif isinstance(stats, (list, tuple)):
-            for stat_item in stats:
-                stat_name = _propline_value(
-                    stat_item, "stat_type", "stat", "name", "market"
-                )
-                if not _propline_raw_player_game_stat_matches(
-                    target.canonical_sport, target_stat, stat_name
-                ):
-                    continue
-                actual = _propline_value(
-                    stat_item, "actual_value", "value", "stat_value"
-                )
-                break
+        actual = propline_raw_player_game_value(
+            target.canonical_sport,
+            target.market,
+            stats,
+        )
         if actual is None:
             declared_stat = _propline_value(
                 game, "stat_type", "stat", "market", "market_name"
             )
-            if not declared_stat or not _propline_raw_player_game_stat_matches(
-                target.canonical_sport, target_stat, declared_stat
-            ):
+            if not declared_stat:
                 continue
-            actual = _propline_value(
-                game, "actual_value", "value", "stat_value"
+            actual = propline_raw_player_game_value(
+                target.canonical_sport,
+                target.market,
+                {
+                    declared_stat: _propline_value(
+                        game, "actual_value", "value", "stat_value"
+                    )
+                },
             )
         if game_id is None or game_date is None or actual is None:
             continue
@@ -1317,18 +1291,6 @@ async def propline_read_only_rotation_job(context) -> None:
                     return candidate
             return None
 
-        active_before_football_filter = len(active_rows)
-        active_rows = [
-            row
-            for row in active_rows
-            if not is_football_related_sport(
-                _source_value(row, "sport", "sport_key", "league")
-            )
-        ]
-        excluded_football_active = (
-            active_before_football_filter - len(active_rows)
-        )
-
         async def cached_discovery(family: str, target_key: str, official: str):
             reader = getattr(db, "get_propline_evidence", None)
             if not asyncio.iscoroutinefunction(reader):
@@ -1386,24 +1348,7 @@ async def propline_read_only_rotation_job(context) -> None:
                     discovered_sports,
                     active_props=active_rows,
                 )
-        propline_sports = [
-            sport
-            for sport in discovered_sports or ()
-            if not is_football_related_sport(
-                _source_value(
-                    sport,
-                    "canonical_key",
-                    "canonical_sport",
-                    "sport",
-                    "official_key",
-                    "sport_key",
-                    "key",
-                )
-            )
-        ]
-        excluded_football_sports = (
-            len(discovered_sports or ()) - len(propline_sports)
-        )
+        propline_sports = list(discovered_sports or ())
         if discovery_audit.pending:
             logger.warning(
                 "propline_read_only_rotation_job: discovery audit pending "
@@ -1692,8 +1637,7 @@ async def propline_read_only_rotation_job(context) -> None:
         logger.info(
             "propline_read_only_rotation_job: attempted=%d completed=%d "
             "persisted=%d pending=%d skipped=%d errors=%d next_family=%s "
-            "families=%s excluded_football_active_props=%d "
-            "excluded_football_sports=%d",
+            "families=%s active_props=%d discovered_sports=%d",
             report.attempted,
             report.completed,
             report.persisted,
@@ -1702,8 +1646,8 @@ async def propline_read_only_rotation_job(context) -> None:
             report.errors,
             report.next_family,
             report.family_counts,
-            excluded_football_active,
-            excluded_football_sports,
+            len(active_rows),
+            len(propline_sports),
         )
     except Exception as exc:  # noqa: BLE001
         logger.exception("propline_read_only_rotation_job: %s", exc)

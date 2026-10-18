@@ -1556,17 +1556,10 @@ async def propline_request_scan_job(context) -> None:
                 cooldown,
             )
             return False
-        from engine.sport_policy import (
-            canonical_sport_key,
-            is_football_related_sport,
-        )
+        from engine.sport_policy import canonical_sport_key
 
         discovered_sports = await _get_prizepicks_scan_sports(provider)
-        sports = tuple(
-            sport
-            for sport in discovered_sports
-            if not is_football_related_sport(sport)
-        )
+        sports = tuple(discovered_sports)
         if not sports:
             logger.info(
                 "propline_request_scan: no eligible sports"
