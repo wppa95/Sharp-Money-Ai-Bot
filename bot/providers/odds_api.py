@@ -1009,6 +1009,21 @@ class OddsApiScheduler:
             return False
         if str(queue_item.get("direction") or "").upper() not in {"OVER", "UNDER"}:
             return False
+        if (
+            str(evidence.get("source_id") or "") != str(queue_item["source_id"])
+            or str(evidence.get("source_event_id") or "")
+            != str(queue_item["event_id"])
+            or str(evidence.get("direction") or "").upper()
+            != str(queue_item["direction"]).upper()
+            or str(evidence.get("line_variant") or "")
+            != str(queue_item.get("line_variant") or "")
+        ):
+            return False
+        try:
+            if float(evidence.get("line")) != float(queue_item["line_value"]):
+                return False
+        except (TypeError, ValueError):
+            return False
         if provider == "prizepicks" and not str(queue_item.get("line_variant") or "").strip():
             return False
         event_teams = evidence.get("source_event_teams")

@@ -813,6 +813,30 @@ async def cmd_health(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                 f"{int(_odds_diag.get('score_supported_sports', 0))} documented "
                 "score-supported sports"
             )
+            _next_odds_sports = _odds_diag.get("next_paid_sports") or []
+            if _next_odds_sports:
+                lines.append(
+                    "  Next fair sport slots: "
+                    + _html.escape(", ".join(map(str, _next_odds_sports)))
+                )
+            _score_rotation_days = _odds_diag.get(
+                "estimated_score_rotation_days"
+            )
+            if _score_rotation_days is not None:
+                lines.append(
+                    f"  Estimated score refresh per supported sport: "
+                    f"~{float(_score_rotation_days):.1f} days at current usage"
+                )
+            _no_scores = _odds_diag.get("no_documented_score_endpoint") or []
+            if _no_scores:
+                _shown = ", ".join(map(str, _no_scores[:6]))
+                _remaining = len(_no_scores) - min(6, len(_no_scores))
+                lines.append(
+                    "  No documented score endpoint for "
+                    + _html.escape(_shown)
+                    + (f" (+{_remaining} more)" if _remaining else "")
+                    + "; event-market discovery only"
+                )
             lines.append(
                 "  <i>Team-score/current-market context only; no player results, "
                 "historical endpoints, or pick validation.</i>"
