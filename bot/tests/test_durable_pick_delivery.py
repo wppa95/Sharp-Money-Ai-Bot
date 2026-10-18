@@ -445,16 +445,6 @@ class _FakeBot:
 async def test_enqueue_is_idempotent_and_fair_across_platform_and_sport(tmp_path):
     db = await _make_db(tmp_path)
     try:
-@pytest.mark.asyncio
-async def test_worker_persists_retry_after_exception_and_evidence(
-    tmp_path, monkeypatch
-):
-    db = await _make_db(tmp_path)
-    try:
-        monkeypatch.setattr(
-            "reporting.is_current_reporting_day",
-            lambda *_args, **_kwargs: True,
-        )
         now = datetime.utcnow()
         candidates = [
             _item(provider="Underdog", sport="NHL", source_id="ud-1"),
@@ -506,14 +496,6 @@ async def test_worker_persists_retry_after_exception_and_evidence(
 async def test_candidate_rank_ages_out_so_old_qualified_work_cannot_starve(tmp_path):
     db = await _make_db(tmp_path)
     try:
-@pytest.mark.asyncio
-async def test_confirmed_send_is_audited_and_never_sent_twice(tmp_path, monkeypatch):
-    db = await _make_db(tmp_path)
-    try:
-        monkeypatch.setattr(
-            "reporting.is_current_reporting_day",
-            lambda *_args, **_kwargs: True,
-        )
         now = datetime.utcnow()
         aged = _item(source_id="aged-rank-8", rank=8)
         aged["qualified_at"] = now - timedelta(seconds=90)
@@ -675,17 +657,6 @@ async def test_changed_directional_opportunity_invalidates_pending_pick(
 ):
     db = await _make_db(tmp_path)
     try:
-@pytest.mark.asyncio
-async def test_delivery_waits_for_initial_provider_snapshot_and_keeps_pick_pending(
-    tmp_path, monkeypatch
-):
-    db = await _make_db(tmp_path)
-    coverage.reset_readiness()
-    try:
-        monkeypatch.setattr(
-            "reporting.is_current_reporting_day",
-            lambda *_args, **_kwargs: True,
-        )
         now = datetime.utcnow()
         candidate = _item(
             game_time=now + timedelta(hours=2),
@@ -977,16 +948,6 @@ async def test_actionable_pick_reporting_deduplicates_exact_legacy_and_current_a
 async def test_actionable_reports_require_exact_audit_not_alert_sent_flag(tmp_path):
     db = await _make_db(tmp_path)
     try:
-@pytest.mark.asyncio
-async def test_partial_broadcast_persists_global_retry_after_across_restart(
-    tmp_path, monkeypatch
-):
-    db = await _make_db(tmp_path)
-    try:
-        monkeypatch.setattr(
-            "reporting.is_current_reporting_day",
-            lambda *_args, **_kwargs: True,
-        )
         now = datetime.utcnow()
         verified = _item(
             source_id="verified-source",
@@ -1045,16 +1006,6 @@ async def test_partial_broadcast_persists_global_retry_after_across_restart(
 async def test_expired_reporting_day_is_not_sent(tmp_path, monkeypatch):
     db = await _make_db(tmp_path)
     try:
-@pytest.mark.asyncio
-async def test_permanent_telegram_rejection_is_terminal_and_logged(
-    tmp_path, monkeypatch
-):
-    db = await _make_db(tmp_path)
-    try:
-        monkeypatch.setattr(
-            "reporting.is_current_reporting_day",
-            lambda *_args, **_kwargs: True,
-        )
         now = datetime.utcnow()
         candidate = _item(
             game_time=now + timedelta(days=2),
@@ -1496,8 +1447,6 @@ async def test_alert_sent_requires_an_exact_successful_delivery_audit(tmp_path):
         await _close_db(db)
 
 
-@pytest.mark.asyncio
-async def test_unqualified_candidate_does_not_enter_delivery_queue(monkeypatch):
 @pytest.mark.asyncio
 async def test_unqualified_candidate_does_not_enter_delivery_queue(monkeypatch):
     now = datetime.utcnow()
