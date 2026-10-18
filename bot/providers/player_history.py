@@ -615,17 +615,6 @@ class PlayerHistoryProvider:
         in-memory fallbacks because they do not provide the same event/status
         join guarantees.
         """
-        from engine.sport_policy import is_football_related_sport
-
-        if is_football_related_sport(sport):
-            logger.info(
-                "PlayerHistoryProvider: INSUFFICIENT_EVIDENCE "
-                "sport=%s player=%s market=%s reason=football_excluded_from_propline",
-                sport,
-                player_name,
-                stat_type,
-            )
-            return []
         today = datetime.utcnow().date().isoformat()
         provider_scope = str(source_provider or "").strip().lower()
         if provider_scope not in {"underdog", "prizepicks"}:
@@ -931,11 +920,7 @@ class PlayerHistoryProvider:
             _normalize_stat,
             _parse_datetime,
         )
-        from engine.sport_policy import is_football_related_sport
-
         sport_u = str(sport or "").upper().strip()
-        if is_football_related_sport(sport_u):
-            return []
         if not sport_u:
             return []
         if self._propline_client is None:
