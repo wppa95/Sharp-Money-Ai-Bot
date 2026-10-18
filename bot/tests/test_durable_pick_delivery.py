@@ -1038,6 +1038,10 @@ async def test_worker_persists_retry_after_exception_and_evidence(
 ):
     db = await _make_db(tmp_path)
     try:
+        monkeypatch.setattr(
+            "reporting.is_current_reporting_day",
+            lambda *_args, **_kwargs: True,
+        )
         now = datetime.utcnow()
         candidate = _item(
             game_time=now + timedelta(hours=2),
@@ -1075,6 +1079,10 @@ async def test_worker_persists_retry_after_exception_and_evidence(
 async def test_confirmed_send_is_audited_and_never_sent_twice(tmp_path, monkeypatch):
     db = await _make_db(tmp_path)
     try:
+        monkeypatch.setattr(
+            "reporting.is_current_reporting_day",
+            lambda *_args, **_kwargs: True,
+        )
         now = datetime.utcnow()
         candidate = _item(
             game_time=now + timedelta(hours=2),
@@ -1133,6 +1141,10 @@ async def test_delivery_waits_for_initial_provider_snapshot_and_keeps_pick_pendi
     db = await _make_db(tmp_path)
     coverage.reset_readiness()
     try:
+        monkeypatch.setattr(
+            "reporting.is_current_reporting_day",
+            lambda *_args, **_kwargs: True,
+        )
         now = datetime.utcnow()
         candidate = _item(game_time=now + timedelta(hours=2), fetched_at=now)
         await _seed_underdog(db, candidate)
@@ -1211,6 +1223,10 @@ async def test_partial_broadcast_persists_global_retry_after_across_restart(
 ):
     db = await _make_db(tmp_path)
     try:
+        monkeypatch.setattr(
+            "reporting.is_current_reporting_day",
+            lambda *_args, **_kwargs: True,
+        )
         now = datetime.utcnow()
         first_pick = _item(
             source_id="first-source",
@@ -1357,6 +1373,10 @@ async def test_permanent_telegram_rejection_is_terminal_and_logged(
 ):
     db = await _make_db(tmp_path)
     try:
+        monkeypatch.setattr(
+            "reporting.is_current_reporting_day",
+            lambda *_args, **_kwargs: True,
+        )
         now = datetime.utcnow()
         candidate = _item(
             game_time=now + timedelta(hours=2),
