@@ -96,7 +96,8 @@ def test_sports_and_events_are_quota_free_and_all_is_explicit(tmp_path):
     events_client = _client(tmp_path / "events", event_transport)
     events = asyncio.run(events_client.fetch_events("basketball_nba"))
     assert events[0].id == "event-1"
-    assert event_transport.calls[0] == ("/sports/basketball_nba/events", {})
+    assert event_transport.calls[0][0] == "/sports/basketball_nba/events"
+    assert "apiKey" in event_transport.calls[0][1]
     assert events_client.budget.diagnostics()["credits_used"] == 0
 
     all_transport = FakeTransport(OddsApiHttpResponse(200, {}, []))
@@ -188,7 +189,7 @@ def test_scores_cost_two_with_days_from_and_one_without(tmp_path):
         OddsApiHttpResponse(200, {"x-requests-last": "1"}, [])
     )
     no_days_client = _client(tmp_path / "no-days", no_days)
-    asyncio.run(no_days_client.fetch_scores("basketball_nba"))
+    asyncio.run(no_days_client.fetch_scores("basketball_nba", days_from=None))
     assert no_days_client.budget.diagnostics()["credits_used"] == 1
 
 
