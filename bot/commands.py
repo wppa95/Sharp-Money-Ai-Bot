@@ -772,7 +772,7 @@ async def cmd_health(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                         str(value).replace("Z", "+00:00")
                     )
                     if _dt.tzinfo is None:
-                        _dt = _dt.replace(tzinfo=__import__("datetime").timezone.utc)
+                        _dt = _dt.replace(tzinfo=timezone.utc)
                     return _dt.astimezone(
                         ZoneInfo("America/Chicago")
                     ).strftime("%b %d %I:%M %p CT")
@@ -789,7 +789,7 @@ async def cmd_health(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                 f"(hard cap {int(_odds_diag.get('credits_hard_limit', 500))})"
             )
             lines.append(
-                "  UTC reset: "
+                "  Next UTC reset: "
                 + _html.escape(_odds_ct_time(_odds_diag.get("next_reset_utc")))
                 + " · next paid slot: "
                 + _html.escape(_odds_ct_time(_odds_diag.get("next_paid_request_at")))
