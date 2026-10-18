@@ -1453,9 +1453,8 @@ class PlayerHistoryProvider:
                 or game.get("game_time")
             )
             stats = game.get("stats", game.get("statistics", game.get("player_stats")))
-            if not game_id or game_time is None or not isinstance(stats, dict):
-                if not game_id or game_time is None:
-                    continue
+            if not game_id or game_time is None:
+                continue
             value = propline_raw_player_game_value(sport_u, stat_type, stats)
             if value is None:
                 continue
