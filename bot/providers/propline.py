@@ -116,6 +116,8 @@ _STAT_NORMALIZATION = {
     "rebounds+assists": "rebounds+assists",
     "points+rebounds+assists": "pts+reb+ast",
     "points+reb+assists": "pts+reb+ast",
+    "pts+rebs+asts": "pts+reb+ast",
+    "pts + rebs + asts": "pts+reb+ast",
     "pts + reb + ast": "pts+reb+ast",
     "pts + reb": "pts+reb",
     "pts + ast": "pts+ast",
@@ -170,6 +172,10 @@ _STAT_NORMALIZATION = {
     "3+ rbis": "3+ rbis",
     "goals + assists": "points",
     "hits + runs + rbis": "hits+runs+rbis",
+    "pass + rush yards": "pass+rush yards",
+    "rush + rec yards": "rush+rec yards",
+    "rush + rec tds": "rush+rec tds",
+    "tackles + assists": "tackles+assists",
     "significant strikes": "significant strikes",
     "fight time (mins)": "fight time (mins)",
     "takedowns": "takedowns",
@@ -188,6 +194,7 @@ _SPORT_NORMALIZATION = {
     "FOOTBALL": "NFL",
     "FOOTBALL NFL": "NFL",
     "FOOTBALL NCAAF": "NCAAF",
+    "CFB": "NCAAF",
     "AMERICAN FOOTBALL": "NFL",
     "AMERICAN FOOTBALL NCAAF": "NCAAF",
     "HOCKEY": "NHL",
@@ -207,7 +214,6 @@ _SPORT_NORMALIZATION = {
     "KBO LEAGUE": "KBO",
     "JAPANESE NPB": "NPB",
     "FIFA WORLD CUP": "FIFA",
-    "PTS+REBS+ASTS": "pts+reb+ast",
 }
 
 _OVER_UNDER = {"OVER", "UNDER"}
@@ -6110,29 +6116,37 @@ def build_propline_read_only_targets(
     The caller may provide active props and/or discovered events.  No
     canonical sport is converted to a guessed provider key here.
     """
-    from engine.sport_policy import is_football_related_sport
-
-    official_by_canonical: dict[str, str] = {}
+    official_candidates: dict[str, set[str]] = {}
     canonical_by_official: dict[str, str] = {}
     for sport in sports:
         official = _read_only_input(sport, "official_key", "key", "sport_key")
         canonical = _normalize_sport(
             _read_only_input(sport, "canonical_key", "canonical_sport", "sport")
         )
-        if is_football_related_sport(canonical):
+        if not official or not canonical:
             continue
-        # A discovered title may be normalized into a familiar-looking
-        # canonical value even when its provider key is new.  Do not let that
-        # heuristic identity create score/history targets.
-        if (
+        # These rows come from the official PropLine catalog. Preserve their
+        # exact provider keys even when V4 has no legacy static alias for a
+        # newly cataloged league. A canonical collision is handled below
+        # rather than guessing which official key owns a source prop.
+        known_canonical = _OFFICIAL_TO_CANONICAL_SPORT.get(official.lower())
+        if known_canonical and known_canonical != canonical:
+            continue
+        official_candidates.setdefault(canonical, set()).add(official)
+        canonical_by_official[official.lower()] = canonical
+
+    official_by_canonical: dict[str, str] = {}
+    for canonical, candidates in official_candidates.items():
+        if len(candidates) == 1:
+            official_by_canonical[canonical] = next(iter(candidates))
+            continue
+        known = [
             official
-            and canonical
-            and official.lower() in _OFFICIAL_TO_CANONICAL_SPORT
-            and canonical == _OFFICIAL_TO_CANONICAL_SPORT[official.lower()]
-            and canonical not in official_by_canonical
-        ):
-            official_by_canonical[canonical] = official
-            canonical_by_official[official.lower()] = canonical
+            for official in candidates
+            if _OFFICIAL_TO_CANONICAL_SPORT.get(official.lower()) == canonical
+        ]
+        if len(known) == 1:
+            official_by_canonical[canonical] = known[0]
 
     targets: dict[str, PropLineReadOnlyTarget] = {}
     discovered_canonical_aliases = {
@@ -6442,15 +6456,7 @@ class PropLineReadOnlyRotation:
         max_requests: Optional[int] = None,
     ) -> PropLineReadOnlyRotationReport:
         """Run one bounded slice and checkpoint after every attempted request."""
-        from engine.sport_policy import is_football_related_sport
-
-        target_list = [
-            target
-            for target in targets
-            if not is_football_related_sport(
-                target.canonical_sport or target.official_sport
-            )
-        ]
+        target_list = list(targets)
         by_family = {
             family: sorted(
                 {
@@ -6644,14 +6650,13 @@ class PropLinePrizePicksProvider(PropProviderBase):
     def _mapped_discovered_sports(
         sports: Iterable[PropLineSport],
     ) -> list[PropLineSport]:
-        """Keep provider-native identities without heuristic fallback keys."""
+        """Keep exact catalog keys even when no legacy alias exists."""
         return [
             sport
             for sport in sports
             if (
-                getattr(sport, "mapped", True)
-                and _clean(getattr(sport, "official_key", "")).lower()
-                in _OFFICIAL_TO_CANONICAL_SPORT
+                _clean(getattr(sport, "official_key", ""))
+                and _clean(getattr(sport, "canonical_key", ""))
             )
         ]
 
