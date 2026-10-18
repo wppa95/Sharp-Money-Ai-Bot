@@ -559,7 +559,7 @@ def test_rotation_checkpoints_each_request_and_resumes_after_restart(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_rotation_never_requests_football_targets(tmp_path):
+async def test_rotation_includes_football_targets(tmp_path):
     from providers.propline import (
         PropLineReadOnlyRotation,
         PropLineReadOnlyTarget,
@@ -571,16 +571,18 @@ async def test_rotation_never_requests_football_targets(tmp_path):
         canonical_sport="NFL",
         event_id="nfl-event",
     )
+    client = _RotationClient()
     rotation = PropLineReadOnlyRotation(
-        object(),
+        client,
         state_path=str(tmp_path / "rotation.sqlite3"),
         max_requests_per_cycle=4,
     )
 
     report = await rotation.run([target])
 
-    assert report.attempted == 0
-    assert report.completed == 0
+    assert report.attempted == 1
+    assert report.completed == 1
+    assert client.calls[0][0] == "event_results"
 
 
 def test_rotation_reports_unresolved_results_without_persisting_them(tmp_path):
@@ -733,7 +735,7 @@ async def test_read_only_player_history_rotation_persists_verified_rows():
 
 
 @pytest.mark.asyncio
-async def test_read_only_history_excludes_football_and_rejects_incomplete():
+async def test_read_only_history_accepts_verified_football_and_rejects_incomplete():
     from types import SimpleNamespace
     from unittest.mock import AsyncMock, MagicMock
 
@@ -776,9 +778,12 @@ async def test_read_only_history_excludes_football_and_rejects_incomplete():
         ),
     )
 
-    assert football_count == 0
+    assert football_count == 1
     assert incomplete_count == 0
-    db.upsert_player_results_bulk.assert_not_awaited()
+    db.upsert_player_results_bulk.assert_awaited_once()
+    saved = db.upsert_player_results_bulk.await_args.args[0]
+    assert len(saved) == 1
+    assert saved[0].sport == "NFL"
 
 
 @pytest.mark.asyncio

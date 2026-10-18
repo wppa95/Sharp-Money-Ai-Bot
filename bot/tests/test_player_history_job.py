@@ -638,7 +638,7 @@ def test_player_games_require_matching_player_sport_stat_and_final_value():
     ("sport", "official_sport"),
     [("NFL", "football_nfl"), ("CFB", "football_ncaaf")],
 )
-def test_player_games_never_persist_football_rows_to_shared_history(
+def test_player_games_persist_verified_football_rows_to_shared_history(
     sport, official_sport
 ):
     target = PropLineReadOnlyTarget(
@@ -654,6 +654,7 @@ def test_player_games_never_persist_football_rows_to_shared_history(
                 "game_id": f"{sport.lower()}-final",
                 "status": "Final",
                 "game_date": "2026-09-20",
+                "stat_type": "passing yards",
                 "actual_value": 250,
             }
         ]
@@ -663,7 +664,104 @@ def test_player_games_never_persist_football_rows_to_shared_history(
     rows = _completed_propline_game_rows(target, result)
 
     assert persisted_payload == result.payload
-    assert rows == []
+    assert [(row.game_id, row.actual_value) for row in rows] == [
+        (f"{sport.lower()}-final", 250.0),
+    ]
+
+
+@pytest.mark.parametrize(
+    ("sport", "market", "stats", "expected"),
+    [
+        (
+            "NBA",
+            "pts+reb+ast",
+            {"points": 20, "rebounds": 7, "assists": 5},
+            32.0,
+        ),
+        (
+            "MLB",
+            "hits+runs+rbis",
+            [
+                {"stat_type": "hits", "value": 2},
+                {"stat_type": "runs", "value": 1},
+                {"stat_type": "rbis", "value": 3},
+            ],
+            6.0,
+        ),
+        (
+            "NFL",
+            "pass+rush yards",
+            [
+                {"stat_type": "passing yards", "value": 220},
+                {"stat_type": "rushing yards", "value": 18},
+            ],
+            238.0,
+        ),
+    ],
+)
+def test_player_games_aggregate_documented_multi_sport_composites(
+    sport, market, stats, expected
+):
+    target = PropLineReadOnlyTarget(
+        family="player_games",
+        official_sport={"NBA": "basketball_nba", "MLB": "baseball_mlb", "NFL": "football_nfl"}[sport],
+        canonical_sport=sport,
+        player_name="History Player",
+        market=market,
+    )
+    result = SimpleNamespace(
+        payload={
+            "games": [{
+                "event_id": f"{sport.lower()}-composite",
+                "status": "Final",
+                "game_date": "2026-09-20",
+                "player_name": "History Player",
+                "sport": sport,
+                "stats": stats,
+            }]
+        }
+    )
+
+    rows = _completed_propline_game_rows(target, result)
+
+    assert [(row.stat_type, row.actual_value) for row in rows] == [
+        (market, expected),
+    ]
+
+
+def test_player_games_do_not_aggregate_composites_with_missing_or_duplicate_parts():
+    target = PropLineReadOnlyTarget(
+        family="player_games",
+        official_sport="basketball_nba",
+        canonical_sport="NBA",
+        player_name="History Player",
+        market="pts+reb+ast",
+    )
+    result = SimpleNamespace(
+        payload={
+            "games": [
+                {
+                    "game_id": "missing-component",
+                    "status": "Final",
+                    "game_date": "2026-09-20",
+                    "stats": {"points": 20, "rebounds": 7},
+                },
+                {
+                    "game_id": "duplicate-component",
+                    "status": "Final",
+                    "game_date": "2026-09-21",
+                    "stats": {
+                        "points": 20,
+                        "rebounds": 7,
+                        "assists": 5,
+                        "assists ": 6,
+                    },
+                },
+            ]
+        }
+    )
+
+    assert _completed_propline_game_rows(target, result) == []
 
 
 @pytest.mark.asyncio

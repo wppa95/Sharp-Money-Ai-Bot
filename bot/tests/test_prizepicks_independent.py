@@ -200,7 +200,7 @@ class TestIndependentPrizePicks:
             for prop in props
         } == {"NBA", "MLB", "NHL"}
 
-    async def test_request_worker_excludes_only_football_and_bounds_cycle(
+    async def test_request_worker_includes_discovered_football_and_bounds_cycle(
         self, monkeypatch
     ):
         calls = []
@@ -240,9 +240,9 @@ class TestIndependentPrizePicks:
         for sport, _bookmaker in calls:
             if sport not in attempted_sports:
                 attempted_sports.append(sport)
-        assert attempted_sports == ["MLB", "NBA", "WNBA", "NHL", "TENNIS"]
+        assert attempted_sports == ["MLB", "NFL", "NCAAF", "NBA", "WNBA"]
         assert len(calls) == 5 * 2
-        assert all(sport not in {"NFL", "NCAAF"} for sport, _ in calls)
+        assert all(sport in attempted_sports for sport, _ in calls)
 
     async def test_empty_sport_cooldowns_do_not_consume_rotation_slots(
         self, monkeypatch

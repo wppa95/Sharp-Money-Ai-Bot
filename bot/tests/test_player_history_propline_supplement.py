@@ -883,7 +883,9 @@ async def test_raw_propline_games_are_normalized_only_after_final_for_all_sports
     assert rows[0].game_id == "final-1"
     assert rows[0].actual_value == 31.0
     assert rows[0].source == "propline_player_games"
-    assert football_rows == []
+    assert len(football_rows) == 1
+    assert football_rows[0].game_id == "final-1"
+    assert football_rows[0].actual_value == 31.0
 
 
 @pytest.mark.asyncio

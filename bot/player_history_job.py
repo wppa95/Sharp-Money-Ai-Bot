@@ -11,9 +11,7 @@ from dataclasses import asdict, is_dataclass, replace
 from types import SimpleNamespace
 from typing import Any
 
-from engine.sport_policy import (
-    canonical_sport_key,
-)
+from engine.sport_policy import canonical_sport_key
 from providers.propline import PROPLINE_DEFAULT_REQUESTS_PER_HOUR
 
 logger = logging.getLogger(__name__)
@@ -1277,19 +1275,6 @@ async def propline_read_only_rotation_job(context) -> None:
         else:
             active = await db.get_active_underdog_snapshot_per_prop()
             active_rows = list(active.values()) if hasattr(active, "values") else list(active or [])
-
-        def _source_value(value, *names):
-            if isinstance(value, dict):
-                for name in names:
-                    candidate = value.get(name)
-                    if candidate not in (None, ""):
-                        return candidate
-                return None
-            for name in names:
-                candidate = getattr(value, name, None)
-                if candidate not in (None, ""):
-                    return candidate
-            return None
 
         async def cached_discovery(family: str, target_key: str, official: str):
             reader = getattr(db, "get_propline_evidence", None)
