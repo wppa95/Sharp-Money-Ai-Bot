@@ -919,6 +919,7 @@ class PlayerHistoryProvider:
             _clean,
             _normalize_stat,
             _parse_datetime,
+            propline_raw_player_game_value,
         )
         sport_u = str(sport or "").upper().strip()
         if not sport_u:
@@ -1136,20 +1137,14 @@ class PlayerHistoryProvider:
 
             player = matching_players[0]
             stats = _field(player, "stats", "statistics", "values")
-            if not isinstance(stats, dict):
+            if not isinstance(stats, (dict, list, tuple)):
                 continue
-            matching_stats = [
-                (key, value) for key, value in stats.items()
-                if _normalize_stat(key) == requested_stat
-            ]
-            if len(matching_stats) != 1:
-                continue
-            _, raw_value = matching_stats[0]
-            if isinstance(raw_value, bool):
-                continue
-            try:
-                value = float(raw_value)
-            except (TypeError, ValueError):
+            value = propline_raw_player_game_value(
+                sport_u,
+                stat_type,
+                stats,
+            )
+            if value is None:
                 continue
             key = (event_id, event_time.date().isoformat(), requested_player, requested_stat)
             if key in seen_keys:

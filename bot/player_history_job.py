@@ -219,6 +219,7 @@ def _completed_propline_game_rows(
 
     from providers.player_stats import RawGameResult
     from providers.propline import (
+        _normalize_stat,
         _parse_datetime,
         propline_raw_player_game_value,
         _team_names_match,
@@ -227,6 +228,7 @@ def _completed_propline_game_rows(
     rows_by_identity: dict[tuple[str, str, str, str, str], Any] = {}
     conflicting_identities: set[tuple[str, str, str, str, str]] = set()
     duplicates = 0
+    target_stat = _normalize_stat(target.market)
     for game in _propline_game_records(getattr(result, "payload", None)):
         if not _is_explicit_propline_final(game):
             continue
@@ -1197,17 +1199,6 @@ async def _hydrate_completed_history_cache(db, targets) -> None:
 
 async def _persist_propline_player_history_rows(db, target, result) -> int:
     """Persist only explicitly settled entries from an already-fetched rotation result."""
-    if is_football_related_sport(
-        getattr(target, "canonical_sport", "") or getattr(target, "sport", "")
-    ):
-        logger.info(
-            "propline_read_only_rotation_job: INSUFFICIENT_EVIDENCE "
-            "sport=%s player=%s market=%s reason=football_excluded_from_propline",
-            getattr(target, "canonical_sport", ""),
-            getattr(target, "player_name", ""),
-            getattr(target, "market", ""),
-        )
-        return 0
     if (
         str(getattr(target, "family", "") or "") != "player_history"
         or not bool(getattr(result, "succeeded", False))

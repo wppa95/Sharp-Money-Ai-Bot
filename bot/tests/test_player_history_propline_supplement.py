@@ -149,10 +149,11 @@ def _endpoint(payload, *, succeeded=True, complete=True):
 
 
 def _event_stats_client(*, players, score_status="final", stats_status="final",
-                        stats_event_id="event-1", stats_time=None):
+                        stats_event_id="event-1", stats_time=None,
+                        sport_key="basketball_nba"):
     score = {
         "id": "event-1",
-        "sport_key": "basketball_nba",
+        "sport_key": sport_key,
         "commence_time": "2026-08-29T00:00:00Z",
         "status": score_status,
         "home_team": "Boston Celtics",
@@ -160,14 +161,14 @@ def _event_stats_client(*, players, score_status="final", stats_status="final",
     }
     stats = {
         "id": stats_event_id,
-        "sport_key": "basketball_nba",
+        "sport_key": sport_key,
         "commence_time": stats_time or "2026-08-29T00:00:00Z",
         "status": stats_status,
         "players": players,
     }
     return SimpleNamespace(
         is_configured=True,
-        official_sport_for=lambda sport: "basketball_nba",
+        official_sport_for=lambda sport: sport_key,
         fetch_scores=AsyncMock(
             return_value=_endpoint({"events": [score]})
         ),
@@ -301,18 +302,21 @@ async def test_event_stats_rejects_in_progress_and_provider_failure_without_writ
 
 
 @pytest.mark.asyncio
-async def test_event_stats_excludes_football():
+async def test_event_stats_supports_verified_football_player_stat():
     client = _event_stats_client(
-        players=[{"name": "Alex Example", "stats": {"points": 31}}]
+        players=[{"name": "Alex Example", "stats": {"passing yards": 275}}],
+        sport_key="football_nfl",
     )
-    client.official_sport_for = lambda sport: "football_nfl"
     provider = PlayerHistoryProvider(propline_client=client)
 
     rows = await provider._fetch_propline_event_stats(
         "NFL", "NFL", "passing yards"
     )
-    assert rows == []
-    client.fetch_scores.assert_not_awaited()
+    assert len(rows) == 1
+    assert rows[0].sport == "NFL"
+    assert rows[0].stat_type == "passing yards"
+    assert rows[0].actual_value == 275.0
+    client.fetch_scores.assert_awaited_once_with("football_nfl", days_from=3)
 
 
 @pytest.mark.asyncio

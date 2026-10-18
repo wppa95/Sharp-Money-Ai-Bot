@@ -234,7 +234,7 @@ def test_discovery_audit_stays_pending_when_catalog_is_unavailable():
     assert audit.catalog_identities == ()
 
 
-def test_unmapped_discovered_sport_never_creates_scoring_targets():
+def test_unmapped_discovered_sport_keeps_exact_catalog_key_for_discovery():
     targets = build_propline_read_only_targets(
         sports=[
             PropLineSport(
@@ -246,7 +246,9 @@ def test_unmapped_discovered_sport_never_creates_scoring_targets():
         ]
     )
 
-    assert targets == []
+    assert [(target.family, target.official_sport) for target in targets] == [
+        ("scores", "basketball_nba_v2"),
+    ]
 
 
 def test_targets_include_officially_discovered_events_without_prop_event_ids():
@@ -581,7 +583,8 @@ async def test_rotation_includes_football_targets(tmp_path):
     report = await rotation.run([target])
 
     assert report.attempted == 1
-    assert report.completed == 1
+    assert report.pending == 1
+    assert report.completed == 0
     assert client.calls[0][0] == "event_results"
 
 
