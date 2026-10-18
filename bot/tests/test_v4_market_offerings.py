@@ -1,5 +1,6 @@
 """Source-shaped deterministic regression fixtures; no live HTTP required."""
 from datetime import datetime, timedelta
+import json
 from types import SimpleNamespace as NS
 from unittest.mock import AsyncMock
 
@@ -331,7 +332,8 @@ async def test_explicit_unavailable_direction_not_delivered_but_available_pick_i
 
 
 async def _attempt_queued_pick(
-    monkeypatch, source, direction, *, line=None, use_delivery_buffer=True
+    monkeypatch, source, direction, *, line=None, use_delivery_buffer=True,
+    evidence_snapshot=None,
 ):
     import alerts
     import alert_scope_filter
@@ -381,10 +383,100 @@ async def _attempt_queued_pick(
         strict_pregame=True,
         decision=NS(recommendation=direction),
         validation=NS(has_supporting_data=True),
+        evidence_snapshot=evidence_snapshot,
         defer_delivery=True,
         delivery_buffer=buffer,
     )
     return result, buffer, delivery, db
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "provider,event_teams",
+    [
+        (
+            "Underdog",
+            (("home-team-id", "Home Team"), ("away-team-id", "Away Team")),
+        ),
+        (
+            "PrizePicks",
+            (("", "Home Team"), ("", "Away Team")),
+        ),
+    ],
+)
+async def test_qualified_queue_preserves_verified_source_event_teams(
+    monkeypatch, provider, event_teams
+):
+    from providers.odds_api import OddsApiScheduler
+
+    source = prop(provider=provider, event_teams=event_teams)
+    result, queue, _delivery, _db = await _attempt_queued_pick(
+        monkeypatch, source, "OVER"
+    )
+
+    assert result.queued is True
+    assert len(queue) == 1
+    item = queue[0]
+    evidence = json.loads(item["evidence_snapshot_json"])
+    assert evidence["source_id"] == source.external_id
+    assert evidence["source_event_id"] == source.game_id
+    assert evidence["source_event_teams"] == [["Home Team", "Away Team"]]
+
+    # Verify the existing supplemental-context gate can consume the persisted
+    # queue shape without making a provider request.
+    scheduler = OddsApiScheduler(
+        NS(
+            budget=NS(get_discovery_last_sport=lambda: None),
+            is_configured=True,
+        )
+    )
+    assert scheduler.queue_qualified_pick_context(item) is True
+    source_event = scheduler._pending_pick_contexts[item["pick_key"]]["source_event"]
+    assert (source_event["home_team"], source_event["away_team"]) == (
+        "Home Team",
+        "Away Team",
+    )
+    assert source_event["commence_time"] == source.game_time
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "event_teams",
+    [
+        (),
+        (("home-team-id", "Home Team"), ("away-team-id", "Away Team"),
+         ("third-team-id", "Third Team")),
+        (("same-team-id", "Home Team"), ("same-team-id", "Away Team")),
+    ],
+)
+async def test_missing_or_ambiguous_event_teams_do_not_enter_quote_context(
+    monkeypatch, event_teams
+):
+    from providers.odds_api import OddsApiScheduler
+
+    source = prop(provider="Underdog", event_teams=event_teams)
+    result, queue, _delivery, _db = await _attempt_queued_pick(
+        monkeypatch,
+        source,
+        "OVER",
+        evidence_snapshot={
+            # A previous/caller-provided pair must not substitute for missing
+            # or ambiguous identity on the exact current offering.
+            "source_event_teams": [["Unverified Home", "Unverified Away"]],
+        },
+    )
+
+    assert result.queued is True
+    assert len(queue) == 1
+    evidence = json.loads(queue[0]["evidence_snapshot_json"])
+    assert "source_event_teams" not in evidence
+    scheduler = OddsApiScheduler(
+        NS(
+            budget=NS(get_discovery_last_sport=lambda: None),
+            is_configured=True,
+        )
+    )
+    assert scheduler.queue_qualified_pick_context(queue[0]) is False
 
 
 @pytest.mark.asyncio

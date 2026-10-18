@@ -25,6 +25,7 @@ import inspect
 import math
 import re
 import time
+import unicodedata
 from threading import Lock
 from html import escape, unescape
 from dataclasses import dataclass, field
@@ -74,6 +75,67 @@ def _reminder_snapshot(game_time, direction, line_variant="", source_event_id=""
         "line_variant": str(line_variant or ""),
         "source_event_id": str(source_event_id or ""),
     }
+
+
+def _verified_source_event_teams(
+    offering: object,
+    *,
+    source_id: str,
+    event_id: str,
+) -> list[list[str]] | None:
+    """Return two source team labels only when their offering identity is exact.
+
+    ``event_teams`` is a tuple of provider participant references
+    ``(team_id, team_name)``. It is not itself a home/away pair. PrizePicks
+    records may have name-only references; Underdog records normally include
+    both IDs and labels. In either case, retain only an unambiguous pair from
+    the exact source line and event.
+    """
+    if offering is None or not source_id or not event_id:
+        return None
+
+    offering_source_id = str(getattr(offering, "external_id", "") or "").strip()
+    if not offering_source_id or offering_source_id != str(source_id).strip():
+        return None
+
+    offering_event_ids = [
+        str(getattr(offering, name, "") or "").strip()
+        for name in ("game_id", "event_id")
+    ]
+    offering_event_ids = [value for value in offering_event_ids if value]
+    if not offering_event_ids or any(
+        value != str(event_id).strip() for value in offering_event_ids
+    ):
+        return None
+
+    references = getattr(offering, "event_teams", None)
+    if not isinstance(references, (tuple, list)) or len(references) != 2:
+        return None
+
+    def identity_key(value: str) -> str:
+        decomposed = unicodedata.normalize("NFKD", value).casefold()
+        return "".join(character for character in decomposed if character.isalnum())
+
+    names: list[str] = []
+    name_keys: list[str] = []
+    team_id_keys: list[str] = []
+    for reference in references:
+        if not isinstance(reference, (tuple, list)) or len(reference) != 2:
+            return None
+        team_id, team_name = reference
+        name = " ".join(str(team_name or "").strip().split())
+        name_key = identity_key(name)
+        if not name or not name_key:
+            return None
+        names.append(name)
+        name_keys.append(name_key)
+        team_id_key = identity_key(str(team_id or "").strip())
+        if team_id_key:
+            team_id_keys.append(team_id_key)
+
+    if len(set(name_keys)) != 2 or len(set(team_id_keys)) != len(team_id_keys):
+        return None
+    return [names]
 
 
 def _is_fresh_delivery_line(fetched_at: object) -> bool:
@@ -2518,14 +2580,21 @@ class AlertDelivery:
                     ),
                 },
             }
-            _source_event_teams: list[list[str]] = []
-            for _pair in getattr(_offering, "event_teams", ()) or ():
-                if isinstance(_pair, (tuple, list)) and len(_pair) == 2:
-                    _home, _away = (str(_pair[0] or "").strip(), str(_pair[1] or "").strip())
-                    if _home and _away:
-                        _source_event_teams.append([_home, _away])
+            _source_event_teams = _verified_source_event_teams(
+                _offering,
+                source_id=source_id_value,
+                event_id=event_id_value,
+            )
+            _queue_evidence_snapshot = (
+                dict(evidence_snapshot)
+                if isinstance(evidence_snapshot, dict)
+                else {}
+            )
+            # Do not inherit a potentially stale or caller-supplied team pair.
+            # Only the exact, currently matched source offering can populate it.
+            _queue_evidence_snapshot.pop("source_event_teams", None)
             evidence_snapshot = {
-                **evidence_snapshot,
+                **_queue_evidence_snapshot,
                 "direction": _direction,
                 "line": _ud_line_value,
                 "line_variant": normalized_line_variant,
@@ -2533,7 +2602,7 @@ class AlertDelivery:
                 "source_id": source_id_value,
                 **(
                     {"source_event_teams": _source_event_teams}
-                    if _source_event_teams else {}
+                    if _source_event_teams is not None else {}
                 ),
                 **_reminder_snapshot(
                     game_time,
