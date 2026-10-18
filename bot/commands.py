@@ -839,7 +839,7 @@ async def cmd_health(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                 )
             lines.append(
                 "  <i>Team-score/current-market context only; no player results, "
-                "historical endpoints, or pick validation.</i>"
+                "or pick validation; no player results.</i>"
             )
 
         last_err_global = ht.last_error()
