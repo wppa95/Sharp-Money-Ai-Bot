@@ -1,9 +1,4 @@
-"""Provider-neutral game-result models and pick-grading helpers.
-
-The former Odds API score adapter is retained only as an import-compatible,
-no-network stub. Live settlement remains owned by the existing PropLine and
-player-result workflows.
-"""
+"""Provider-neutral team-score models and player-pick grading helpers."""
 
 from __future__ import annotations
 
@@ -14,6 +9,7 @@ from datetime import datetime
 from typing import Optional
 
 from .base import ProviderHealth, ProviderStatus
+from .odds_api import OddsApiClient, OddsApiDeferred, OddsApiError
 
 logger = logging.getLogger(__name__)
 _PUSH_TOLERANCE = 0.01
@@ -68,29 +64,54 @@ class GameResultsProvider(abc.ABC):
 
 
 class OddsApiResultsProvider(GameResultsProvider):
-    """Retired compatibility stub; it never makes a network request."""
+    """Team-score adapter backed by the shared, quota-limited v4 client.
 
-    name = "OddsAPIResults"
+    Scores remain team-level context only. This adapter never turns them into
+    player results or a player-prop settlement.
+    """
+
+    name = "OddsAPI"
+
+    def __init__(
+        self,
+        api_key: str | None = None,
+        *,
+        client: OddsApiClient | None = None,
+    ) -> None:
+        self.client = client or OddsApiClient(api_key=api_key)
 
     async def fetch_scores(
         self,
         sport_key: str,
-        days_from: int = 1,
+        days_from: int | None = 1,
     ) -> list[GameResult]:
-        return []
+        try:
+            scores = await self.client.fetch_scores(sport_key, days_from=days_from)
+        except (OddsApiDeferred, OddsApiError):
+            return []
+
+        results: list[GameResult] = []
+        for item in scores:
+            by_team = {team: score for team, score in item.scores}
+            away = by_team.get(item.away_team)
+            home = by_team.get(item.home_team)
+            results.append(
+                GameResult(
+                    sport=item.sport_key,
+                    event=item.event_id,
+                    away_team=item.away_team,
+                    home_team=item.home_team,
+                    away_score=int(away) if away is not None and away.is_integer() else None,
+                    home_score=int(home) if home is not None and home.is_integer() else None,
+                    status="FINAL" if item.completed else "IN_PROGRESS",
+                    completed_at=item.last_update if item.completed else None,
+                    source="TheOddsAPI:team_scores",
+                )
+            )
+        return results
 
     async def health_check(self) -> ProviderHealth:
-        return ProviderHealth(
-            name=self.name,
-            status=ProviderStatus.DISABLED,
-            last_success=None,
-            last_failure=None,
-            consecutive_failures=0,
-            failure_type=None,
-            quota_remaining=None,
-            quota_used=None,
-            error_msg="retired",
-        )
+        return await self.client.health_check()
 
 
 def grade_pp_pick(
