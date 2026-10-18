@@ -2270,8 +2270,13 @@ def normalize_propline_prizepicks_record(
         reject("missing player")
         return None
 
-    sport = _normalize_sport(
+    raw_sport = _clean(
         _first(raw_record, "sport", "league", "sport_key", "league_name")
+    )
+    sport = (
+        raw_sport.upper()
+        if raw_sport.upper() in _CANONICAL_TO_OFFICIAL_SPORT
+        else _normalize_sport(raw_sport)
     )
     stat_type = _normalize_stat(
         _first(raw_record, "stat_type", "stat", "market_name", "prop_type", "category")
@@ -6785,7 +6790,10 @@ class PropLinePrizePicksProvider(PropProviderBase):
                 error=f"PropLine sport is outside configured scope: {canonical_sport}",
                 failure_kind="configuration",
             )
-        official_sport = self.client.official_sport_for(canonical_sport)
+        official_sport = (
+            self.client.official_sport_for(requested_sport)
+            or self.client.official_sport_for(canonical_sport)
+        )
         if not official_sport:
             logger.debug(
                 "PropLine sport unavailable or unsupported; skipping %s",
