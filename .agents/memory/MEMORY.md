@@ -123,7 +123,7 @@
 - [Monitoring cycle budget](cycle-budget-funnel-resilience.md) — optional enrichment must have a hard shared budget so stalled history calls cannot block cycle completion or /funnel.
 - [Direction-only prop delivery](direction-only-delivery.md) — apply sport-specific quality rules while keeping independent safety gates; watchlists/tiers remain non-blocking and uncapped.
 - [Independent sport delivery](independent-sport-delivery-quotas.md) — attempt every pick passing existing gates; order within sports and never impose global or per-sport caps.
-- [PropLine complete-feed ledger](propline-complete-feed-ledger.md) — fetch all active non-football sports, retain immutable normalized observations, and withhold evaluation on partial feeds.
+- [PropLine complete-feed ledger](propline-complete-feed-ledger.md) — discover all monitored sports dynamically; retain source-aware observations and require exact verified stat mappings for history/grading.
 - [PropLine catalog audit boundary](propline-catalog-audit.md) — catalog drift is separate operational evidence; retain unknown identities and resolve them only when a later complete audit maps them.
 - [Opportunity identity and FPR delivery](opportunity-event-identity.md) — preserve source IDs; cross-ID grading requires one exact player/stat/date/team/opponent match.
 - [History coverage boundaries](history-coverage-boundaries.md) — distinguish no history from low sample; don't impose five results universally; report empty coverage separately from errors.
