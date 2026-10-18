@@ -668,6 +668,8 @@ async def cmd_health(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             "opportunity_grader":    "Opportunity grader",
             "player_history_collector": "Player history",
             "prop_history_pruner":   "History pruner",
+            "odds_api_discovery":    "Odds API free discovery",
+            "odds_api_paid_rotation": "Odds API paced context",
         }
 
         logger.info("cmd_health: reading job info")
@@ -745,6 +747,76 @@ async def cmd_health(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         # Other stat providers (ESPN, NHL, PandaScore) are fetched on-demand
         lines.append("  ⚪ <b>ESPN</b>  ·  on-demand gamelog (NBA/NFL/WNBA/MLB)")
         lines.append("  ⚪ <b>NHL API</b>  ·  on-demand skater/goalie logs")
+
+        # Optional Odds API diagnostics show only quota and scheduler state;
+        # never display request parameters, account identifiers, or credentials.
+        lines.append("")
+        lines.append("<b>🎲 Supplemental Odds API</b>")
+        _odds_client = getattr(context.application, "bot_data", {}).get(
+            "odds_api_client"
+        )
+        if _odds_client is None:
+            lines.append("  ⚪ not initialized")
+        elif not _odds_client.is_configured:
+            lines.append("  ⏸️ disabled")
+        else:
+            _odds_diag = _odds_client.diagnostics()
+
+            def _odds_ct_time(value: object) -> str:
+                if not value:
+                    return "not scheduled"
+                try:
+                    from zoneinfo import ZoneInfo
+
+                    _dt = datetime.fromisoformat(
+                        str(value).replace("Z", "+00:00")
+                    )
+                    if _dt.tzinfo is None:
+                        _dt = _dt.replace(tzinfo=__import__("datetime").timezone.utc)
+                    return _dt.astimezone(
+                        ZoneInfo("America/Chicago")
+                    ).strftime("%b %d %I:%M %p CT")
+                except (TypeError, ValueError, OverflowError):
+                    return "unknown"
+
+            _odds_health = ht.get_provider_info("OddsAPI") or {}
+            _odds_failures = int(_odds_health.get("error_streak", 0) or 0)
+            _odds_icon = "✅" if not _odds_failures else "⚠️"
+            lines.append(
+                f"  {_odds_icon} shared credits: "
+                f"<b>{int(_odds_diag.get('credits_used', 0))}/"
+                f"{int(_odds_diag.get('credits_target', 450))}</b> target "
+                f"(hard cap {int(_odds_diag.get('credits_hard_limit', 500))})"
+            )
+            lines.append(
+                "  UTC reset: "
+                + _html.escape(_odds_ct_time(_odds_diag.get("next_reset_utc")))
+                + " · next paid slot: "
+                + _html.escape(_odds_ct_time(_odds_diag.get("next_paid_request_at")))
+            )
+            _odds_last = _odds_diag.get("last_request") or {}
+            if _odds_last:
+                lines.append(
+                    f"  Last request: {_html.escape(str(_odds_last.get('endpoint', '?')))} "
+                    f"· {_html.escape(str(_odds_last.get('outcome', '?')))} "
+                    f"· {int(_odds_last.get('credit_cost', 0) or 0)} credits"
+                )
+            _odds_cooldown = _odds_diag.get("cooldown_until")
+            if _odds_cooldown:
+                lines.append(
+                    "  Provider cooldown until "
+                    + _html.escape(_odds_ct_time(_odds_cooldown))
+                )
+            lines.append(
+                f"  Discovery: {int(_odds_diag.get('discovered_sports', 0))} sports, "
+                f"{int(_odds_diag.get('discovered_events', 0))} events cached · "
+                f"{int(_odds_diag.get('score_supported_sports', 0))} documented "
+                "score-supported sports"
+            )
+            lines.append(
+                "  <i>Team-score/current-market context only; no player results, "
+                "historical endpoints, or pick validation.</i>"
+            )
 
         last_err_global = ht.last_error()
         # Only show the global last error if it's recent (within 2 hours).
