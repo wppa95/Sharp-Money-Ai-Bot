@@ -2030,8 +2030,6 @@ def propline_raw_player_game_value(
     """
     import math
 
-    if not isinstance(stats, dict):
-        return None
     canonical_sport = _normalize_sport(sport)
     requested = _normalize_stat(requested_stat)
 
@@ -2044,17 +2042,61 @@ def propline_raw_player_game_value(
             return None
         return parsed if math.isfinite(parsed) else None
 
-    normalized_values: dict[str, list[float]] = {}
-    for key, raw_value in stats.items():
+    if isinstance(stats, dict):
+        raw_pairs = []
+        for key, raw_value in stats.items():
+            if isinstance(raw_value, dict):
+                raw_value = next(
+                    (
+                        raw_value[name]
+                        for name in ("actual_value", "value", "stat_value")
+                        if name in raw_value
+                    ),
+                    None,
+                )
+            raw_pairs.append((key, raw_value))
+    elif isinstance(stats, (list, tuple)):
+        raw_pairs = []
+        for item in stats:
+            if not isinstance(item, dict):
+                continue
+            key = next(
+                (
+                    item[name]
+                    for name in ("stat_type", "stat", "name", "market")
+                    if item.get(name) not in (None, "")
+                ),
+                None,
+            )
+            if key is None:
+                continue
+            value = next(
+                (
+                    item[name]
+                    for name in ("actual_value", "value", "stat_value")
+                    if name in item
+                ),
+                None,
+            )
+            raw_pairs.append((key, value))
+    else:
+        return None
+
+    normalized_values: dict[str, list[Optional[float]]] = {}
+    exact_values: list[Optional[float]] = []
+    for key, raw_value in raw_pairs:
         normalized_values.setdefault(_normalize_stat(key), []).append(
             numeric(raw_value)
         )
         if _propline_raw_player_game_stat_matches(
             canonical_sport, requested, key
         ):
-            value = numeric(raw_value)
-            if value is not None:
-                return value
+            exact_values.append(numeric(raw_value))
+
+    # A direct provider field is preferred to deriving a value from component
+    # stats, but duplicate aliases or an invalid direct value are ambiguous.
+    if exact_values:
+        return exact_values[0] if len(exact_values) == 1 else None
 
     components = _PROPLINE_RAW_PLAYER_GAME_COMPOSITES.get(
         canonical_sport, {}

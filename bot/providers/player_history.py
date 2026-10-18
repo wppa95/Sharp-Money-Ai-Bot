@@ -1409,16 +1409,12 @@ class PlayerHistoryProvider:
         from providers.player_stats import RawGameResult
         from providers.propline import (
             PropLineClient,
-            _normalize_stat,
             _parse_datetime,
-            _propline_raw_player_game_stat_matches,
+            propline_raw_player_game_value,
             _team_names_match,
         )
-        from engine.sport_policy import is_football_related_sport
 
         sport_u = str(sport or "").upper().strip()
-        if is_football_related_sport(sport_u):
-            return []
         if not sport_u:
             return []
         if self._propline_client is None:
@@ -1446,7 +1442,6 @@ class PlayerHistoryProvider:
         if not isinstance(payload, dict) or not isinstance(payload.get("games"), list):
             return []
 
-        requested_stat = _normalize_stat(stat_type)
         rows = []
         for game in payload["games"]:
             if not isinstance(game, dict):
@@ -1462,19 +1457,11 @@ class PlayerHistoryProvider:
                 or game.get("start_time")
                 or game.get("game_time")
             )
-            stats = game.get("stats")
+            stats = game.get("stats", game.get("statistics", game.get("player_stats")))
             if not game_id or game_time is None or not isinstance(stats, dict):
-                continue
-            value = None
-            for key, raw_value in stats.items():
-                if _propline_raw_player_game_stat_matches(
-                    sport_u, requested_stat, key
-                ):
-                    try:
-                        value = float(raw_value)
-                    except (TypeError, ValueError):
-                        value = None
-                    break
+                if not game_id or game_time is None:
+                    continue
+            value = propline_raw_player_game_value(sport_u, stat_type, stats)
             if value is None:
                 continue
             opponent = game.get("opponent")
