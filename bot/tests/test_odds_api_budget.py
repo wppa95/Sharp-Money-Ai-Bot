@@ -97,6 +97,7 @@ def test_all_endpoints_share_persistent_credit_total_and_header_reconciliation(t
         actual_cost=1,
         outcome="success",
         now=now + timedelta(days=1),
+        reported_used=4,
     )
     assert OddsApiCreditBudget(str(path)).diagnostics(
         now + timedelta(days=1)
@@ -116,9 +117,16 @@ def test_unknown_interrupted_reservation_charges_maximum_after_restart(tmp_path)
     )
     assert reservation
 
-    after_interruption = OddsApiCreditBudget(str(path)).diagnostics(
-        now + timedelta(minutes=4)
+    restarted = OddsApiCreditBudget(str(path))
+    reservation, reason = restarted.reserve(
+        endpoint="/sports/nba/scores",
+        params={},
+        max_cost=1,
+        now=now + timedelta(minutes=4),
     )
+    assert reservation is None
+    assert reason == "paced"
+    after_interruption = restarted.diagnostics(now + timedelta(minutes=4))
     assert after_interruption["credits_used"] == 2
     state = json.loads(path.read_text(encoding="utf-8"))
     assert state["last_request"]["outcome"] == "unknown_after_interruption"
@@ -133,7 +141,7 @@ def test_hard_limit_and_unknown_ledger_fail_closed(tmp_path):
         endpoint="/sports/nba/scores", params={}, max_cost=1, now=now
     )
     assert reservation is None
-    assert reason in {"hard_limit", "target_reached"}
+    assert reason in {"hard_limit_reached", "working_target_reached"}
 
     broken_path = tmp_path / "broken.json"
     broken_path.write_text("{not json", encoding="utf-8")
@@ -152,6 +160,7 @@ def test_budget_rolls_only_at_utc_month_boundary_and_keeps_history(tmp_path):
     assert budget.diagnostics(october)["credits_used"] == 123
     after_reset = budget.diagnostics(november)
     assert after_reset["credits_used"] == 0
+    budget.initialize_schedule(november)
     state = json.loads(path.read_text(encoding="utf-8"))
     assert state["period_start"] == datetime(2026, 11, 1, tzinfo=UTC).isoformat()
     assert state["period_history"][
