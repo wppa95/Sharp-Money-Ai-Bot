@@ -479,6 +479,23 @@ async def test_missing_or_ambiguous_event_teams_do_not_enter_quote_context(
     assert scheduler.queue_qualified_pick_context(queue[0]) is False
 
 
+def test_event_teams_are_rejected_when_source_event_identity_differs():
+    import alerts
+
+    offering = NS(
+        external_id="source-1",
+        game_id="event-1",
+        event_id="event-1",
+        event_teams=(("home-id", "Home Team"), ("away-id", "Away Team")),
+    )
+    assert alerts._verified_source_event_teams(
+        offering, source_id="source-1", event_id="event-2"
+    ) is None
+    assert alerts._verified_source_event_teams(
+        offering, source_id="source-2", event_id="event-1"
+    ) is None
+
+
 @pytest.mark.asyncio
 async def test_reported_underdog_line_and_under_selection_fail_closed(monkeypatch):
     source = prop(
