@@ -207,6 +207,7 @@ _SPORT_NORMALIZATION = {
     "KBO LEAGUE": "KBO",
     "JAPANESE NPB": "NPB",
     "FIFA WORLD CUP": "FIFA",
+    "PTS+REBS+ASTS": "pts+reb+ast",
 }
 
 _OVER_UNDER = {"OVER", "UNDER"}
@@ -1934,6 +1935,43 @@ _PROPLINE_RAW_PLAYER_GAME_ONLY_STATS = {
 }
 
 _PROPLINE_RAW_PLAYER_GAME_STAT_ALIASES = {
+    "NBA": {
+        "points+assists": frozenset({"points assists", "pts+ast"}),
+        "points+rebounds": frozenset({"points rebounds", "pts+reb"}),
+        "rebounds+assists": frozenset({"rebounds assists", "reb+ast"}),
+        "pts+reb+ast": frozenset(
+            {"points rebounds assists", "pts+rebs+asts"}
+        ),
+    },
+    "WNBA": {
+        "points+assists": frozenset({"points assists", "pts+ast"}),
+        "points+rebounds": frozenset({"points rebounds", "pts+reb"}),
+        "rebounds+assists": frozenset({"rebounds assists", "reb+ast"}),
+        "pts+reb+ast": frozenset(
+            {"points rebounds assists", "pts+rebs+asts"}
+        ),
+    },
+    "MLB": {
+        "hits+runs+rbis": frozenset({"hits runs rbis"}),
+    },
+    "NFL": {
+        "passing yards": frozenset({"pass yards"}),
+        "rushing yards": frozenset({"rush yards"}),
+        "receiving yards": frozenset({"rec yards"}),
+        "pass+rush yards": frozenset({"pass rush yards"}),
+        "rush+rec yards": frozenset({"rush rec yards"}),
+        "rush+rec tds": frozenset({"rush rec tds"}),
+        "tackles+assists": frozenset({"tackles assists"}),
+    },
+    "NCAAF": {
+        "passing yards": frozenset({"pass yards"}),
+        "rushing yards": frozenset({"rush yards"}),
+        "receiving yards": frozenset({"rec yards"}),
+        "pass+rush yards": frozenset({"pass rush yards"}),
+        "rush+rec yards": frozenset({"rush rec yards"}),
+        "rush+rec tds": frozenset({"rush rec tds"}),
+        "tackles+assists": frozenset({"tackles assists"}),
+    },
     "CS": {
         # PropLine's documented CS2 player markets cover maps 1-2, while the
         # raw game log names the full stat field explicitly.
@@ -1943,6 +1981,106 @@ _PROPLINE_RAW_PLAYER_GAME_STAT_ALIASES = {
         "headshots map 1 2": frozenset({"headshots maps 1 2"}),
     }
 }
+
+_PROPLINE_RAW_PLAYER_GAME_COMPOSITES = {
+    "NBA": {
+        "points+assists": ("points", "assists"),
+        "points+rebounds": ("points", "rebounds"),
+        "rebounds+assists": ("rebounds", "assists"),
+        "pts+reb+ast": ("points", "rebounds", "assists"),
+    },
+    "WNBA": {
+        "points+assists": ("points", "assists"),
+        "points+rebounds": ("points", "rebounds"),
+        "rebounds+assists": ("rebounds", "assists"),
+        "pts+reb+ast": ("points", "rebounds", "assists"),
+    },
+    "MLB": {
+        "hits+runs+rbis": ("hits", "runs", "rbis"),
+    },
+    "NFL": {
+        "pass+rush yards": ("passing yards", "rushing yards"),
+        "rush+rec yards": ("rushing yards", "receiving yards"),
+        "rush+rec tds": ("rushing touchdowns", "receiving touchdowns"),
+        "tackles+assists": ("tackles", "assists"),
+    },
+    "NCAAF": {
+        "pass+rush yards": ("passing yards", "rushing yards"),
+        "rush+rec yards": ("rushing yards", "receiving yards"),
+        "rush+rec tds": ("rushing touchdowns", "receiving touchdowns"),
+        "tackles+assists": ("tackles", "assists"),
+    },
+}
+
+
+def propline_raw_player_game_value(
+    sport: Any, requested_stat: Any, stats: Any
+) -> Optional[float]:
+    """Read one exact raw stat or sum a documented same-game composite.
+
+    Composite values are only derived from all component fields on the same
+    completed player-game record. Missing, non-numeric, non-finite, or
+    ambiguous component fields remain insufficient evidence.
+    """
+    import math
+
+    if not isinstance(stats, dict):
+        return None
+    canonical_sport = _normalize_sport(sport)
+    requested = _normalize_stat(requested_stat)
+
+    def numeric(value: Any) -> Optional[float]:
+        if isinstance(value, bool):
+            return None
+        try:
+            parsed = float(value)
+        except (TypeError, ValueError):
+            return None
+        return parsed if math.isfinite(parsed) else None
+
+    normalized_values: dict[str, list[float]] = {}
+    for key, raw_value in stats.items():
+        normalized_values.setdefault(_normalize_stat(key), []).append(
+            numeric(raw_value)
+        )
+        if _propline_raw_player_game_stat_matches(
+            canonical_sport, requested, key
+        ):
+            value = numeric(raw_value)
+            if value is not None:
+                return value
+
+    components = _PROPLINE_RAW_PLAYER_GAME_COMPOSITES.get(
+        canonical_sport, {}
+    ).get(requested)
+    if not components:
+        return None
+
+    aliases = {
+        "passing yards": {"passing yards", "pass yards"},
+        "rushing yards": {"rushing yards", "rush yards"},
+        "receiving yards": {"receiving yards", "rec yards"},
+        "rushing touchdowns": {
+            "rushing touchdowns", "rush touchdowns", "rush tds"
+        },
+        "receiving touchdowns": {
+            "receiving touchdowns", "receiving tds", "rec tds"
+        },
+    }
+    total = 0.0
+    for component in components:
+        accepted = aliases.get(component, {component})
+        component_values = [
+            value
+            for key in accepted
+            for value in normalized_values.get(_normalize_stat(key), [])
+        ]
+        # A missing or duplicate component is ambiguous; never guess which
+        # provider field is authoritative.
+        if len(component_values) != 1 or component_values[0] is None:
+            return None
+        total += component_values[0]
+    return total if math.isfinite(total) else None
 
 
 def _propline_raw_player_game_stat_supported(sport: Any, stat_type: Any) -> bool:
@@ -2659,13 +2797,15 @@ def official_player_market_for(
         return candidate
     # Resolve sport-specific labels before generic normalization collapses
     # them into a different sport's equivalent stat.
-    if sport_key in {
+    official_sport = _CANONICAL_TO_OFFICIAL_SPORT.get(sport_key, "")
+    is_soccer_sport = official_sport.startswith("soccer_") or sport_key in {
         "SOCCER", "EPL", "LALIGA", "SERIEA", "BUNDESLIGA", "LIGUE1",
         "MLS", "UCL", "FIFA",
-    }:
+    }
+    if is_soccer_sport:
         if raw_candidate == "shots":
             return "player_shots"
-        if raw_candidate == "shots on target":
+        if raw_candidate in {"shots on target", "shots on goal"}:
             return "player_shots_on_target"
         if raw_candidate in {
             "goals + assists", "goals+assists", "goals assists",
@@ -2722,6 +2862,29 @@ _CANONICAL_TO_OFFICIAL_SPORT = {
     "MLS": "soccer_mls",
     "UCL": "soccer_uefa_champions_league",
     "FIFA": "soccer_fifa_world_cup",
+    "CHAMPIONSHIP": "soccer_championship",
+    "EREDIVISIE": "soccer_eredivisie",
+    "LIGA MX": "soccer_liga_mx",
+    "PRIMEIRA LIGA": "soccer_primeira_liga",
+    "BRASILEIRÃO": "soccer_brasileirao",
+    "LIGA PROFESIONAL": "soccer_argentina_primera",
+    "SCOTTISH PREMIERSHIP": "soccer_scottish_premiership",
+    "SAUDI PRO LEAGUE": "soccer_saudi_pro",
+    "ELITESERIEN": "soccer_eliteserien",
+    "J1 LEAGUE": "soccer_japan_j_league",
+    "SÜPER LIG": "soccer_turkey_super_lig",
+    "BELGIAN PRO LEAGUE": "soccer_belgium_pro_league",
+    "ALLSVENSKAN": "soccer_sweden_allsvenskan",
+    "GREEK SUPER LEAGUE": "soccer_greek_super_league",
+    "SWISS SUPER LEAGUE": "soccer_swiss_super_league",
+    "A-LEAGUE": "soccer_a_league",
+    "COPA LIBERTADORES": "soccer_copa_libertadores",
+    "COPA SUDAMERICANA": "soccer_copa_sudamericana",
+    "UEFA EUROPA LEAGUE": "soccer_uefa_europa_league",
+    "UEFA CONFERENCE LEAGUE": "soccer_uefa_conference_league",
+    "UEFA NATIONS LEAGUE": "soccer_uefa_nations_league",
+    "2. BUNDESLIGA": "soccer_germany_bundesliga2",
+    "DFB-POKAL": "soccer_germany_dfb_pokal",
     "CFL": "football_cfl",
     "AFL": "aussie_rules_afl",
     "BOXING": "boxing",
@@ -2761,6 +2924,29 @@ _OFFICIAL_TO_CANONICAL_SPORT = {
     "soccer_mls": "MLS",
     "soccer_uefa_champions_league": "UCL",
     "soccer_fifa_world_cup": "FIFA",
+    "soccer_championship": "CHAMPIONSHIP",
+    "soccer_eredivisie": "EREDIVISIE",
+    "soccer_liga_mx": "LIGA MX",
+    "soccer_primeira_liga": "PRIMEIRA LIGA",
+    "soccer_brasileirao": "BRASILEIRÃO",
+    "soccer_argentina_primera": "LIGA PROFESIONAL",
+    "soccer_scottish_premiership": "SCOTTISH PREMIERSHIP",
+    "soccer_saudi_pro": "SAUDI PRO LEAGUE",
+    "soccer_eliteserien": "ELITESERIEN",
+    "soccer_japan_j_league": "J1 LEAGUE",
+    "soccer_turkey_super_lig": "SÜPER LIG",
+    "soccer_belgium_pro_league": "BELGIAN PRO LEAGUE",
+    "soccer_sweden_allsvenskan": "ALLSVENSKAN",
+    "soccer_greek_super_league": "GREEK SUPER LEAGUE",
+    "soccer_swiss_super_league": "SWISS SUPER LEAGUE",
+    "soccer_a_league": "A-LEAGUE",
+    "soccer_copa_libertadores": "COPA LIBERTADORES",
+    "soccer_copa_sudamericana": "COPA SUDAMERICANA",
+    "soccer_uefa_europa_league": "UEFA EUROPA LEAGUE",
+    "soccer_uefa_conference_league": "UEFA CONFERENCE LEAGUE",
+    "soccer_uefa_nations_league": "UEFA NATIONS LEAGUE",
+    "soccer_germany_bundesliga2": "2. BUNDESLIGA",
+    "soccer_germany_dfb_pokal": "DFB-POKAL",
     "football_cfl": "CFL",
     "aussie_rules_afl": "AFL",
     "boxing": "BOXING",
@@ -5575,15 +5761,26 @@ class PropLineClient:
         )
 
     def official_sport_for(self, canonical_sport: str) -> Optional[str]:
-        """Resolve a canonical sport, preferring the last official discovery."""
+        """Resolve a sport using the provider's exact active catalog key first."""
         canonical = _normalize_sport(canonical_sport)
-        for sport in self._sports_cache:
-            if (
-                sport.mapped
-                and sport.canonical_key == canonical
-                and sport.official_key.lower() in _OFFICIAL_TO_CANONICAL_SPORT
-            ):
-                return sport.official_key
+        matches = [
+            sport
+            for sport in self._sports_cache
+            if sport.canonical_key == canonical and sport.official_key
+        ]
+        if len(matches) == 1:
+            return matches[0].official_key
+        if len(matches) > 1:
+            known_matches = [
+                sport
+                for sport in matches
+                if _OFFICIAL_TO_CANONICAL_SPORT.get(
+                    sport.official_key.lower()
+                ) == canonical
+            ]
+            if len(known_matches) == 1:
+                return known_matches[0].official_key
+            return None
         return _CANONICAL_TO_OFFICIAL_SPORT.get(canonical)
 
     async def fetch_prizepicks_props(
