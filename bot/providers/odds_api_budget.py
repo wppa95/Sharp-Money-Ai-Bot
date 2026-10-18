@@ -264,6 +264,18 @@ class OddsApiCreditBudget:
                 "max_cost": int(max_cost),
                 "created_at": current.isoformat(),
             }
+            if max_cost:
+                _, reset_at = utc_month_bounds(current)
+                remaining_target = max(1, ODDS_API_MONTHLY_TARGET - effective)
+                spacing = max(
+                    60.0,
+                    (reset_at - current).total_seconds() / remaining_target,
+                )
+                reserved_slot = current + timedelta(seconds=spacing * max_cost)
+                prior_slot = _parse_datetime(state.get("next_paid_request_at"))
+                if prior_slot and prior_slot > reserved_slot:
+                    reserved_slot = prior_slot
+                state["next_paid_request_at"] = reserved_slot.isoformat()
             self._save_unlocked(state)
             return reservation_id, ""
 

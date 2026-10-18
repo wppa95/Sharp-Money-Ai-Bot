@@ -467,23 +467,41 @@ class OddsApiClient:
                 raise OddsApiDeferred("HTTP 429; provider cooldown applied")
 
             if status in (401, 402):
+                error_code = (
+                    str(response.body.get("error_code") or "").upper()
+                    if isinstance(response.body, dict) else ""
+                )
+                quota_rejected = (
+                    status == 402
+                    or "OUT_OF_USAGE_CREDITS" in error_code
+                    or "QUOTA" in error_code
+                )
                 if reservation_id:
                     self.budget.complete(
                         reservation_id,
                         actual_cost=None,
-                        outcome="quota_or_auth_rejected",
+                        outcome=(
+                            "quota_rejected" if quota_rejected
+                            else "authentication_rejected"
+                        ),
                         reported_used=reported_used,
-                        reported_remaining=0,
+                        reported_remaining=0 if quota_rejected else reported_remaining,
                     )
                 else:
                     self.budget.record_free_request(
                         endpoint=endpoint,
                         params=params,
-                        outcome="auth_or_quota_rejected",
+                        outcome=(
+                            "quota_rejected" if quota_rejected
+                            else "authentication_rejected"
+                        ),
                         reported_used=reported_used,
-                        reported_remaining=0,
+                        reported_remaining=0 if quota_rejected else reported_remaining,
                     )
-                self._record_failure("HTTP authentication/quota rejection", FailureType.QUOTA)
+                if quota_rejected:
+                    self._record_failure("HTTP quota rejection", FailureType.QUOTA)
+                else:
+                    self._record_failure("HTTP authentication rejection", FailureType.HTTP_ERROR)
                 raise OddsApiError("provider rejected the request")
 
             if status == 403:
