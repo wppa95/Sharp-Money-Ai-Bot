@@ -1603,6 +1603,29 @@ def test_unknown_sport_event_request_does_not_send_cross_sport_market_list():
     assert params == {"bookmakers": "prizepicks"}
 
 
+def test_http_error_detail_is_retained_without_exposing_credentials():
+    secret_marker = "do-not-log-this-key"
+    client = PropLineClient(
+        api_key=secret_marker,
+        api_url="https://api.prop-line.com",
+        session=_Session(
+            _Response(400, {"error": f"invalid api_key={secret_marker}"})
+        ),
+        min_request_interval=0,
+        request_budget=PropLineRequestBudget(10),
+    )
+
+    with pytest.raises(propline_module.PropLineError) as exc_info:
+        asyncio.run(client._request_json(
+            "https://api.prop-line.com/v1/sports/baseball_mlb/events/game/odds",
+            {"bookmakers": "prizepicks"},
+        ))
+
+    assert "HTTP 400" in str(exc_info.value)
+    assert "[REDACTED]" in str(exc_info.value)
+    assert secret_marker not in str(exc_info.value)
+
+
 def test_rotating_event_collection_is_bounded_fair_cached_and_preserves_identity():
     budget = PropLineRequestBudget(10)
     endpoint_budget = PropLineRequestBudget(10)

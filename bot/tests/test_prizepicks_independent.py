@@ -128,6 +128,80 @@ class TestIndependentPrizePicks:
         assert len(db.tracked) == 1
         assert db.tracked[0]["external_id"] == "fetched-prop"
 
+    async def test_request_worker_uses_event_rotation_and_persists_selected_slice(
+        self, monkeypatch
+    ):
+        calls = []
+        prop = SimpleNamespace(
+            player_name="Rotated Player",
+            team="TM",
+            sport="NBA",
+            stat_type="Points",
+            line_value=21.5,
+            game_time=datetime.utcnow() + timedelta(hours=2),
+            external_id="rotated-event-prop",
+            event_id="verified-event",
+            fetched_at=datetime.utcnow(),
+        )
+
+        class FakeProvider:
+            client = None
+
+            def is_available(self):
+                return True
+
+            async def fetch_props_for_sport_event_rotation(
+                self, sport, bookmaker=None
+            ):
+                calls.append((sport, bookmaker))
+                return PropLineFetchResult(
+                    [prop],
+                    datetime.utcnow(),
+                    succeeded=True,
+                    complete=True,
+                    discovered_event_count=4,
+                    fetched_event_count=1,
+                    incremental_event_scan=True,
+                )
+
+            async def fetch_props_for_sport_result(self, *_args, **_kwargs):
+                raise AssertionError("scheduled ingestion must use event rotation")
+
+        class FakeDB:
+            def __init__(self):
+                self.saved = []
+                self.tracked = []
+
+            async def upsert_prop_line_history_batch(self, provider, props, **kwargs):
+                self.saved.append((provider, list(props), kwargs))
+
+            async def track_prop_records(self, records):
+                self.tracked.extend(records)
+
+        db = FakeDB()
+        monkeypatch.setattr(market_engine, "_propline_provider", FakeProvider())
+        monkeypatch.setattr(market_engine, "_propline_request_cursor", 0)
+        monkeypatch.setattr(market_engine, "_propline_bookmaker_cursor", 0)
+        monkeypatch.setattr(market_engine, "_propline_empty_sport_until", {})
+        monkeypatch.setattr(market_engine, "_propline_empty_feed_streak", {})
+        monkeypatch.setattr(
+            market_engine,
+            "_get_prizepicks_scan_sports",
+            AsyncMock(return_value=("NBA",)),
+        )
+
+        result = await market_engine.propline_request_scan_job(
+            SimpleNamespace(bot_data={"db": db})
+        )
+
+        assert result is True
+        assert set(calls) == {("NBA", "prizepicks"), ("NBA", "underdog")}
+        assert len(db.saved) == 2
+        assert {provider for provider, _props, _kwargs in db.saved} == {
+            "PrizePicks", "Underdog"
+        }
+        assert all(saved_props == [prop] for _provider, saved_props, _kwargs in db.saved)
+
     async def test_request_worker_ingests_every_active_sport(self, monkeypatch):
         calls = []
 
