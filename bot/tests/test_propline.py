@@ -45,6 +45,9 @@ from providers.propline import (
 @pytest.fixture(autouse=True)
 def isolated_propline_limiter(monkeypatch):
     """Keep HTTP-fixture tests fast while exercising the real limiter."""
+    # This module exercises the paid endpoint client contracts. The Free-plan
+    # restriction behavior has separate tests that set the plan explicitly.
+    monkeypatch.setenv("PROPLINE_SUBSCRIPTION_PLAN", "hobby")
     virtual_time = [0.0]
 
     async def advance(seconds: float):

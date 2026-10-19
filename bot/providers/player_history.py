@@ -864,8 +864,9 @@ class PlayerHistoryProvider:
         client = self._propline_client
         if not getattr(client, "is_configured", False):
             return []
-        if not propline_family_allowed_for_plan(
-            "event_results", getattr(client, "subscription_plan", None)
+        plan = getattr(client, "subscription_plan", None)
+        if plan is not None and not propline_family_allowed_for_plan(
+            "event_results", plan
         ):
             logger.debug(
                 "PropLine event settlement unavailable on configured plan"
@@ -1211,8 +1212,9 @@ class PlayerHistoryProvider:
                     sport=str(sport or "").upper().strip(),
                 )
             return []
-        if not propline_family_allowed_for_plan(
-            "player_history", getattr(client, "subscription_plan", None)
+        plan = getattr(client, "subscription_plan", None)
+        if plan is not None and not propline_family_allowed_for_plan(
+            "player_history", plan
         ):
             if coverage is not None:
                 coverage.update(
