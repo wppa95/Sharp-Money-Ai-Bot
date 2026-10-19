@@ -10,7 +10,13 @@ from unittest.mock import AsyncMock
 import pytest
 
 from connectors.underdog import UnderdogConnector, UnderdogProjection
-from alerts import is_telegram_suppressed_sport
+import alerts
+from alerts import (
+    is_football_delivery_blocked,
+    is_telegram_suppressed_sport,
+    send_alert_detailed,
+    telegram_pick_delivery_job,
+)
 from engine.sport_policy import (
     is_disallowed_football_sport,
     is_football_related_sport,
@@ -67,6 +73,95 @@ def test_football_aliases_are_classified_as_gridiron_family(sport):
 )
 def test_supported_non_football_sports_remain_allowed(sport):
     assert is_football_related_sport(sport) is False
+    assert is_football_delivery_blocked(sport) is False
+
+
+@pytest.mark.parametrize(
+    "sport",
+    [
+        "NFL",
+        "NCAAF",
+        "CFB",
+        "FCS",
+        "CFL",
+        "AFLW",
+        "americanfootball_ncaaf",
+        "rugby_union",
+        "indoor football",
+    ],
+)
+def test_every_football_alias_is_blocked_at_the_telegram_send_boundary(sport):
+    bot = SimpleNamespace(send_message=AsyncMock())
+
+    outcome = asyncio.run(
+        send_alert_detailed(
+            bot,
+            123,
+            f"<b>Sport:</b> {sport}\nIndividual pick",
+        )
+    )
+
+    assert outcome.sent is False
+    assert outcome.error == "football_delivery_disabled"
+    bot.send_message.assert_not_awaited()
+
+
+def test_football_send_boundary_blocks_explicit_sport_even_if_text_is_ambiguous():
+    bot = SimpleNamespace(send_message=AsyncMock())
+    outcome = asyncio.run(
+        send_alert_detailed(bot, 123, "Individual pick", sport="americanfootball_nfl")
+    )
+    assert outcome.sent is False
+    bot.send_message.assert_not_awaited()
+
+
+def test_non_football_remains_eligible_at_the_telegram_send_boundary():
+    bot = SimpleNamespace(send_message=AsyncMock())
+    alerts._telegram_last_send_at.clear()
+
+    outcome = asyncio.run(
+        send_alert_detailed(
+            bot,
+            123,
+            "<b>Sport:</b> NBA\nIndividual pick",
+        )
+    )
+
+    assert outcome.sent is True
+    bot.send_message.assert_awaited_once()
+
+
+def test_queued_football_retry_is_invalidated_before_source_validation(monkeypatch):
+    from engine.offering_coverage import coverage
+
+    item = {
+        "id": 41,
+        "attempt_id": "attempt-1",
+        "qualification_json": "{}",
+        "evidence_snapshot_json": "{}",
+        "direction": "OVER",
+        "sport": "americanfootball_ncaaf",
+    }
+    db = SimpleNamespace(
+        claim_next_telegram_pick_delivery=AsyncMock(return_value=item),
+        finish_telegram_pick_delivery=AsyncMock(),
+        validate_telegram_pick_source=AsyncMock(),
+    )
+    bot = SimpleNamespace(send_message=AsyncMock())
+    context = SimpleNamespace(bot_data={"db": db}, bot=bot)
+    monkeypatch.setattr(alerts, "config", SimpleNamespace(allowed_user_ids=[123]))
+    monkeypatch.setattr(coverage, "ready_scopes", lambda: {"Underdog"})
+
+    asyncio.run(telegram_pick_delivery_job(context))
+
+    db.finish_telegram_pick_delivery.assert_awaited_once()
+    assert db.finish_telegram_pick_delivery.await_args.kwargs["status"] == "invalidated"
+    assert (
+        db.finish_telegram_pick_delivery.await_args.kwargs["reason"]
+        == "football_delivery_disabled"
+    )
+    db.validate_telegram_pick_source.assert_not_awaited()
+    bot.send_message.assert_not_awaited()
 
 
 @pytest.mark.parametrize(
