@@ -302,6 +302,10 @@ class PropLineError(RuntimeError):
     """Base error for a failed authorized PropLine request."""
 
 
+class PropLinePlanRestrictionError(PropLineError):
+    """Raised before I/O when a capability is outside the configured plan."""
+
+
 class PropLineRateLimitError(PropLineError):
     """PropLine rejected a request because of rate limiting or quota."""
 
@@ -3822,6 +3826,7 @@ class PropLineClient:
         endpoint_request_budget: Optional[PropLineRequestBudget] = None,
         endpoint_request_limiter: Optional[PropLineRequestLimiter] = None,
         export_request_budget: Optional[PropLineRequestBudget] = None,
+        subscription_plan: Optional[str] = None,
     ) -> None:
         self.api_key = api_key if api_key is not None else os.getenv("PROPLINE_API_KEY", "")
         self.api_url = (
@@ -3831,6 +3836,14 @@ class PropLineClient:
         ).strip()
         self._session = session
         self._owns_session = session is None
+        self.subscription_plan = (
+            str(subscription_plan).strip().lower()
+            if subscription_plan is not None
+            else os.getenv(
+                "PROPLINE_SUBSCRIPTION_PLAN",
+                DEFAULT_PROPLINE_SUBSCRIPTION_PLAN,
+            ).strip().lower()
+        )
         self.min_request_interval = max(0.0, float(min_request_interval))
         self.cache_ttl = max(0.0, float(cache_ttl))
         self.timeout_seconds = max(1.0, float(timeout_seconds))
