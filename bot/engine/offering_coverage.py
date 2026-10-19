@@ -368,32 +368,56 @@ class OfferingCoverage:
         result = []
         if not getattr(pick, "available_directions", ()):
             return result
+        from engine.sport_policy import player_sport_key
+
         start = _utc(getattr(pick, "game_time", None))
-        opponent = str(getattr(pick, "opponent", "") or "").strip().casefold()
-        def participants(prop):
-            return frozenset(
-                str(name).strip().casefold()
-                for _, name in getattr(prop, "event_teams", ())
-                if str(name).strip()
-            )
-        pick_teams = participants(pick)
+        if start is None:
+            return result
+
+        def _team_names(prop: Any) -> frozenset[str]:
+            names = {
+                " ".join(str(name).split()).casefold()
+                for _, name in (getattr(prop, "event_teams", ()) or ())
+                if str(name or "").strip()
+            }
+            if len(names) == 2:
+                return frozenset(names)
+            team = " ".join(str(getattr(prop, "team", "") or "").split()).casefold()
+            opponent = " ".join(
+                str(getattr(prop, "opponent", "") or "").split()
+            ).casefold()
+            return frozenset((team, opponent)) if team and opponent else frozenset()
+
+        pick_teams = _team_names(pick)
+        pick_event_id = str(getattr(pick, "game_id", "") or "").strip()
         for row in self.rows.values():
             if getattr(row, "removed", False):
                 continue
             if row.provider == pick.provider or {row.provider, pick.provider} != {"Underdog", "PrizePicks"}:
                 continue
-            if row.sport != pick.sport or row.player_name.strip().casefold() != pick.player_name.strip().casefold():
+            if (
+                player_sport_key(row.sport) != player_sport_key(pick.sport)
+                or row.player_name.strip().casefold()
+                != pick.player_name.strip().casefold()
+            ):
                 continue
             if market_identity(row.sport, row.original_stat_type or row.stat_type) != market_identity(pick.sport, pick.original_stat_type or pick.stat_type):
                 continue
-            # Provider event IDs are not universal. Accept either the same
-            # explicit ID plus start, or exact start plus confirmed opponent.
-            if start is None or _utc(row.game_time) != start:
+            if _utc(row.game_time) != start:
                 continue
-            same_event = bool(row.game_id and row.game_id == pick.game_id)
-            other_opponent = str(getattr(row, "opponent", "") or "").strip().casefold()
-            same_teams = len(pick_teams) == 2 and participants(row) == pick_teams
-            if not same_event and not same_teams and not (opponent and other_opponent == opponent):
+            row_teams = _team_names(row)
+            # Reject contradictory verified teams even if provider IDs happen
+            # to collide. When IDs differ across providers, exact team identity
+            # plus the exact event start is the required cross-source join.
+            if pick_teams and row_teams and pick_teams != row_teams:
+                continue
+            same_teams = bool(pick_teams and row_teams and pick_teams == row_teams)
+            same_event_id = bool(
+                pick_event_id
+                and str(getattr(row, "game_id", "") or "").strip()
+                == pick_event_id
+            )
+            if not same_teams and not same_event_id:
                 continue
             # Unknown periods/rules are never equated across different labels;
             # the conservative alias table above only contains known definitions.
