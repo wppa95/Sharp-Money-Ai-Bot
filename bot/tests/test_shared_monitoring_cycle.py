@@ -96,6 +96,9 @@ async def test_shared_cycle_keeps_propline_internal_to_ingestion(monkeypatch):
     underdog_release = asyncio.Event()
     ingestion_release = asyncio.Event()
     completed = []
+    monkeypatch.setattr(market_engine, "_propline_ingest_task", None)
+    monkeypatch.setattr(market_engine, "_prizepicks_cycle_task", None)
+    monkeypatch.setattr(market_engine, "_propline_pending_props", {})
 
     class Health:
         def record_monitoring_cycle_complete(self):
