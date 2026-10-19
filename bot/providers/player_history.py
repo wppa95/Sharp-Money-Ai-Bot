@@ -850,7 +850,10 @@ class PlayerHistoryProvider:
         result payload even when the display market is not supported by the
         player-history market catalog.
         """
-        from providers.propline import PropLineClient
+        from providers.propline import (
+            PropLineClient,
+            propline_family_allowed_for_plan,
+        )
 
         event_key = str(event_id or "").strip()
         sport_u = str(sport or "").upper().strip()
@@ -860,6 +863,13 @@ class PlayerHistoryProvider:
             self._propline_client = PropLineClient()
         client = self._propline_client
         if not getattr(client, "is_configured", False):
+            return []
+        if not propline_family_allowed_for_plan(
+            "event_results", getattr(client, "subscription_plan", None)
+        ):
+            logger.debug(
+                "PropLine event settlement unavailable on configured plan"
+            )
             return []
 
         try:
@@ -1188,6 +1198,7 @@ class PlayerHistoryProvider:
         from providers.propline import (
             PropLineClient,
             official_player_market_for,
+            propline_family_allowed_for_plan,
         )
 
         if self._propline_client is None:
@@ -1197,6 +1208,17 @@ class PlayerHistoryProvider:
             if coverage is not None:
                 coverage.update(
                     status=PROPLINE_COVERAGE_UNAVAILABLE,
+                    sport=str(sport or "").upper().strip(),
+                )
+            return []
+        if not propline_family_allowed_for_plan(
+            "player_history", getattr(client, "subscription_plan", None)
+        ):
+            if coverage is not None:
+                coverage.update(
+                    status=PROPLINE_COVERAGE_UNAVAILABLE,
+                    failure_kind="plan_restricted",
+                    error="PropLine player history unavailable on configured plan",
                     sport=str(sport or "").upper().strip(),
                 )
             return []
