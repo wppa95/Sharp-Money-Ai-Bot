@@ -79,11 +79,12 @@ class _Response:
     status = 200
     headers = {}
 
-    def __init__(self, kind):
+    def __init__(self, kind, request_number):
         self.kind = kind
+        self.request_number = request_number
 
     async def __aenter__(self):
-        if self.kind == "timeout":
+        if self.kind == "timeout" and self.request_number == 2:
             raise asyncio.TimeoutError()
         return self
 
@@ -91,10 +92,18 @@ class _Response:
         pass
 
     async def json(self, **kwargs):
+        if self.request_number == 1:
+            return [{
+                "id": "fixture-event", "sport_key": "basketball_nba",
+                "home_team": "Fixture Home", "away_team": "Fixture Away",
+                "commence_time": (
+                    datetime.utcnow() + timedelta(days=1)
+                ).isoformat() + "Z",
+            }]
         if self.kind == "malformed":
             raise ValueError("Invalid JSON fixture")
         if self.kind == "empty":
-            return []
+            return {"id": "fixture-event", "bookmakers": []}
         return [{
             "id": "fixture-event", "sport_key": "basketball_nba",
             "home_team": "Fixture Home", "away_team": "Fixture Away",
@@ -115,7 +124,7 @@ class _Session:
 
     def get(self, *args, **kwargs):
         self.requests += 1
-        return _Response(self.kind)
+        return _Response(self.kind, self.requests)
 
 
 @pytest.mark.asyncio
@@ -145,7 +154,7 @@ async def test_real_parser_to_worker_persistence_handles_response_states(
             "PrizePicks", "Fixture Player", "NBA", "points"
         )
         assert len(rows) == expected_rows
-        assert session.requests == 1
+        assert session.requests == 2
         assert len(market_engine._propline_pending_props) == expected_rows
         if rows:
             assert rows[0].provider == "PrizePicks"
