@@ -16,6 +16,13 @@ import commands
 import market_engine
 
 
+@pytest.fixture(autouse=True)
+def isolate_shared_cycle_handoff_state(monkeypatch):
+    monkeypatch.setattr(market_engine, "_propline_ingest_task", None)
+    monkeypatch.setattr(market_engine, "_prizepicks_cycle_task", None)
+    monkeypatch.setattr(market_engine, "_propline_pending_props", {})
+
+
 @pytest.mark.asyncio
 async def test_prizepicks_evaluates_before_slow_underdog_finishes(monkeypatch):
     release_ud = asyncio.Event()
