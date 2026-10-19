@@ -430,15 +430,17 @@ def test_history_uses_sample_label_for_short_season_window():
     import types
 
     decision = types.SimpleNamespace(
-        l30_games=30, season_games=30, season_over=18, season_hit_rate=0.60,
-        l5_games=None, l5_over=None, l5_hit_rate=None,
-        l10_games=None, l10_over=None, l10_hit_rate=None,
-        l20_games=None, l20_over=None, l20_hit_rate=None,
+        recommendation="OVER",
+        l30_games=30, l30_over=18, l30_under=12,
+        season_games=30, season_over=18, season_under=12, season_hit_rate=0.60,
+        l5_games=None, l5_over=None, l5_under=None, l5_hit_rate=None,
+        l10_games=None, l10_over=None, l10_under=None, l10_hit_rate=None,
+        l20_games=None, l20_over=None, l20_under=None, l20_hit_rate=None,
         h2h_games=None, h2h_over=None, h2h_hit_rate=None,
     )
     result = _format_history_block(decision)
-    assert "30-game sample" in result
-    assert "<b>Season:</b>" not in result
+    assert "<b>SZN (Over):</b> 18/30 — 60% (18 hits, 12 misses)" in result
+    assert "<b>L30 (Over):</b> 18/30 — 60%" in result
 
 
 def test_history_includes_recent_actual_result_values():
@@ -446,6 +448,7 @@ def test_history_includes_recent_actual_result_values():
     import types
 
     decision = types.SimpleNamespace(
+        recommendation="OVER",
         recent_values=(10, 14, 17, 12, 8),
         sample_values={
             "l5": (10, 14, 17, 12, 8),
@@ -455,9 +458,11 @@ def test_history_includes_recent_actual_result_values():
         },
         l5_games=5,
         l5_over=5,
+        l5_under=0,
         l5_hit_rate=1.0,
         l10_games=10,
         l10_over=7,
+        l10_under=2,
         l10_hit_rate=0.7,
         l15_games=None,
         l15_over=None,
@@ -470,24 +475,20 @@ def test_history_includes_recent_actual_result_values():
         l30_hit_rate=None,
         season_games=10,
         season_over=7,
+        season_under=2,
         season_hit_rate=0.7,
         h2h_games=3,
         h2h_over=2,
+        h2h_under=1,
         h2h_hit_rate=2 / 3,
     )
 
     result = _format_history_block(decision)
 
-    assert "<b>L5:</b> 10, 14, 17, 12, 8 · 100% (5/5)" in result
-    assert (
-        "<b>L10:</b> 10, 14, 17, 12, 8, 20, 6, 11, 9, 15 · 70% (7/10)"
-        in result
-    )
-    assert (
-        "<b>10-game sample:</b> 10, 14, 17, 12, 8, 20, 6, 11, 9, 15 · 70% (7/10)"
-        in result
-    )
-    assert "<b>H2H:</b> 7, 13, 14 · 67% (2/3)" in result
+    assert "<b>L5 (Over):</b> 5/5 — 100% (5 hits, 0 misses)" in result
+    assert "<b>L10 (Over):</b> 7/9 — 78% (7 hits, 2 misses, 1 pushes)" in result
+    assert "<b>SZN (Over):</b> 7/9 — 78%" in result
+    assert "<b>H2H (Over):</b> 2/3 — 67% (2 hits, 1 misses)" in result
 
 
 def test_alert_history_includes_h2h_window_from_decision():
@@ -500,21 +501,27 @@ def test_alert_history_includes_h2h_window_from_decision():
         reason="H2H supports the current direction",
         l5_games=None,
         l5_over=None,
+        l5_under=None,
         l5_hit_rate=None,
         l10_games=None,
         l10_over=None,
+        l10_under=None,
         l10_hit_rate=None,
         l20_games=20,
         l20_over=12,
+        l20_under=8,
         l20_hit_rate=0.60,
         l30_games=30,
         l30_over=18,
+        l30_under=12,
         l30_hit_rate=0.60,
         season_games=None,
         season_over=None,
+        season_under=None,
         season_hit_rate=None,
         h2h_games=3,
         h2h_over=2,
+        h2h_under=1,
         h2h_hit_rate=2 / 3,
     )
 
@@ -528,12 +535,9 @@ def test_alert_history_includes_h2h_window_from_decision():
         decision=decision,
     )
 
-    assert "H2H:" in message
-    assert "67% (2/3)" in message
-    assert "L20:" in message
-    assert "60% (12/20)" in message
-    assert "L30:" in message
-    assert "60% (18/30)" in message
+    assert "<b>H2H (Over):</b> 2/3 — 67% (2 hits, 1 misses)" in message
+    assert "<b>L20 (Over):</b> 12/20 — 60%" in message
+    assert "<b>L30 (Over):</b> 18/30 — 60%" in message
 
 
 def test_alert_history_includes_h2h_from_validation_when_decision_lacks_it():
@@ -563,7 +567,7 @@ def test_alert_history_includes_h2h_from_validation_when_decision_lacks_it():
         decision=decision,
     )
 
-    assert "<b>H2H:</b> 75%" in message
+    assert "<b>H2H (Over):</b> N/A" in message
 
 
 def test_strong_bet_uses_directional_hit_and_miss_thresholds():
