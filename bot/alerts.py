@@ -2878,6 +2878,12 @@ async def telegram_pick_delivery_job(context) -> None:
         qualification = json.loads(item.get("qualification_json") or "{}")
         evidence_snapshot = json.loads(item.get("evidence_snapshot_json") or "{}")
         direction = str(item.get("direction") or "").upper()
+        if is_football_delivery_blocked(str(item.get("sport") or "")):
+            await _finish(
+                "invalidated",
+                reason="football_delivery_disabled",
+            )
+            return
         offered = qualification.get("originating_platform_direction", {}).get(
             "available_directions"
         )
