@@ -1348,6 +1348,21 @@ def format_pp_alert(
 
     over_fmt  = format_odds(opp.sportsbook_over_odds)
     under_fmt = format_odds(opp.sportsbook_under_odds)
+    from alerts_multiplatform import (
+        _format_history_block,
+        _offering_line_details,
+        format_platform_line_comparison,
+    )
+    from engine.offering_coverage import coverage
+
+    pp_offering = coverage.match(
+        provider="PrizePicks",
+        player=pp.player_name,
+        sport=pp.sport,
+        stat=pp.stat_type,
+        line=pp.line_value,
+        game_time=pp.start_time,
+    )
 
     parts = [
         f"📊 <b>PLAYER PROP</b>",
@@ -1356,7 +1371,12 @@ def format_pp_alert(
         f"👤 <b>{pp.player_name}</b> ({pp.team})",
         "",
         "📡 <b>Source:</b>  Player Props · PrizePicks / PropLine",
-        f"🎯 <b>LINE:</b>  {pp.line_value} ({pp.stat_type})",
+        f"🎯 <b>LINE:</b>  {pp.line_value:g} ({pp.stat_type})",
+        (
+            f"<b>PrizePicks offering:</b> {_offering_line_details(pp_offering)}"
+            if pp_offering is not None
+            else "<b>PrizePicks offering:</b> classification, directions, and provider odds unavailable"
+        ),
         f"📊 <b>Reference Line:</b>   {opp.sportsbook_line} ({opp.sportsbook}) [{line_note}]",
         f"📉 <b>SB Odds:</b>     O {over_fmt} / U {under_fmt}",
         "",
@@ -1376,7 +1396,13 @@ def format_pp_alert(
 
     if pp.start_time:
         from alerts_multiplatform import _format_game_time_et
-        parts.append(f"🕐 <b>Start:</b>      {_format_game_time_et(pp.start_time)}")
+        parts.append(f"🕐 <b>Time:</b>      {_format_game_time_et(pp.start_time)}")
+
+    parts += [
+        "",
+        format_platform_line_comparison(pp_offering),
+        _format_history_block({"recommendation": opp.best_side}),
+    ]
 
     parts += [
         "",
