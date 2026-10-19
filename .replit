@@ -67,11 +67,11 @@ ODDS_API_MIN_REQUEST_INTERVAL = "3600"
 
 [[ports]]
 localPort = 8080
-externalPort = 80
+externalPort = 8080
 
 [[ports]]
 localPort = 8081
-externalPort = 8081
+externalPort = 80
 
 [[ports]]
 localPort = 8099
