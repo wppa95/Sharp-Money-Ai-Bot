@@ -1362,6 +1362,7 @@ def format_pp_alert(
         stat=pp.stat_type,
         line=pp.line_value,
         game_time=pp.start_time,
+        source_id=str(getattr(pp, "external_id", "") or ""),
     )
 
     parts = [
