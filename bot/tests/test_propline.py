@@ -1546,6 +1546,194 @@ def _event_odds(event_id, player="Alex Example", direction="Over"):
 
 
 @pytest.mark.parametrize(
+    ("sport", "required_market", "excluded_market"),
+    [
+        ("baseball_mlb", "player_hits", "player_points"),
+        ("basketball_nba", "player_points", "player_hits"),
+        ("basketball_wnba", "player_rebounds", "player_hits"),
+        ("basketball_ncaab", "player_assists", "player_hits"),
+        ("football_nfl", "player_passing_yards", "player_points"),
+        ("football_ncaaf", "player_receiving_yards", "player_hits"),
+        ("hockey_nhl", "player_shots_on_goal", "player_points"),
+        ("soccer_epl", "player_shots_on_target", "player_hits"),
+        ("tennis", "player_aces", "player_points"),
+        ("esports", "player_kills", "player_hits"),
+        ("mma_ufc", "player_takedowns", "player_points"),
+    ],
+)
+def test_event_odds_route_uses_only_sport_supported_markets(
+    sport, required_market, excluded_market
+):
+    client = PropLineClient(
+        api_key="test-only-key",
+        api_url="https://api.prop-line.com",
+        session=_Session(_Response(200, [])),
+        min_request_interval=0,
+        request_budget=PropLineRequestBudget(10),
+    )
+
+    url, params, scope = client._official_event_odds_request(
+        sport, "event-verified", bookmaker="underdog"
+    )
+
+    assert url == (
+        f"https://api.prop-line.com/v1/sports/{sport}"
+        "/events/event-verified/odds"
+    )
+    assert params["bookmakers"] == "underdog"
+    assert required_market in params["markets"].split(",")
+    assert excluded_market not in params["markets"].split(",")
+    assert scope.endswith(":underdog")
+    assert propline_module._propline_request_kind(url) == "event"
+
+
+def test_unknown_sport_event_request_does_not_send_cross_sport_market_list():
+    client = PropLineClient(
+        api_key="test-only-key",
+        api_url="https://api.prop-line.com",
+        session=_Session(_Response(200, [])),
+        min_request_interval=0,
+        request_budget=PropLineRequestBudget(10),
+    )
+
+    _url, params, _scope = client._official_event_odds_request(
+        "table_tennis", "event-verified", bookmaker="prizepicks"
+    )
+
+    assert params == {"bookmakers": "prizepicks"}
+
+
+def test_rotating_event_collection_is_bounded_fair_cached_and_preserves_identity():
+    budget = PropLineRequestBudget(10)
+    endpoint_budget = PropLineRequestBudget(10)
+    session = _QueueSession(
+        [
+            _Response(
+                200,
+                {
+                    "events": [
+                        _event("game-1", "Home One", "Away One"),
+                        _event("game-2", "Home Two", "Away Two"),
+                        _event("game-3", "Home Three", "Away Three"),
+                    ]
+                },
+            ),
+            _Response(200, _event_odds("game-1")),
+            _Response(200, _event_odds("game-2")),
+            _Response(200, _event_odds("game-3")),
+        ]
+    )
+    client = PropLineClient(
+        api_key="test-only-key",
+        api_url="https://api.prop-line.com",
+        session=session,
+        min_request_interval=0,
+        cache_ttl=300,
+        request_budget=budget,
+        endpoint_request_budget=endpoint_budget,
+    )
+
+    results = [
+        asyncio.run(
+            client.fetch_rotating_event_props(
+                "basketball_nba", bookmaker="prizepicks"
+            )
+        )
+        for _ in range(4)
+    ]
+
+    assert [result.failed_event_ids for result in results] == [(), (), (), ()]
+    assert [result.discovered_event_count for result in results] == [3, 3, 3, 3]
+    assert [result.props[0].event_id for result in results] == [
+        "game-1", "game-2", "game-3", "game-1"
+    ]
+    assert results[3].from_cache is True
+    assert results[0].incremental_event_scan is True
+    assert results[0].props[0].event_teams == (
+        ("", "Home One"), ("", "Away One")
+    )
+    assert [call[0].rsplit("/", 1)[-1] for call in session.calls[1:]] == [
+        "odds", "odds", "odds"
+    ]
+    assert sum("/events/" in call[0] and call[0].endswith("/odds") for call in session.calls) == 3
+    assert budget.count == 4
+    assert endpoint_budget.count == 4
+
+
+def test_event_rotation_advances_after_failure_and_rejects_wrong_event_payload():
+    session = _QueueSession(
+        [
+            _Response(
+                200,
+                {
+                    "events": [
+                        _event("game-1", "Home One", "Away One"),
+                        _event("game-2", "Home Two", "Away Two"),
+                    ]
+                },
+            ),
+            _Response(200, _event_odds("different-event")),
+            _Response(200, _event_odds("game-2")),
+        ]
+    )
+    client = PropLineClient(
+        api_key="test-only-key",
+        api_url="https://api.prop-line.com",
+        session=session,
+        min_request_interval=0,
+        cache_ttl=300,
+        request_budget=PropLineRequestBudget(10),
+    )
+
+    first = asyncio.run(
+        client.fetch_rotating_event_props("basketball_nba")
+    )
+    second = asyncio.run(
+        client.fetch_rotating_event_props("basketball_nba")
+    )
+
+    assert first.succeeded is False
+    assert first.complete is False
+    assert first.failed_event_ids == ("game-1",)
+    assert "requested event envelope" in first.error
+    assert second.succeeded is True
+    assert second.props[0].event_id == "game-2"
+    assert len(session.calls) == 3
+
+
+def test_event_rotation_accepts_a_verified_empty_market_list():
+    session = _QueueSession(
+        [
+            _Response(200, {"events": [_event("game-empty", "Home", "Away")]}),
+            _Response(
+                200,
+                [
+                    {
+                        "id": "game-empty",
+                        "sport_key": "basketball_nba",
+                        "bookmakers": [],
+                    }
+                ],
+            ),
+        ]
+    )
+    client = PropLineClient(
+        api_key="test-only-key",
+        api_url="https://api.prop-line.com",
+        session=session,
+        min_request_interval=0,
+        request_budget=PropLineRequestBudget(10),
+    )
+
+    result = asyncio.run(client.fetch_rotating_event_props("basketball_nba"))
+
+    assert result.succeeded is True
+    assert result.complete is True
+    assert result.props == []
+    assert result.fetched_event_count == 1
+
+
+@pytest.mark.parametrize(
     ("bookmaker", "provider"),
     [
         ("prizepicks", "PrizePicks"),
