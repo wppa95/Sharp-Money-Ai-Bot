@@ -936,7 +936,6 @@ async def send_alert_detailed(
         )
         return TelegramSendOutcome(
             sent=False,
-            error="football_delivery_disabled",
             exception_class="FootballDeliveryBlocked",
         )
     # All live Telegram paths eventually pass through this low-level sender.

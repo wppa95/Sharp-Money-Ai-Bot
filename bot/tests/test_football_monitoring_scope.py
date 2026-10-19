@@ -102,7 +102,7 @@ def test_every_football_alias_is_blocked_at_the_telegram_send_boundary(sport):
     )
 
     assert outcome.sent is False
-    assert outcome.error == "football_delivery_disabled"
+    assert outcome.exception_class == "FootballDeliveryBlocked"
     bot.send_message.assert_not_awaited()
 
 
