@@ -564,7 +564,7 @@ class TestDeliverUnderdog:
         ("data_source", "n_real_games", "n_supplemental_games"),
         [("real+propline", 3, 3), ("propline", 0, 6)],
     )
-    async def test_gridiron_completed_history_can_deliver(
+    async def test_gridiron_completed_history_does_not_enable_telegram_delivery(
         self, sport, data_source, n_real_games, n_supplemental_games
     ):
         sent_messages: list[str] = []
@@ -593,8 +593,12 @@ class TestDeliverUnderdog:
             decision=_make_directional_decision("OVER", confidence=75),
         )
 
-        assert result.sent is True
-        assert sent_messages
+        assert validation.has_supporting_data is True
+        assert result.sent is False
+        assert result.filtered is True
+        assert "football" in result.filtered_reason.lower()
+        assert not sent_messages
+        mock_bot.send_message.assert_not_awaited()
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
