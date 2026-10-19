@@ -585,15 +585,12 @@ def _format_history_block(
 
     l30_games = _numeric_attr(decision, "l30_games")
     windows = (
-        ("L5", "l5", "l5_hit_rate", "l5_games", "l5_over"),
-        ("L10", "l10", "l10_hit_rate", "l10_games", "l10_over"),
-        ("L20", "l20", "l20_hit_rate", "l20_games", "l20_over"),
-        ("L30", "l30", "l30_hit_rate", "l30_games", "l30_over"),
-        ("Season", "season", "season_hit_rate", "season_games", "season_over"),
-        ("H2H L5", "h2h_l5", "h2h_l5_hit_rate", "h2h_l5_games", "h2h_l5_over"),
-        ("H2H L10", "h2h_l10", "h2h_l10_hit_rate", "h2h_l10_games", "h2h_l10_over"),
-        ("H2H L20", "h2h_l20", "h2h_l20_hit_rate", "h2h_l20_games", "h2h_l20_over"),
-        ("H2H", "h2h", "h2h_hit_rate", "h2h_games", "h2h_over"),
+        ("L5", "l5", "l5_games", "l5_over", "l5_under"),
+        ("L10", "l10", "l10_games", "l10_over", "l10_under"),
+        ("L20", "l20", "l20_games", "l20_over", "l20_under"),
+        ("L30", "l30", "l30_games", "l30_over", "l30_under"),
+        ("H2H", "h2h", "h2h_games", "h2h_over", "h2h_under"),
+        ("SZN", "season", "season_games", "season_over", "season_under"),
     )
     rows: list[str] = []
     h2h_rendered = False
@@ -642,42 +639,42 @@ def _format_history_block(
 
     sample_values_rendered = False
     direction = _decision_recommendation(decision)
-    for label, values_key, rate_name, games_name, over_name in windows:
-        rate = _numeric_attr(decision, rate_name)
+    for label, _values_key, games_name, over_name, under_name in windows:
         games = _numeric_attr(decision, games_name)
         over = _numeric_attr(decision, over_name)
-        if direction == "UNDER":
-            under = _numeric_attr(decision, over_name.replace("_over", "_under"))
-            if under is not None and games:
-                over = under
-                rate = under / games
-            else:
-                # Without strict UNDER counts, pushes cannot be distinguished
-                # from losses. Never report 1 - OVER as verified UNDER history.
-                over = None
-                rate = None
-        shown_label = _history_window_label(label, games, l30_games)
-        if rate is None or games is None or games <= 0:
-            if label in {"L5", "L10", "L20", "L30"}:
-                sample_size = _numeric_attr(decision, "season_games")
-                detail = (
-                    f" — {int(sample_size)} valid games available"
-                    if sample_size is not None and 0 < sample_size < int(label[1:])
-                    else ""
-                )
-                rows.append(f"   <b>{shown_label}:</b> N/A{detail}")
+        under = _numeric_attr(decision, under_name)
+        shown_label = (
+            f"{label} ({direction.title()})"
+            if direction in {"OVER", "UNDER"}
+            else label
+        )
+        counts = (games, over, under)
+        if (
+            direction not in {"OVER", "UNDER"}
+            or any(
+                value is None
+                or not math.isfinite(value)
+                or int(value) != value
+                for value in counts
+            )
+            or games <= 0
+            or over < 0
+            or under < 0
+            or over + under > games
+        ):
+            rows.append(f"   <b>{shown_label}:</b> N/A")
+            if label == "H2H":
+                h2h_rendered = True
             continue
-        if over is not None:
-            value = f"{rate:.0%} ({int(over)}/{int(games)})"
-        else:
-            value = f"{rate:.0%} ({int(games)} games)"
-        actuals = _format_actuals(sample_values.get(values_key))
-        if values_key == "l5" and not actuals:
-            actuals = recent_actuals
-        if actuals:
-            value = f"{', '.join(actuals)} · {value}"
-            sample_values_rendered = True
-        rows.append(f"   <b>{shown_label}:</b> {value} ({direction})" if direction in {"OVER", "UNDER"} else f"   <b>{shown_label}:</b> {value}")
+        hits = int(over if direction == "OVER" else under)
+        pushes = int(games - over - under)
+        misses = int(games - hits - pushes)
+        decided = hits + misses
+        rate_text = f"{hits}/{decided} — {hits / decided:.0%}" if decided else "N/A"
+        details = f"{hits} hits, {misses} misses"
+        if pushes:
+            details += f", {pushes} pushes"
+        rows.append(f"   <b>{shown_label}:</b> {rate_text} ({details})")
         if label == "H2H":
             h2h_rendered = True
 
