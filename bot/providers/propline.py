@@ -103,25 +103,26 @@ def propline_family_allowed_for_plan(family: str, plan: Optional[str] = None) ->
 def _propline_restricted_family_for_url(url: str) -> str:
     """Identify known paid-only endpoint families without retaining the URL."""
     path = str(url or "").split("?", 1)[0].lower()
+    endpoint = path.rstrip("/").rsplit("/", 1)[-1]
     if "/exports/resolved-props" in path:
         return "resolved_props_export"
     if "/clv/grade" in path:
         return "clv_grade"
     if "/sgp" in path:
         return "sgp"
-    if "/results" in path:
+    if endpoint == "results":
         return "event_results"
     if "/players/" in path and "/history" in path:
         return "player_history"
     if "/players/" in path and "/trends" in path:
         return "player_trends"
-    if "/history" in path:
+    if endpoint in {"history", "closing"}:
         return "event_odds_history"
-    if "/movement" in path:
+    if endpoint == "movement":
         return "event_movement"
-    if "/best-line" in path:
+    if endpoint == "best-line":
         return "event_best_line"
-    if "/ev" in path:
+    if endpoint == "ev":
         return "event_ev"
     return ""
 

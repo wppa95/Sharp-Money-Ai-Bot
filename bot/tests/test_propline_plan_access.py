@@ -111,6 +111,45 @@ def test_free_plan_keeps_raw_player_game_collection_active():
     assert budget.count == 1
 
 
+def test_free_plan_allows_event_player_props_without_misclassifying_events_as_ev():
+    session = _Session({"id": "verified-event", "bookmakers": []})
+    budget = PropLineRequestBudget(20)
+    client = _client(session, budget=budget)
+
+    result = asyncio.run(client._request_json(
+        "https://api.prop-line.com/v1/sports/basketball_nba/"
+        "events/verified-event/odds",
+        {"bookmakers": "prizepicks", "markets": "player_points"},
+    ))
+
+    assert result == {"id": "verified-event", "bookmakers": []}
+    assert len(session.calls) == 1
+    assert session.calls[0][0].endswith(
+        "/v1/sports/basketball_nba/events/verified-event/odds"
+    )
+    assert budget.count == 1
+
+
+def test_free_plan_still_blocks_actual_event_ev_endpoint_before_budget_reservation():
+    session = _Session({})
+    budget = PropLineRequestBudget(20)
+    client = _client(session, budget=budget)
+
+    try:
+        asyncio.run(client._request_json(
+            "https://api.prop-line.com/v1/sports/basketball_nba/"
+            "events/verified-event/ev",
+            {},
+        ))
+    except Exception as exc:
+        assert "event_ev endpoint unavailable" in str(exc)
+    else:
+        raise AssertionError("The paid EV endpoint must be blocked on Free")
+
+    assert session.calls == []
+    assert budget.count == 0
+
+
 def test_paid_endpoints_remain_available_when_hobby_plan_is_configured():
     for family in (
         "player_history",
