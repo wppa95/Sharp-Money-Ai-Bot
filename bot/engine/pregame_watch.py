@@ -460,10 +460,10 @@ class PregameWatchEngine:
             # Monitoring and delivery share the normal evidence/freshness gates;
             # sport alone is never a delivery veto.
             try:
-                from alerts import is_telegram_suppressed_sport
+                from alerts import is_football_delivery_blocked
             except Exception:
-                is_telegram_suppressed_sport = lambda _sport: False
-            if is_telegram_suppressed_sport(entry.sport):
+                is_football_delivery_blocked = lambda _sport: False
+            if is_football_delivery_blocked(entry.sport):
                 continue
 
             player, stat, _ = key

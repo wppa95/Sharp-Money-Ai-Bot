@@ -38,8 +38,8 @@ def _safe(prop) -> bool:
         or not _is_fresh_delivery_line(prop.fetched_at)
     ):
         return False
-    from .sport_policy import is_disallowed_football_sport
-    if is_disallowed_football_sport(prop.sport):
+    from alerts import is_football_delivery_blocked
+    if is_football_delivery_blocked(prop.sport):
         return False
     return is_game_alertable(
         prop.game_time, game_status=prop.provider_status,
