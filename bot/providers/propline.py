@@ -3907,6 +3907,38 @@ def _official_player_trends_payload(
     }, True, ""
 
 
+def _event_odds_records(
+    payload: Any,
+    *,
+    event_id: str,
+    bookmaker: str,
+    event_context: Optional[PropLineEvent] = None,
+) -> list[dict[str, Any]]:
+    """Flatten only a structurally valid response for the requested event."""
+    expected_id = _clean(event_id)
+    if isinstance(payload, dict) and isinstance(payload.get("bookmakers"), list):
+        envelopes = [payload]
+    else:
+        envelopes = _extract_records(payload)
+    matching = [
+        event
+        for event in envelopes
+        if _clean(_first(event, "id", "event_id", "game_id", "match_id"))
+        == expected_id
+    ]
+    if not matching or any(
+        not isinstance(event.get("bookmakers"), list) for event in matching
+    ):
+        raise PropLineError(
+            "PropLine event odds response did not contain the requested event envelope"
+        )
+    return _official_odds_records(
+        matching,
+        bookmaker=bookmaker,
+        event_context=event_context,
+    )
+
+
 class PropLineClient:
     """Small, cached, rate-limited HTTP client for the authorized feed."""
 
@@ -3975,6 +4007,7 @@ class PropLineClient:
         self._snapshot_state_by_scope: dict[str, PropLineSnapshotState] = {}
         self._events_cache_by_sport: dict[str, tuple[PropLineEvent, ...]] = {}
         self._events_cache_clock_by_sport: dict[str, float] = {}
+        self._event_rotation_cursors: dict[str, int] = {}
         self._player_history_cache: dict[str, PropLinePlayerHistoryFetchResult] = {}
         self._player_history_cache_clock: dict[str, float] = {}
         self._player_trends_cache: dict[str, PropLinePlayerTrendsFetchResult] = {}
