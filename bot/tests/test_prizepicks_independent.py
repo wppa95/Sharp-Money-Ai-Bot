@@ -182,6 +182,12 @@ class TestIndependentPrizePicks:
         monkeypatch.setattr(market_engine, "_propline_provider", FakeProvider())
         monkeypatch.setattr(market_engine, "_propline_request_cursor", 0)
         monkeypatch.setattr(market_engine, "_propline_bookmaker_cursor", 0)
+        monkeypatch.setattr(market_engine, "_propline_ingest_task", None)
+        monkeypatch.setattr(market_engine, "_prizepicks_cycle_task", None)
+        monkeypatch.setattr(market_engine, "_propline_pending_props", {})
+        monkeypatch.setattr(
+            market_engine, "_start_prizepicks_handoff", lambda _context: None
+        )
         monkeypatch.setattr(market_engine, "_propline_empty_sport_until", {})
         monkeypatch.setattr(market_engine, "_propline_empty_feed_streak", {})
         monkeypatch.setattr(
@@ -200,7 +206,11 @@ class TestIndependentPrizePicks:
         assert {provider for provider, _props, _kwargs in db.saved} == {
             "PrizePicks", "Underdog"
         }
-        assert all(saved_props == [prop] for _provider, saved_props, _kwargs in db.saved)
+        assert all(
+            len(saved_props) == 1
+            and saved_props[0].external_id == "rotated-event-prop"
+            for _provider, saved_props, _kwargs in db.saved
+        )
 
     async def test_request_worker_ingests_every_active_sport(self, monkeypatch):
         calls = []
