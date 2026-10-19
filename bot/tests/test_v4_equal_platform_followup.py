@@ -137,11 +137,16 @@ async def test_real_parser_to_worker_persistence_handles_response_states(
 ):
     session = _Session(kind)
     budget = propline.PropLineRequestBudget(10)
-    async def no_sleep(_seconds):
-        return None
+    now = [0.0]
+
+    def clock():
+        return now[0]
+
+    async def advance_clock(seconds):
+        now[0] += seconds
 
     limiter = propline.PropLineRequestLimiter(
-        clock=lambda: 0.0, sleep=no_sleep
+        clock=clock, sleep=advance_clock
     )
     client = propline.PropLineClient(
         api_key="fixture-not-a-secret", api_url=propline.DEFAULT_PROPLINE_API_URL,
