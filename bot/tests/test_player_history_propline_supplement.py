@@ -97,6 +97,28 @@ def _client(entries):
 
 
 @pytest.mark.asyncio
+async def test_existing_sufficient_history_is_reused_without_propline_calls():
+    existing_rows = [
+        _primary_result(f"2026-08-{day:02d}T00:00:00", value=18.0 + day)
+        for day in range(1, 6)
+    ]
+    client = _client([])
+    provider = PlayerHistoryProvider(propline_client=client)
+
+    coverage = await provider.fetch_scheduled_results(
+        existing_rows,
+        "Alex Example",
+        "NBA",
+        "points",
+        min_samples=5,
+    )
+
+    assert coverage.rows == tuple(existing_rows)
+    assert coverage.status == "not_needed"
+    client.fetch_player_history.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_event_settlement_fetch_uses_provider_identity_and_explicit_rows():
     evidence = SimpleNamespace(
         event_id="event-1",
