@@ -50,7 +50,10 @@ from engine.delivery_evidence import (
     optional_sport_evidence_is_usable,
     serialized_evidence_supports_delivery,
 )
-from engine.sport_policy import is_disallowed_football_sport
+from engine.sport_policy import (
+    is_disallowed_football_sport,
+    is_football_related_sport,
+)
 from engine.strongest_pick import evidence_profile
 from models import EVOpportunity, Recommendation, SteamAlert
 
@@ -738,6 +741,21 @@ def format_start_message() -> str:
 def is_telegram_suppressed_sport(sport: Optional[str]) -> bool:
     """Only NFL/CFB are allowed within the football-family sport aliases."""
     return is_disallowed_football_sport(sport)
+
+
+def is_football_delivery_blocked(sport: Optional[str]) -> bool:
+    """Block every recognized football-family sport from Telegram delivery."""
+    return is_football_related_sport(sport)
+
+
+def _message_sport(message: str) -> str:
+    """Recover the explicit sport label from a legacy formatted pick alert."""
+    match = re.search(
+        r"(?:^|\n)\s*(?:<b>\s*)?sport\s*:\s*(?:</b>\s*)?([^<\n]+)",
+        str(message or ""),
+        re.IGNORECASE,
+    )
+    return unescape(match.group(1)).strip() if match else ""
 
 
 def _has_strong_underdog_evidence(
