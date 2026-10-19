@@ -580,6 +580,57 @@ class TestFormatPPAlert:
         msg = format_pp_alert(opp)
         assert "25.5" in msg
 
+    def test_format_pp_alert_uses_verified_underdog_line_context(self):
+        from engine.offering_coverage import coverage
+        from engine.player_props_pipeline import canonicalize_player_props
+        from types import SimpleNamespace
+
+        coverage.__init__()
+        opp = self._make_opp(line_value=25.5)
+        pp = opp.pp_line
+        canonicalize_player_props("PrizePicks", [SimpleNamespace(
+            provider="PrizePicks",
+            sport=pp.sport,
+            player_name=pp.player_name,
+            team=pp.team,
+            stat_type=pp.stat_type,
+            line_value=pp.line_value,
+            external_id=pp.external_id,
+            game_id="pp-event",
+            game_time=pp.start_time,
+            fetched_at=datetime.utcnow(),
+            event="LAL vs LAC",
+            opponent="LAC",
+            event_teams=(("home", "LAL"), ("away", "LAC")),
+            available_directions=("OVER", "UNDER"),
+            line_variant="standard",
+        )])
+        canonicalize_player_props("Underdog", [SimpleNamespace(
+            provider="Underdog",
+            sport=pp.sport,
+            player_name=pp.player_name,
+            team=pp.team,
+            stat_type=pp.stat_type,
+            line_value=27.5,
+            external_id="ud-offering",
+            game_id="ud-event",
+            game_time=pp.start_time,
+            fetched_at=datetime.utcnow(),
+            event="LAL vs LAC",
+            opponent="LAC",
+            event_teams=(("home", "LAL"), ("away", "LAC")),
+            available_directions=("OVER", "UNDER"),
+            line_variant="standard",
+        )])
+
+        msg = format_pp_alert(opp)
+
+        assert "PrizePicks:</b> 25.5" in msg
+        assert "Underdog:</b> 27.5" in msg
+        assert "<b>Diff:</b> 2" in msg
+        assert "line difference is context only" in msg
+        coverage.__init__()
+
     def test_contains_sb_line_value(self):
         opp = self._make_opp(sb_line=27.5)
         msg = format_pp_alert(opp)
