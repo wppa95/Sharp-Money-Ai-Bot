@@ -448,7 +448,7 @@ _DEFAULT_PROPLINE_EXPORT_REQUEST_BUDGET = PropLineRequestBudget(
 def _propline_request_kind(url: str) -> str:
     """Classify a request for quota telemetry without exposing its URL."""
     path = str(url or "").lower()
-    if "/odds" in path and "/sports/" in path:
+    if "/odds" in path and "/sports/" in path and "/events/" not in path:
         return "bulk"
     if "/events/" in path:
         return "event"
@@ -789,6 +789,7 @@ class PropLineEvent:
     away_team: str = ""
     start_time: Optional[datetime] = None
     label: str = ""
+    provider_event_id: bool = True
 
     @property
     def identity(self) -> str:
@@ -2577,6 +2578,7 @@ def _official_events(payload: Any, sport_key: str) -> list[PropLineEvent]:
                 away_team=away,
                 start_time=start,
                 label=label,
+                provider_event_id=bool(event_id),
             )
         )
     return events
@@ -3614,6 +3616,7 @@ def _official_odds_records(
     payload: Any,
     *,
     bookmaker: str = "prizepicks",
+    event_context: Optional[PropLineEvent] = None,
 ) -> list[dict[str, Any]]:
     """Flatten the documented PropLine odds response into normalizer records."""
     if isinstance(payload, dict) and payload.get("bookmakers") is not None:
@@ -3631,10 +3634,23 @@ def _official_odds_records(
     for event in payload:
         if not isinstance(event, dict):
             continue
-        sport_key = _clean(event.get("sport_key"))
-        event_id = _clean(event.get("id"))
-        home = _clean(event.get("home_team"))
-        away = _clean(event.get("away_team"))
+        event_id = _clean(_first(event, "id", "event_id", "game_id", "match_id"))
+        if event_context is not None and event_id != event_context.event_id:
+            continue
+        sport_key = _clean(event.get("sport_key")) or (
+            event_context.sport_key if event_context is not None else ""
+        )
+        home = _clean(_first(event, "home_team", "home", "home_name")) or (
+            event_context.home_team if event_context is not None else ""
+        )
+        away = _clean(_first(event, "away_team", "away", "away_name")) or (
+            event_context.away_team if event_context is not None else ""
+        )
+        commence_time = _first(
+            event, "commence_time", "start_time", "event_start", "game_time"
+        )
+        if commence_time in (None, "") and event_context is not None:
+            commence_time = event_context.start_time
         event_label = (
             f"{away} at {home}"
             if away and home
@@ -3643,7 +3659,7 @@ def _official_odds_records(
         event_data = {
             "id": event_id,
             "name": event_label,
-            "start_time": event.get("commence_time"),
+            "start_time": commence_time,
             "home_team": home,
             "away_team": away,
         }
