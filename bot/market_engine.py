@@ -1608,6 +1608,9 @@ async def propline_request_scan_job(context) -> None:
         persisted_feeds: list[str] = []
         failed_prizepicks = False
         last_attempted_index = first
+        fetch_rotation = getattr(
+            provider, "fetch_props_for_sport_event_rotation", None
+        )
         fetch_result = getattr(provider, "fetch_props_for_sport_result", None)
         fetch_props = getattr(provider, "fetch_props_for_sport", None)
         for offset, sport_index in enumerate(ordered_indexes):
@@ -1619,7 +1622,22 @@ async def propline_request_scan_job(context) -> None:
                 if _propline_empty_sport_until.get(feed_key, 0.0) > now:
                     continue
                 try:
-                    if callable(fetch_result):
+                    result = None
+                    if callable(fetch_rotation):
+                        result = await fetch_rotation(
+                            sport,
+                            bookmaker=bookmaker,
+                        )
+                        props = list(getattr(result, "props", []) or [])
+                        succeeded = bool(
+                            getattr(result, "succeeded", False)
+                            and getattr(result, "complete", False)
+                        )
+                        failure_text = str(getattr(result, "error", "") or "")
+                        failure_kind = str(
+                            getattr(result, "failure_kind", "") or ""
+                        )
+                    elif callable(fetch_result):
                         result = await fetch_result(
                             sport,
                             bookmaker=bookmaker,
@@ -1767,6 +1785,13 @@ async def propline_request_scan_job(context) -> None:
                     if props:
                         _propline_empty_sport_until.pop(feed_key, None)
                         _propline_empty_feed_streak.pop(feed_key, None)
+                    elif getattr(result, "incremental_event_scan", False):
+                        logger.info(
+                            "propline_request_scan: event had no props; "
+                            "rotation continues provider=%s sport=%s",
+                            source_provider,
+                            sport,
+                        )
                     else:
                         empty_streak = _propline_empty_feed_streak.get(feed_key, 0) + 1
                         _propline_empty_feed_streak[feed_key] = empty_streak

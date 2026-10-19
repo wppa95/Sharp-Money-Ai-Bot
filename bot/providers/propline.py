@@ -4118,6 +4118,39 @@ class PropLineClient:
         self._request_count += 1
         return True
 
+    async def _sanitized_http_error_detail(self, response: Any) -> str:
+        """Read a short provider error diagnostic without retaining credentials."""
+        body = ""
+        try:
+            payload = await response.json(content_type=None)
+        except Exception:
+            payload = None
+        if isinstance(payload, dict):
+            parts = [
+                _clean(payload.get(key))
+                for key in ("code", "error", "message", "detail", "type")
+                if payload.get(key) not in (None, "")
+            ]
+            body = " ".join(parts)
+        if not body:
+            try:
+                body = str(await response.text() or "")
+            except Exception:
+                body = ""
+        if self.api_key:
+            body = body.replace(self.api_key, "[REDACTED]")
+        body = re.sub(
+            r"(?i)([\"']?(?:x-api-key|api[_-]?key|access[_-]?token|token|"
+            r"authorization|secret|password|credential|key)[\"']?\s*[:=]\s*"
+            r"[\"']?)[^,\s}\"'&]+",
+            r"\1[REDACTED]",
+            body,
+        )
+        body = re.sub(r"(?i)\bBearer\s+\S+", "Bearer [REDACTED]", body)
+        body = re.sub(r"https?://[^\s\"'<>?]+\?[^\s\"'<>]*", "[URL REDACTED]", body)
+        body = re.sub(r"\s+", " ", body).strip()
+        return f": {body[:280]}" if body else ""
+
     async def _request_json(
         self,
         url: str,
@@ -4210,7 +4243,10 @@ class PropLineClient:
                 }
                 request_limiter.observe_provider_limit(response.headers)
                 if response.status == 404:
-                    raise PropLineNotFoundError(f"PropLine resource not found (HTTP {response.status})")
+                    detail = await self._sanitized_http_error_detail(response)
+                    raise PropLineNotFoundError(
+                        f"PropLine resource not found (HTTP {response.status}){detail}"
+                    )
                 if response.status == 429:
                     retry_after = _retry_after_seconds(response)
                     self._backoff_until = self._clock() + retry_after
@@ -4232,11 +4268,13 @@ class PropLineClient:
                         stats["rate_limited"],
                         retry_after,
                     )
+                    detail = await self._sanitized_http_error_detail(response)
                     raise PropLineRateLimitError(
-                        f"PropLine rate limited (HTTP {response.status})",
+                        f"PropLine rate limited (HTTP {response.status}){detail}",
                         retry_after=retry_after,
                     )
                 if response.status in {408, 425, 502, 503, 504}:
+                    detail = await self._sanitized_http_error_detail(response)
                     retry_after = min(
                         900.0,
                         max(30.0, 2.0 * request_limiter.min_interval),
@@ -4245,10 +4283,13 @@ class PropLineClient:
                     self.request_limiter.defer(retry_after)
                     self.endpoint_request_limiter.defer(retry_after)
                     raise PropLineError(
-                        f"PropLine temporarily unavailable (HTTP {response.status})"
+                        f"PropLine temporarily unavailable (HTTP {response.status}){detail}"
                     )
                 if response.status >= 400:
-                    raise PropLineError(f"PropLine request failed (HTTP {response.status})")
+                    detail = await self._sanitized_http_error_detail(response)
+                    raise PropLineError(
+                        f"PropLine request failed (HTTP {response.status}){detail}"
+                    )
                 if stream:
                     content_length = response.headers.get("Content-Length")
                     if (
