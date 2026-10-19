@@ -165,10 +165,60 @@ def test_telegram_uses_platform_line_difference_and_actual_classification(provid
     assert f"<b>Platform:</b> {provider}" in text
     assert "<b>Diff:</b> 2" in text
     assert "demon" in text and "standard" in text
-    assert "line difference alone" in text
+    assert "line difference is context only" in text
     assert "A at B" in text
+    assert "directions: OVER, UNDER" in text
+    assert "odds: unavailable" in text
     assert "Monitoring player props across multiple sports. Not betting advice." in text
     assert "STRONG BET" not in text and "★" not in text
+
+
+def test_equal_lines_show_zero_diff_and_source_odds_without_claiming_advantage():
+    a = prop(provider="Underdog", line=1.5, odds=-110)
+    b = prop(
+        provider="PrizePicks",
+        line=1.5,
+        game_id="provider-event-id",
+        game_time=a.game_time,
+        odds=-125,
+    )
+    # Provider IDs differ, but the exact start and team/opponent pair match.
+    a.event_teams = (("home", "Home Team"), ("away", "Away Team"))
+    b.event_teams = (("", "Away Team"), ("", "Home Team"))
+    a = canonicalize_player_props("Underdog", [a])[0]
+    b = canonicalize_player_props("PrizePicks", [b])[0]
+
+    text = format_underdog_new_prop_alert(
+        a.player_name, a.team, a.sport, a.stat_type, a.line_value, a.game_time,
+        decision=NS(recommendation="OVER"), source="Underdog",
+    )
+
+    assert "PrizePicks:</b> 1.5" in text
+    assert "Underdog:</b> 1.5" in text
+    assert "<b>Diff:</b> 0" in text
+    assert "odds: -110" in text and "odds: -125" in text
+    assert "does not establish which line is better" in text
+    assert "may be good value" not in text
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    ["player", "sport", "market", "event_teams", "directions"],
+)
+def test_cross_platform_comparison_rejects_mismatched_identity(mutation):
+    a, b = paired(1.5, 2.5)
+    if mutation == "player":
+        b.player_name = "Different Player"
+    elif mutation == "sport":
+        b.sport = "NHL"
+    elif mutation == "market":
+        b.stat_type = "Home Runs"
+    elif mutation == "event_teams":
+        a.event_teams = (("h", "Home"), ("a", "Away"))
+        b.event_teams = (("h2", "Other Home"), ("a2", "Other Away"))
+    else:
+        b.available_directions = ()
+    assert coverage.comparisons(a) == []
 
 
 def test_single_platform_does_not_invent_comparison():
@@ -196,9 +246,34 @@ def test_valid_games_filtered_before_slicing_and_pushes_are_not_under_hits():
     assert rates.l10 is None
     decision = UDBetDecision.make_pick("UNDER", "evidence", hit_rates=rates)
     text = _format_history_block(decision)
-    assert "80% (4/5)" in text and "(UNDER)" in text
-    assert "<b>L10:</b> N/A" in text
-    assert "<b>L20:</b> N/A" in text and "<b>L30:</b> N/A" in text
+    assert "4/5 — 80% (4 hits, 1 misses)" in text and "(Under)" in text
+    assert "<b>L10 (Under):</b> N/A" in text
+    assert "<b>L20 (Under):</b> N/A" in text and "<b>L30 (Under):</b> N/A" in text
+    assert "<b>SZN (Under):</b> 4/5 — 80% (4 hits, 1 misses, 1 pushes)" in text
+
+
+def test_history_uses_strict_directional_counts_and_displays_pushes_separately():
+    decision = NS(
+        recommendation="OVER",
+        l5_games=5, l5_over=3, l5_under=1,
+        l10_games=None, l10_over=None, l10_under=None,
+        l20_games=None, l20_over=None, l20_under=None,
+        l30_games=None, l30_over=None, l30_under=None,
+        h2h_games=4, h2h_over=1, h2h_under=2,
+        season_games=5, season_over=3, season_under=1,
+    )
+    text = _format_history_block(decision)
+    assert "<b>L5 (Over):</b> 3/4 — 75% (3 hits, 1 misses, 1 pushes)" in text
+    assert "<b>H2H (Over):</b> 1/3 — 33% (1 hits, 1 misses, 2 pushes)" in text
+    assert "<b>L10 (Over):</b> N/A" in text
+    assert "<b>SZN (Over):</b> 3/4 — 75%" in text
+
+
+def test_history_without_direction_or_counts_is_n_a_for_each_window():
+    assert "<b>L5:</b> N/A" in _format_history_block(None)
+    text = _format_history_block(NS(recommendation="PASS", l5_games=5, l5_over=4, l5_under=1))
+    for label in ("L5", "L10", "L20", "L30", "H2H", "SZN"):
+        assert f"<b>{label}:</b> N/A" in text
 
 
 def test_history_window_values_counts_order_and_h2h():
