@@ -927,6 +927,18 @@ async def send_alert_detailed(
     sport: Optional[str] = None,
 ) -> TelegramSendOutcome:
     """Send one message with shared pacing and preserve Telegram failure details."""
+    message_sport = _message_sport(message)
+    if is_football_delivery_blocked(sport) or is_football_delivery_blocked(
+        message_sport
+    ):
+        logger.info(
+            "Telegram pick send suppressed for database-only sport family"
+        )
+        return TelegramSendOutcome(
+            sent=False,
+            error="football_delivery_disabled",
+            exception_class="FootballDeliveryBlocked",
+        )
     # All live Telegram paths eventually pass through this low-level sender.
     # Keep internal scoring vocabulary out of user-facing alerts, including
     # legacy/direct broadcast callers that do not use the current formatters.
@@ -1893,7 +1905,7 @@ class AlertDelivery:
         """
         # Compatibility hook for non-Underdog alert paths.
         _pp_sport = getattr(getattr(opp, "pp_line", None), "sport", None) or ""
-        if is_telegram_suppressed_sport(_pp_sport):
+        if is_football_delivery_blocked(_pp_sport):
             logger.info(
                 "deliver_pp: sport suppressed — sport=%s player=%s stat=%s",
                 _pp_sport,
@@ -2170,7 +2182,7 @@ class AlertDelivery:
                 filtered=True,
                 filtered_reason=f"Unsupported prop provider/source: {source}",
             )
-        if is_telegram_suppressed_sport(sport):
+        if is_football_delivery_blocked(sport):
             logger.info(
                 "UD alert sport-blocked: sport=%s player=%s stat=%s",
                 sport,

@@ -150,11 +150,14 @@ async def run_due_reminders(db, bot, chat_ids, *, now=None):
                 )
                 continue
             if quote is not None:
-                from alerts import _is_fresh_delivery_line, is_telegram_suppressed_sport
+                from alerts import (
+                    _is_fresh_delivery_line,
+                    is_football_delivery_blocked,
+                )
                 start = _naive_utc(quote.game_time)
                 safe = (
                     not quote.removed and start is not None
-                    and not is_telegram_suppressed_sport(quote.sport)
+                    and not is_football_delivery_blocked(quote.sport)
                     and quote.line_value == row.line_value
                     and data["direction"] in quote.available_directions
                     and _is_fresh_delivery_line(quote.fetched_at)
