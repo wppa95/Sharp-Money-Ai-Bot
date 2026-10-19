@@ -5751,6 +5751,7 @@ class PropLineClient:
                 error="PropLine event odds require the official endpoint",
                 failure_kind="configuration",
             )
+        event_context = event if isinstance(event, PropLineEvent) else None
         if isinstance(event, PropLineEvent):
             event_id = event.event_id
         elif isinstance(event, dict):
@@ -5765,7 +5766,8 @@ class PropLineClient:
 
         async with self._lock:
             result = await self._fetch_event_props_locked(
-                sport_key, event_id, bookmaker=bookmaker
+                sport_key, event_id, bookmaker=bookmaker,
+                event_context=event_context,
             )
             if result.failure_kind != "not_found":
                 return result
@@ -5785,7 +5787,83 @@ class PropLineClient:
             if replacement is None or replacement.event_id == event_id:
                 return result
             return await self._fetch_event_props_locked(
-                sport_key, replacement.event_id, bookmaker=bookmaker
+                sport_key, replacement.event_id, bookmaker=bookmaker,
+                event_context=replacement,
+            )
+
+    async def fetch_rotating_event_props(
+        self,
+        sport_key: str,
+        *,
+        bookmaker: str = "prizepicks",
+    ) -> PropLineFetchResult:
+        """Fetch one discovered event per call, rotating fairly by sport/bookmaker."""
+        fetched_at = datetime.utcnow()
+        if not self.is_configured:
+            return PropLineFetchResult(
+                [], fetched_at, error="PropLine is not configured",
+                failure_kind="disabled",
+            )
+        if self.api_url.rstrip("/") != DEFAULT_PROPLINE_API_URL:
+            return PropLineFetchResult(
+                [], fetched_at,
+                error="PropLine event odds require the official endpoint",
+                failure_kind="configuration",
+            )
+        async with self._lock:
+            events, discovery_complete, discovery_error = (
+                await self._discover_events_locked(sport_key)
+            )
+            if not discovery_complete:
+                return PropLineFetchResult(
+                    [], fetched_at, succeeded=False, complete=False,
+                    error=discovery_error or "PropLine event discovery incomplete",
+                    failure_kind="incomplete",
+                )
+            if not events:
+                return PropLineFetchResult(
+                    [], fetched_at, succeeded=True, complete=True,
+                    discovered_event_count=0, fetched_event_count=0,
+                )
+            eligible = [
+                event for event in events
+                if event.provider_event_id and _clean(event.event_id)
+            ]
+            if not eligible:
+                return PropLineFetchResult(
+                    [], fetched_at, succeeded=False, complete=False,
+                    error="PropLine event discovery returned no verified event ids",
+                    failure_kind="incomplete",
+                    discovered_event_count=len(events),
+                )
+
+            rotation_key = (
+                f"{_clean(sport_key).lower()}:"
+                f"{_clean(bookmaker).lower().replace('_', '').replace('-', '')}"
+            )
+            index = self._event_rotation_cursors.get(rotation_key, 0) % len(eligible)
+            event = eligible[index]
+            # Advance before attempting I/O so a rejection or interruption does
+            # not pin the next cycle to the same event.
+            self._event_rotation_cursors[rotation_key] = (index + 1) % len(eligible)
+            result = await self._fetch_event_props_locked(
+                sport_key,
+                event.event_id,
+                bookmaker=bookmaker,
+                event_context=event,
+            )
+            return replace(
+                result,
+                discovered_event_count=len(events),
+                fetched_event_count=(
+                    1 if result.succeeded and result.complete
+                    else result.fetched_event_count
+                ),
+                failed_event_ids=(
+                    () if result.succeeded and result.complete
+                    else (event.event_id,)
+                ),
+                incremental_event_scan=True,
             )
 
     async def _fetch_event_props_locked(
@@ -5794,17 +5872,26 @@ class PropLineClient:
         event_id: str,
         *,
         bookmaker: str,
+        event_context: Optional[PropLineEvent] = None,
     ) -> PropLineFetchResult:
         url, params, scope = self._official_event_odds_request(
             sport_key, event_id, bookmaker=bookmaker
         )
+        if self._cache_is_fresh(self._clock(), scope):
+            return replace(
+                self._cache_by_scope[scope],
+                fetched_at=datetime.utcnow(),
+                from_cache=True,
+            )
         try:
             raw_records, complete, error = await self._paginate_json(
                 url,
                 params,
-                extractor=lambda payload: _official_odds_records(
+                extractor=lambda payload: _event_odds_records(
                     payload,
+                    event_id=event_id,
                     bookmaker=bookmaker,
+                    event_context=event_context,
                 ),
             )
         except PropLineNotFoundError as exc:
@@ -5842,6 +5929,8 @@ class PropLineClient:
             complete=True, discovered_event_count=1, fetched_event_count=1,
             last_successful_at=fetched_at,
         )
+        self._cache_by_scope[scope] = result
+        self._cache_clock_by_scope[scope] = self._clock()
         return result
 
     async def fetch_event_odds(
@@ -7108,6 +7197,48 @@ class PropLinePrizePicksProvider(PropProviderBase):
         """Fetch only one canonical sport for confirmation freshness and quota safety."""
         result = await self.fetch_props_for_sport_result(sport)
         return result.props
+
+    async def fetch_props_for_sport_event_rotation(
+        self,
+        sport: str,
+        *,
+        bookmaker: Optional[str] = None,
+    ) -> PropLineFetchResult:
+        """Fetch one event-level slice for the shared scheduled ingestion job."""
+        if not self.is_available():
+            return PropLineFetchResult(
+                [], datetime.utcnow(), error="PropLine is not configured",
+                failure_kind="disabled",
+            )
+        requested_sport = _clean(sport).upper()
+        canonical_sport = _normalize_sport(sport)
+        if self._sport_filter is not None and canonical_sport not in self._sport_filter:
+            return PropLineFetchResult(
+                [], datetime.utcnow(),
+                error=f"PropLine sport is outside configured scope: {canonical_sport}",
+                failure_kind="configuration",
+            )
+        official_sport = (
+            self.client.official_sport_for(requested_sport)
+            or self.client.official_sport_for(canonical_sport)
+        )
+        if not official_sport:
+            return PropLineFetchResult(
+                [], datetime.utcnow(),
+                error=f"PropLine sport is unsupported: {canonical_sport}",
+                failure_kind="configuration",
+            )
+        result = await self.client.fetch_rotating_event_props(
+            official_sport,
+            bookmaker=bookmaker or self.bookmaker,
+        )
+        return replace(
+            result,
+            props=[replace(prop, sport=requested_sport) for prop in result.props],
+            partial_props=tuple(
+                replace(prop, sport=requested_sport) for prop in result.partial_props
+            ),
+        )
 
     async def fetch_props_for_sport_result(
             self,
