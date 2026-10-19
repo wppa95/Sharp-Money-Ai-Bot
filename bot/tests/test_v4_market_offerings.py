@@ -213,6 +213,7 @@ def test_cross_platform_comparison_rejects_mismatched_identity(mutation):
         b.sport = "NHL"
     elif mutation == "market":
         b.stat_type = "Home Runs"
+        b.original_stat_type = "Home Runs"
     elif mutation == "event_teams":
         a.event_teams = (("h", "Home"), ("a", "Away"))
         b.event_teams = (("h2", "Other Home"), ("a2", "Other Away"))
@@ -264,7 +265,7 @@ def test_history_uses_strict_directional_counts_and_displays_pushes_separately()
     )
     text = _format_history_block(decision)
     assert "<b>L5 (Over):</b> 3/4 — 75% (3 hits, 1 misses, 1 pushes)" in text
-    assert "<b>H2H (Over):</b> 1/3 — 33% (1 hits, 1 misses, 2 pushes)" in text
+    assert "<b>H2H (Over):</b> 1/3 — 33% (1 hits, 2 misses, 1 pushes)" in text
     assert "<b>L10 (Over):</b> N/A" in text
     assert "<b>SZN (Over):</b> 3/4 — 75%" in text
 
