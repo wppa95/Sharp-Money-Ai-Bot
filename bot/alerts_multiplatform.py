@@ -579,11 +579,9 @@ def _format_history_block(
     decision: Optional[object],
     validation: Optional[object] = None,
 ) -> str:
-    """Render one compact hit-history block, including available H2H data."""
-    if decision is None and validation is None:
-        return ""
-
-    l30_games = _numeric_attr(decision, "l30_games")
+    """Render exact-line directional results without turning pushes into hits."""
+    source = decision if decision is not None else validation
+    direction = _decision_recommendation(decision) or _decision_recommendation(validation)
     windows = (
         ("L5", "l5", "l5_games", "l5_over", "l5_under"),
         ("L10", "l10", "l10_games", "l10_over", "l10_under"),
@@ -593,56 +591,10 @@ def _format_history_block(
         ("SZN", "season", "season_games", "season_over", "season_under"),
     )
     rows: list[str] = []
-    h2h_rendered = False
-    actuals_source = decision if decision is not None else validation
-    if isinstance(actuals_source, dict):
-        raw_recent_values = actuals_source.get("recent_values")
-        raw_sample_values = actuals_source.get("sample_values")
-    else:
-        raw_recent_values = getattr(actuals_source, "recent_values", None)
-        raw_sample_values = getattr(actuals_source, "sample_values", None)
-
-    def _format_actuals(raw_values: object) -> list[str]:
-        rendered: list[str] = []
-        if isinstance(raw_values, (list, tuple)):
-            for raw_value in raw_values:
-                if isinstance(raw_value, bool):
-                    continue
-                try:
-                    numeric_value = float(raw_value)
-                except (TypeError, ValueError):
-                    continue
-                if not math.isfinite(numeric_value):
-                    continue
-                rendered.append(
-                    f"{numeric_value:.2f}".rstrip("0").rstrip(".")
-                )
-        return rendered
-
-    recent_actuals = _format_actuals(raw_recent_values[:5] if isinstance(
-        raw_recent_values, (list, tuple)
-    ) else ())
-    if isinstance(raw_sample_values, dict):
-        sample_values = raw_sample_values
-    elif isinstance(raw_sample_values, (list, tuple)):
-        sample_values = {
-            str(item[0]): item[1]
-            for item in raw_sample_values
-            if (
-                isinstance(item, (list, tuple))
-                and len(item) == 2
-                and isinstance(item[0], str)
-            )
-        }
-    else:
-        sample_values = {}
-
-    sample_values_rendered = False
-    direction = _decision_recommendation(decision)
     for label, _values_key, games_name, over_name, under_name in windows:
-        games = _numeric_attr(decision, games_name)
-        over = _numeric_attr(decision, over_name)
-        under = _numeric_attr(decision, under_name)
+        games = _numeric_attr(source, games_name)
+        over = _numeric_attr(source, over_name)
+        under = _numeric_attr(source, under_name)
         shown_label = (
             f"{label} ({direction.title()})"
             if direction in {"OVER", "UNDER"}
@@ -663,8 +615,6 @@ def _format_history_block(
             or over + under > games
         ):
             rows.append(f"   <b>{shown_label}:</b> N/A")
-            if label == "H2H":
-                h2h_rendered = True
             continue
         hits = int(over if direction == "OVER" else under)
         pushes = int(games - over - under)
@@ -675,49 +625,6 @@ def _format_history_block(
         if pushes:
             details += f", {pushes} pushes"
         rows.append(f"   <b>{shown_label}:</b> {rate_text} ({details})")
-        if label == "H2H":
-            h2h_rendered = True
-
-    if recent_actuals and not sample_values_rendered:
-        rows.append(
-            f"   <b>Recent actuals:</b> {', '.join(recent_actuals)}"
-        )
-
-    # Compatibility delivery callers may provide a validated history snapshot
-    # without a fully materialized UDBetDecision.  Keep the alert historical
-    # rather than falling back to an uninformative N/A block.
-    if not rows and validation is not None:
-        for label, rate_name, games_name in (
-            ("L5", "l5_rate", "l5_games"),
-            ("L10", "l10_rate", "l10_games"),
-            ("L20", "l20_rate", "l20_games"),
-            ("L30", "l30_rate", "l30_games"),
-            ("Season", "season_hit_rate", "season_games"),
-        ):
-            rate = _numeric_attr(validation, rate_name)
-            games = _numeric_attr(validation, games_name)
-            if rate is None or games is None or games <= 0:
-                continue
-            rows.append(f"   <b>{label}:</b> {rate:.0%} ({int(games)} games)")
-
-        if not rows:
-            source, count = _evidence_display(validation, decision)
-            if count > 0 and source != "unavailable":
-                rows.append(
-                    f"   <b>Results:</b> {escape(source)} ({count} games)"
-                )
-
-    # Some delivery paths have H2H on PlayerPropValidation before a complete
-    # UDBetDecision is available. Preserve that signal rather than silently
-    # dropping it from the Telegram alert.
-    validation_h2h = _numeric_attr(validation, "h2h_hit_rate")
-    if not h2h_rendered and validation_h2h is not None:
-        rows.append(f"   <b>H2H:</b> {validation_h2h:.0%}")
-    elif not h2h_rendered:
-        rows.append("   <b>H2H:</b> N/A")
-
-    if not rows:
-        return "\n\n📈 <b>HISTORY</b>\n   <b>L5:</b> N/A — no history available"
     return "\n\n📈 <b>HISTORY</b>\n" + "\n".join(rows)
 
 
