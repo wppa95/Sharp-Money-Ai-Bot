@@ -480,7 +480,7 @@ async def test_disallowed_football_family_is_not_delivered(sport):
 
 
 @pytest.mark.asyncio
-async def test_ncaaf_alias_is_delivered_as_active_cfb_scope():
+async def test_ncaaf_alias_is_blocked_from_telegram_delivery():
     db = _make_db()
     delivery = _make_delivery(db)
 
@@ -505,8 +505,10 @@ async def test_ncaaf_alias_is_delivered_as_active_cfb_scope():
         decision=SimpleNamespace(**vars(_directional_history("OVER"))),
     )
 
-    assert result.sent is True
-    delivery._bot.send_message.assert_awaited()
+    assert result.sent is False
+    assert result.filtered is True
+    assert "football" in result.filtered_reason.lower()
+    delivery._bot.send_message.assert_not_awaited()
 
 
 # ── S-tier does not consume A/B cap budget ────────────────────────────────────
