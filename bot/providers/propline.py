@@ -57,6 +57,73 @@ def provider_name_for_bookmaker(bookmaker: Any) -> str:
         _clean(bookmaker).title() or PROPLINE_PROVIDER_NAME,
     )
 DEFAULT_PROPLINE_API_URL = "https://api.prop-line.com"
+DEFAULT_PROPLINE_SUBSCRIPTION_PLAN = "free"
+
+# The Free plan keeps the live feed and raw, book-agnostic result collection
+# available. Resolved history/settlement and derived odds-analysis endpoints
+# are retained in the client for subscribers whose plan includes them, but
+# must not be polled while the configured subscription is Free.
+PROPLINE_PAID_ONLY_FAMILIES = frozenset({
+    "player_history",
+    "player_trends",
+    "event_results",
+    "event_odds_history",
+    "event_movement",
+    "event_best_line",
+    "event_ev",
+    "resolved_props_export",
+    "sgp",
+    "clv_grade",
+})
+
+
+def propline_family_allowed_for_plan(family: str, plan: Optional[str] = None) -> bool:
+    """Return whether a PropLine capability can be requested on this plan.
+
+    Unknown plan values fail closed for paid-only capabilities. The ordinary
+    feed, event catalog, scores, raw event stats, and raw player-game routes
+    remain available on Free.
+    """
+    plan_key = re.sub(
+        r"[^a-z0-9]+", "_",
+        str(
+            plan
+            if plan is not None
+            else os.getenv(
+                "PROPLINE_SUBSCRIPTION_PLAN",
+                DEFAULT_PROPLINE_SUBSCRIPTION_PLAN,
+            )
+        ).strip().lower(),
+    ).strip("_")
+    if family not in PROPLINE_PAID_ONLY_FAMILIES:
+        return True
+    return plan_key in {"hobby", "monthly_hobby", "pro", "enterprise"}
+
+
+def _propline_restricted_family_for_url(url: str) -> str:
+    """Identify known paid-only endpoint families without retaining the URL."""
+    path = str(url or "").split("?", 1)[0].lower()
+    if "/exports/resolved-props" in path:
+        return "resolved_props_export"
+    if "/clv/grade" in path:
+        return "clv_grade"
+    if "/sgp" in path:
+        return "sgp"
+    if "/results" in path:
+        return "event_results"
+    if "/players/" in path and "/history" in path:
+        return "player_history"
+    if "/players/" in path and "/trends" in path:
+        return "player_trends"
+    if "/history" in path:
+        return "event_odds_history"
+    if "/movement" in path:
+        return "event_movement"
+    if "/best-line" in path:
+        return "event_best_line"
+    if "/ev" in path:
+        return "event_ev"
+    return ""
 
 _STAT_NORMALIZATION = {
     "pts": "points",
@@ -4298,6 +4365,18 @@ class PropLineClient:
                 and self._clock() - cached_at < self.cache_ttl
             ):
                 return replace(cached, from_cache=True)
+            restricted_family = _propline_restricted_family_for_url(endpoint)
+            if restricted_family and not propline_family_allowed_for_plan(
+                restricted_family, self.subscription_plan
+            ):
+                return PropLineEndpointResult(
+                    None,
+                    fetched_at,
+                    endpoint=endpoint,
+                    error=f"PropLine {restricted_family} endpoint unavailable "
+                    f"on configured {self.subscription_plan or 'free'} plan",
+                    failure_kind="plan_restricted",
+                )
             try:
                 payload = await self._request_json(endpoint, params or {})
             except PropLineNotFoundError as exc:
@@ -4309,6 +4388,11 @@ class PropLineClient:
                 return PropLineEndpointResult(
                     None, fetched_at, endpoint=endpoint,
                     error=str(exc), failure_kind="quota",
+                )
+            except PropLinePlanRestrictionError as exc:
+                return PropLineEndpointResult(
+                    None, fetched_at, endpoint=endpoint,
+                    error=str(exc), failure_kind="plan_restricted",
                 )
             except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
                 return PropLineEndpointResult(
@@ -4346,6 +4430,18 @@ class PropLineClient:
                 None, fetched_at, endpoint=endpoint,
                 error="PropLine is not configured", failure_kind="disabled",
             )
+        restricted_family = _propline_restricted_family_for_url(endpoint)
+        if restricted_family and not propline_family_allowed_for_plan(
+            restricted_family, self.subscription_plan
+        ):
+            return PropLineEndpointResult(
+                None,
+                fetched_at,
+                endpoint=endpoint,
+                error=f"PropLine {restricted_family} endpoint unavailable "
+                f"on configured {self.subscription_plan or 'free'} plan",
+                failure_kind="plan_restricted",
+            )
         async with self._lock:
             try:
                 payload = await self._request_json(
@@ -4360,6 +4456,11 @@ class PropLineClient:
                 return PropLineEndpointResult(
                     None, fetched_at, endpoint=endpoint,
                     error=str(exc), failure_kind="quota",
+                )
+            except PropLinePlanRestrictionError as exc:
+                return PropLineEndpointResult(
+                    None, fetched_at, endpoint=endpoint,
+                    error=str(exc), failure_kind="plan_restricted",
                 )
             except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
                 return PropLineEndpointResult(
@@ -4507,6 +4608,16 @@ class PropLineClient:
             return PropLineEndpointResult(
                 None, fetched_at, error="PropLine export requires sport",
                 failure_kind="configuration",
+            )
+        if not propline_family_allowed_for_plan(
+            "resolved_props_export", self.subscription_plan
+        ):
+            return PropLineEndpointResult(
+                None,
+                fetched_at,
+                error="PropLine resolved-props export unavailable on "
+                f"configured {self.subscription_plan or 'free'} plan",
+                failure_kind="plan_restricted",
             )
         lookback_start = datetime.utcnow() - timedelta(days=90)
         start = _parse_datetime(since) if _clean(since) else lookback_start
@@ -5172,6 +5283,19 @@ class PropLineClient:
                 and self._clock() - cached_at < self.cache_ttl
             ):
                 return replace(cached, from_cache=True)
+            if not propline_family_allowed_for_plan(
+                "player_history", self.subscription_plan
+            ):
+                return PropLinePlayerHistoryFetchResult(
+                    (),
+                    fetched_at,
+                    player_name=_clean(player_name),
+                    sport_key=_clean(sport_key),
+                    market=_clean(market),
+                    error="PropLine player history unavailable on configured "
+                    f"{self.subscription_plan or 'free'} plan",
+                    failure_kind="plan_restricted",
+                )
             try:
                 payload = await self._request_json(url, params)
             except PropLineNotFoundError as exc:
@@ -5185,6 +5309,12 @@ class PropLineClient:
                     (), fetched_at, player_name=_clean(player_name),
                     sport_key=_clean(sport_key), market=_clean(market),
                     error=str(exc), failure_kind="quota",
+                )
+            except PropLinePlanRestrictionError as exc:
+                return PropLinePlayerHistoryFetchResult(
+                    (), fetched_at, player_name=_clean(player_name),
+                    sport_key=_clean(sport_key), market=_clean(market),
+                    error=str(exc), failure_kind="plan_restricted",
                 )
             except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
                 return PropLinePlayerHistoryFetchResult(
@@ -5288,6 +5418,18 @@ class PropLineClient:
                 and self._clock() - cached_at < self.cache_ttl
             ):
                 return replace(cached, from_cache=True)
+            if not propline_family_allowed_for_plan(
+                "player_trends", self.subscription_plan
+            ):
+                return PropLinePlayerTrendsFetchResult(
+                    (),
+                    fetched_at,
+                    player_name=player,
+                    sport_key=sport,
+                    error="PropLine player trends unavailable on configured "
+                    f"{self.subscription_plan or 'free'} plan",
+                    failure_kind="plan_restricted",
+                )
             try:
                 payload = await self._request_json(url, params)
             except PropLineNotFoundError as exc:
@@ -5299,6 +5441,11 @@ class PropLineClient:
                 return PropLinePlayerTrendsFetchResult(
                     (), fetched_at, player_name=player, sport_key=sport,
                     error=str(exc), failure_kind="quota",
+                )
+            except PropLinePlanRestrictionError as exc:
+                return PropLinePlayerTrendsFetchResult(
+                    (), fetched_at, player_name=player, sport_key=sport,
+                    error=str(exc), failure_kind="plan_restricted",
                 )
             except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
                 return PropLinePlayerTrendsFetchResult(
