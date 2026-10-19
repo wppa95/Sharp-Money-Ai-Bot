@@ -2670,6 +2670,86 @@ _OFFICIAL_ODDS_MARKETS = tuple(
     if market not in {"player_goals", "player_headshots", "player_saves"}
 )
 
+# Event odds requests must not reuse a bulk-feed market list: a bulk request
+# containing markets belonging to other sports can make an otherwise valid
+# event-level collection fail with HTTP 400.  These are the markets understood
+# by this adapter for each sport family; unknown catalog sports omit the
+# optional market filter and still request only the selected event.
+_SPORT_EVENT_ODDS_MARKETS = {
+    "MLB": (
+        "player_hits", "player_home_runs", "player_home_runs_2plus",
+        "player_rbis", "player_rbis_2plus", "player_rbis_3plus",
+        "player_hits_runs_rbis", "player_total_bases", "player_stolen_bases",
+        "player_runs", "player_singles", "player_doubles", "player_hits_2plus",
+        "player_earned_runs", "player_hits_allowed", "player_pitching_outs",
+        "player_strikeouts", "player_walks",
+    ),
+    "NBA": (
+        "player_points", "player_rebounds", "player_assists",
+        "player_turnovers", "player_threes", "player_blocks", "player_steals",
+        "player_points_rebounds", "player_points_assists",
+        "player_rebounds_assists", "player_points_rebounds_assists",
+        "player_blocks_steals", "player_double_double", "player_triple_double",
+        "player_fantasy_points",
+    ),
+    "NFL": (
+        "player_rushing_yards", "player_receiving_yards", "player_receptions",
+        "player_passing_yards", "player_passing_tds", "player_rush_rec_yards",
+        "player_fantasy_points",
+    ),
+    "NHL": (
+        "player_points_1plus", "player_points_2plus", "player_points_3plus",
+        "player_goals_2plus", "player_first_goal", "player_first_period_goal",
+        "goalie_saves", "player_shots_on_goal", "player_blocked_shots",
+        "player_power_play_points",
+    ),
+    "SOCCER": (
+        "anytime_goal_scorer", "goal_or_assist", "player_shots",
+        "player_shots_on_target",
+    ),
+    "TENNIS": (
+        "player_games_won", "player_sets_won", "player_games_played",
+        "player_sets_played", "player_tiebreakers_played", "player_aces",
+        "player_double_faults", "player_break_points_won", "total_games",
+        "total_tiebreaks", "total_sets",
+    ),
+    "ESPORTS": (
+        "player_kills", "player_deaths", "player_maps_won",
+        "player_kills_maps_1_2", "player_headshots_maps_1_2",
+    ),
+    "MMA": (
+        "player_significant_strikes", "player_takedowns", "fight_time_minutes",
+    ),
+}
+
+
+def official_event_odds_markets_for_sport(sport_key: Any) -> tuple[str, ...]:
+    """Return a sport-specific event-odds filter, or empty for unmodeled sports."""
+    raw = _clean(sport_key).lower()
+    canonical = _OFFICIAL_TO_CANONICAL_SPORT.get(raw, "")
+    if not canonical:
+        canonical = _normalize_sport(sport_key)
+    if raw.startswith("soccer_") or canonical in {
+        "EPL", "LALIGA", "SERIEA", "BUNDESLIGA", "LIGUE1", "MLS", "UCL",
+        "FIFA", "CHAMPIONSHIP", "EREDIVISIE", "LIGA MX", "PRIMEIRA LIGA",
+        "BRASILEIRÃO", "LIGA PROFESIONAL", "SCOTTISH PREMIERSHIP",
+        "SAUDI PRO LEAGUE", "ELITESERIEN", "J1 LEAGUE", "SÜPER LIG",
+        "BELGIAN PRO LEAGUE", "ALLSVENSKAN", "GREEK SUPER LEAGUE",
+        "SWISS SUPER LEAGUE", "A-LEAGUE", "COPA LIBERTADORES",
+        "COPA SUDAMERICANA",
+    }:
+        family = "SOCCER"
+    elif canonical in {"CFB", "NCAAF", "FOOTBALL"} or raw.startswith("football_"):
+        family = "NFL"
+    elif raw == "esports" or canonical in {"CS", "DOTA", "LOL", "VAL", "VALORANT"}:
+        family = "ESPORTS"
+    elif canonical in {"UFC", "MMA", "BOXING"} or raw.startswith("mma_"):
+        family = "MMA"
+    else:
+        family = canonical
+    allowed = set(_SPORT_EVENT_ODDS_MARKETS.get(family, ()))
+    return tuple(market for market in _OFFICIAL_MARKETS if market in allowed)
+
 _STAT_TO_OFFICIAL_MARKET = {
     "points": "player_points",
     "goals": "player_goals",
