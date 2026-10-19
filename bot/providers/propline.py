@@ -3998,6 +3998,14 @@ class PropLineClient:
         """Perform one authorized request and account for it centrally."""
         if not self.api_key:
             raise PropLineError("PropLine API key is missing")
+        restricted_family = _propline_restricted_family_for_url(url)
+        if restricted_family and not propline_family_allowed_for_plan(
+            restricted_family, self.subscription_plan
+        ):
+            raise PropLinePlanRestrictionError(
+                f"PropLine {restricted_family} endpoint unavailable on "
+                f"configured {self.subscription_plan or 'free'} plan"
+            )
         request_kind = _propline_request_kind(url)
         is_endpoint_request = request_kind != "bulk"
         request_limiter = (
@@ -5749,6 +5757,19 @@ class PropLineClient:
             return PropLineResultsFetchResult(
                 (), fetched_at, succeeded=False, complete=False,
                 error="PropLine event id is required", failure_kind="configuration",
+            )
+        if not propline_family_allowed_for_plan(
+            "event_results", self.subscription_plan
+        ):
+            return PropLineResultsFetchResult(
+                (),
+                fetched_at,
+                succeeded=False,
+                complete=False,
+                event_id=event_id,
+                error="PropLine event settlement unavailable on configured "
+                f"{self.subscription_plan or 'free'} plan",
+                failure_kind="plan_restricted",
             )
 
         async with self._lock:
