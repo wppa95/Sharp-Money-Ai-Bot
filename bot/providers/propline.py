@@ -6685,6 +6685,16 @@ class PropLineReadOnlyRotation:
     ) -> PropLineReadOnlyRotationReport:
         """Run one bounded slice and checkpoint after every attempted request."""
         target_list = list(targets)
+        restricted_targets: list[PropLineReadOnlyTarget] = []
+        plan = getattr(self.client, "subscription_plan", None)
+        if plan is not None:
+            allowed_targets = []
+            for target in target_list:
+                if propline_family_allowed_for_plan(target.family, plan):
+                    allowed_targets.append(target)
+                else:
+                    restricted_targets.append(target)
+            target_list = allowed_targets
         by_family = {
             family: sorted(
                 {
@@ -6701,9 +6711,23 @@ class PropLineReadOnlyRotation:
             self.max_requests_per_cycle,
             max(1, int(max_requests or self.max_requests_per_cycle)),
         )
-        attempted = completed = persisted = pending = skipped = errors = 0
+        attempted = completed = persisted = pending = errors = 0
+        skipped = len(restricted_targets)
         family_counts: dict[str, int] = {}
-        provenance: list[dict[str, str]] = []
+        restricted_counts: dict[str, int] = {}
+        for target in restricted_targets:
+            restricted_counts[target.family] = (
+                restricted_counts.get(target.family, 0) + 1
+            )
+        provenance: list[dict[str, str]] = [
+            {
+                "family": family,
+                "target": "restricted-by-plan",
+                "status": "skipped",
+                "reason": f"plan_restricted_count:{count}",
+            }
+            for family, count in sorted(restricted_counts.items())
+        ]
         family_index = family_cursor % len(PROPLINE_READ_ONLY_FAMILIES)
         visited: set[str] = set()
 
