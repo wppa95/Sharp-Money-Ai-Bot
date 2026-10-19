@@ -1,21 +1,18 @@
 ---
 name: Football active-scope policy
-description: NFL and CFB are allowed; other football-family sports remain excluded from actionable delivery.
+description: Football-family data remains monitored and stored, but no football-family picks are delivered through Telegram.
 ---
 
-User-facing actionable delivery allows NFL and active CFB. Accept NCAAF only
-when explicitly identified as the CFB provider alias; reject other
-football-related sports such as FCS, CFL, AFL/AFLW, UFL, rugby, and unrelated
-provider identifiers containing football. Association soccer is separate.
-Provider observations and shared player history remain available for supported
-sports.
+All football-family sports and aliases are database-monitoring-only. This
+includes NFL, CFB/NCAAF, other catalog football competitions, rugby, and
+Australian-rules football. Association soccer is separate. Keep collection,
+observation persistence, analysis, history, and grading active wherever their
+existing validated data paths support them.
 
-**Why:** The product wants NFL and CFB picks but not other
-football-family markets. Filtering only the disallowed aliases prevents
-unsupported competitions from reaching user-facing alerts without deleting
-evidence or changing historical reports.
+**Why:** The user changed the product policy to prohibit Telegram delivery for
+every football-related sport while retaining database monitoring and evidence.
 
-**How to apply:** Apply the disallowed-football predicate only at actionable
-delivery boundaries, including direct pregame-watch broadcasts. Never use it
-to suppress supported-sport provider observations or shared player history.
-Keep AlertScopeFilter available for unrelated scope violations.
+**How to apply:** Use the broad football-family predicate at the final Telegram
+send boundary and at alert/retry prefilters. Never use it to disable ingestion,
+erase records, or suppress verified history/grading. Do not block soccer or
+other non-football sports.
