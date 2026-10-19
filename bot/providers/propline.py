@@ -768,6 +768,7 @@ class PropLineFetchResult:
     failed_event_ids: tuple[str, ...] = ()
     retained_last_success: bool = False
     partial_props: tuple[PlayerProp, ...] = ()
+    incremental_event_scan: bool = False
 
     @property
     def snapshot_complete(self) -> bool:
@@ -4436,13 +4437,14 @@ class PropLineClient:
         official_event = _clean(event_id)
         if not official_sport or not official_event:
             raise PropLineError("PropLine sport and event keys are required for event odds")
+        params: dict[str, str] = {"bookmakers": bookmaker}
+        markets = official_event_odds_markets_for_sport(official_sport)
+        if markets:
+            params["markets"] = ",".join(markets)
         return (
             f"{self.api_url.rstrip('/')}/v1/sports/{quote(official_sport, safe='')}"
             f"/events/{quote(official_event, safe='')}/odds",
-            {
-                "markets": ",".join(_OFFICIAL_ODDS_MARKETS),
-                "bookmakers": bookmaker,
-            },
+            params,
             f"{official_sport}:event:{official_event}:{bookmaker.lower()}",
         )
 
