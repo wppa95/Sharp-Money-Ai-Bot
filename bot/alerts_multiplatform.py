@@ -721,6 +721,99 @@ def _format_history_block(
     return "\n\n📈 <b>HISTORY</b>\n" + "\n".join(rows)
 
 
+def _offering_value(offering: object, *names: str) -> object:
+    """Read only a field explicitly supplied by an offering or its raw record."""
+    raw = offering.get("raw") if isinstance(offering, dict) else getattr(offering, "raw", None)
+    for candidate in (offering, raw):
+        for name in names:
+            value = (
+                candidate.get(name)
+                if isinstance(candidate, dict)
+                else getattr(candidate, name, None)
+            )
+            if value is not None and str(value).strip():
+                return value
+    return None
+
+
+def _offering_line_details(offering: object) -> str:
+    """Show source-reported classification, directions, and odds when present."""
+    variant = _offering_value(
+        offering, "line_variant", "dfs_odds_type", "odds_type", "payout_type"
+    )
+    variant_text = (
+        escape(str(variant).strip())
+        if variant is not None
+        else "classification unavailable"
+    )
+    directions = _offering_value(offering, "available_directions", "direction")
+    if not isinstance(directions, (list, tuple, set)):
+        directions = [directions] if directions is not None else []
+    normalized = []
+    for value in directions:
+        if isinstance(value, dict):
+            value = value.get("choice") or value.get("direction") or value.get("side")
+        value = str(value or "").strip().upper()
+        value = {
+            "HIGHER": "OVER", "LOWER": "UNDER",
+            "MORE": "OVER", "LESS": "UNDER",
+        }.get(value, value)
+        if value in {"OVER", "UNDER"} and value not in normalized:
+            normalized.append(value)
+    direction_text = ", ".join(normalized) or "unavailable"
+
+    odds_text = "unavailable"
+    try:
+        raw_odds = float(_offering_value(offering, "american_odds", "odds", "price"))
+        if math.isfinite(raw_odds) and raw_odds.is_integer() and int(raw_odds) != 0:
+            odds_text = format_odds(int(raw_odds))
+    except (TypeError, ValueError):
+        pass
+    return (
+        f"{variant_text}; directions: {escape(direction_text)}; "
+        f"odds: {escape(odds_text)}"
+    )
+
+
+def format_platform_line_comparison(offering: Optional[object]) -> str:
+    """Render exact current PrizePicks/Underdog counterparts as neutral context."""
+    if offering is None:
+        return "Cross-platform comparison: unavailable or not verified."
+    from engine.offering_coverage import coverage
+
+    try:
+        provider = str(getattr(offering, "provider", "") or "")
+        line = float(getattr(offering, "line_value", None))
+    except (TypeError, ValueError):
+        return "Cross-platform comparison: unavailable or not verified."
+    counterparts = coverage.comparisons(offering)
+    if not counterparts:
+        return "Cross-platform comparison: unavailable or not verified."
+
+    primary = (
+        f"<b>{escape(provider)}:</b> {line:g} "
+        f"({_offering_line_details(offering)})"
+    )
+    lines = []
+    shown = counterparts[:6]
+    for other in shown:
+        other_line = float(getattr(other, "line_value"))
+        lines.append(
+            f"{primary}\n"
+            f"<b>{escape(str(getattr(other, 'provider', '') or ''))}:</b> "
+            f"{other_line:g} ({_offering_line_details(other)})\n"
+            f"<b>Diff:</b> {abs(line - other_line):g}"
+        )
+    if len(counterparts) > len(shown):
+        lines.append(
+            f"{len(counterparts) - len(shown)} additional matching lines not shown."
+        )
+    lines.append(
+        "A line difference is context only; it does not establish which line is better."
+    )
+    return "\n".join(lines)
+
+
 def _format_value_analysis_block(
     *,
     player_name: str,
@@ -1079,55 +1172,53 @@ def _format_simple_prop_alert(
     }.get(str(sport).upper(), "🎯")
     recommendation = _decision_recommendation(decision)
     line_text = (
-        f"{recommendation} {line:.1f}"
+        f"{recommendation} {line:g}"
         if recommendation in {"OVER", "UNDER"}
-        else f"{line:.1f}"
+        else f"{line:g}"
     )
     history = _format_history_block(decision, validation)
     if history:
         history = history.lstrip("\n")
-    else:
-        history = "📈 <b>History:</b>\n" + "\n".join(
-            f"   <b>{window}:</b> N/A"
-            for window in ("L5", "L10", "L20", "L30", "H2H")
-        )
     from engine.offering_coverage import coverage
-    offering = offering_context or coverage.match(
-        provider=source, player=player_name, sport=sport, stat=stat_type,
-        line=line, game_time=game_time,
-    )
-    variant = str(getattr(offering, "line_variant", "") or "classification unavailable")
-    comparison = []
+    offering = offering_context
+    if offering is None:
+        offering = coverage.match(
+            provider=source,
+            player=player_name,
+            sport=sport,
+            stat=stat_type,
+            line=line,
+            game_time=game_time,
+        )
     if offering is not None:
-        counterparts = coverage.comparisons(offering)
-        # Display one verified reference to keep Telegram messages bounded;
-        # every alternate offering remains in discovery/evaluation/inventory.
-        counterparts.sort(key=lambda row: (
-            row.line_variant != offering.line_variant,
-            -row.line_value if recommendation == "OVER" else row.line_value,
-        ))
-        for other in counterparts[:1]:
-            other_variant = str(other.line_variant or "classification unavailable")
-            difference = abs(line - other.line_value)
-            favorable = (
-                recommendation == "OVER" and line < other.line_value
-                or recommendation == "UNDER" and line > other.line_value
+        from engine.offering_coverage import market_identity
+        from engine.sport_policy import player_sport_key
+
+        offering_time = getattr(offering, "game_time", None)
+        requested_time = game_time
+        def _utc_time(value):
+            if not isinstance(value, datetime):
+                return None
+            return (
+                value.astimezone(timezone.utc).replace(tzinfo=None)
+                if value.tzinfo is not None and value.utcoffset() is not None
+                else value.replace(tzinfo=None)
             )
-            comparison.append(
-                f"This line is set at {line:g} on {escape(source)} ({escape(variant)}) "
-                f"for a fixed payout, but {escape(other.provider)} has "
-                f"{escape(stat_type)} at {other.line_value:g} ({escape(other_variant)}). "
-                f"Taking the {recommendation} on {escape(source)} at {line:g} "
-                + ("may offer a line advantage" if favorable else "does not show a directional line advantage")
-                + "; a line difference alone does not establish profitable value. "
-                "Verify available alt lines and player statistics."
-                + (
-                    " Different line classifications may have different payout or settlement terms."
-                    if variant != other_variant else ""
-                )
-                + f"\n<b>Diff:</b> {difference:g}"
-                f"\n<b>Other directions:</b> {', '.join(other.available_directions)}"
+        if (
+            str(getattr(offering, "provider", "") or "").casefold() != source.casefold()
+            or str(getattr(offering, "player_name", "") or "").strip().casefold()
+            != player_name.strip().casefold()
+            or player_sport_key(getattr(offering, "sport", "")) != player_sport_key(sport)
+            or market_identity(sport, str(getattr(offering, "stat_type", "") or ""))
+            != market_identity(sport, stat_type)
+            or getattr(offering, "line_value", None) != float(line)
+            or (
+                requested_time is not None
+                and _utc_time(offering_time) != _utc_time(requested_time)
             )
+        ):
+            offering = None
+    comparison = format_platform_line_comparison(offering)
     game = str(getattr(offering, "event", "") or opponent or "N/A — matchup unavailable")
 
     return "\n".join(
@@ -1138,15 +1229,15 @@ def _format_simple_prop_alert(
             f"👤 <b>Player:</b> {escape(str(player_name))}",
             f"📊 <b>Stat:</b> {escape(str(stat_type))}",
             f"🎯 <b>Line:</b> <code>{line_text}</code>",
-            f"<b>Platform:</b> {escape(source)} · fixed payout · {escape(variant)}",
+            f"<b>Platform:</b> {escape(source)} · {escape(_offering_line_details(offering)) if offering is not None else 'classification unavailable'}",
             f"<b>Game:</b> {escape(game)}",
             (
-                f"🕐 <b>Game starts:</b> {_format_game_time_et(game_time)}"
+                f"🕐 <b>Time:</b> {_format_game_time_et(game_time)}"
                 if game_time is not None
-                else "🕐 <b>Game starts:</b> N/A"
+                else "🕐 <b>Time:</b> N/A"
             ),
             "",
-            "\n\n".join(comparison) if comparison else "Cross-platform comparison: unavailable or not verified.",
+            comparison,
             history,
             "",
             "Monitoring player props across multiple sports. Not betting advice.",
