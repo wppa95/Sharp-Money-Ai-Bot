@@ -2731,7 +2731,11 @@ def official_event_odds_markets_for_sport(sport_key: Any) -> tuple[str, ...]:
     canonical = _OFFICIAL_TO_CANONICAL_SPORT.get(raw, "")
     if not canonical:
         canonical = _normalize_sport(sport_key)
-    if raw.startswith("soccer_") or canonical in {
+    if canonical in {"WNBA", "NCAAB"}:
+        family = "NBA"
+    elif canonical in {"NCAAF", "CFB", "CFL"}:
+        family = "NFL"
+    elif raw.startswith("soccer_") or canonical in {
         "EPL", "LALIGA", "SERIEA", "BUNDESLIGA", "LIGUE1", "MLS", "UCL",
         "FIFA", "CHAMPIONSHIP", "EREDIVISIE", "LIGA MX", "PRIMEIRA LIGA",
         "BRASILEIRÃO", "LIGA PROFESIONAL", "SCOTTISH PREMIERSHIP",
@@ -2741,7 +2745,7 @@ def official_event_odds_markets_for_sport(sport_key: Any) -> tuple[str, ...]:
         "COPA SUDAMERICANA",
     }:
         family = "SOCCER"
-    elif canonical in {"CFB", "NCAAF", "FOOTBALL"} or raw.startswith("football_"):
+    elif canonical == "FOOTBALL" or raw.startswith("football_"):
         family = "NFL"
     elif raw == "esports" or canonical in {"CS", "DOTA", "LOL", "VAL", "VALORANT"}:
         family = "ESPORTS"
